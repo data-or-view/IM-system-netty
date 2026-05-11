@@ -1,0 +1,81 @@
+package com.im.api.content;
+
+import com.im.api.SignalingAction;
+
+/**
+ * 音视频通话信令消息内容。
+ *
+ * 作为自定义 ContentType 通过 IM 消息管道发送。
+ * 服务端只负责转发，不解析 SDP/ICE 内容。
+ *
+ * 配合第三方 SFU（LiveKit / MediaSoup / Agora 等）使用：
+ *   IM 管道    = 信令通道（invite/accept/ice 等）
+ *   SFU        = 媒体通道（实际的编码音视频流）
+ *
+ * 消息体 body 为 JSON 字符串，格式：
+ *   {
+ *       "_act": 1,             // SignalingAction.code
+ *       "_room": "room_abc",   // 房间 ID
+ *       "_token": "xxx",       // SFU room token（由 ICallManager 签发）
+ *       "_sdp": "",            // WebRTC SDP offer/answer 可选
+ *       "_ice": "",            // ICE candidate 可选
+ *   }
+ */
+public class SignalingContent implements IMessageContent {
+
+    /** 信令动作 */
+    private SignalingAction action;
+    /** 房间 ID */
+    private String roomId;
+    /** SFU room token */
+    private String token;
+    /** SDP offer/answer（JSON string） */
+    private String sdp;
+    /** ICE candidate（JSON string） */
+    private String ice;
+    /** 通话时长（秒，仅 HANGUP 时携带） */
+    private int duration;
+
+    /** Jackson 反序列化用 */
+    private SignalingContent() {
+        this.action = null;
+        this.roomId = null;
+        this.token = null;
+        this.sdp = null;
+        this.ice = null;
+        this.duration = 0;
+    }
+
+    public SignalingContent(SignalingAction action, String roomId, String token,
+                            String sdp, String ice, int duration) {
+        this.action = action;
+        this.roomId = roomId;
+        this.token = token;
+        this.sdp = sdp;
+        this.ice = ice;
+        this.duration = duration;
+    }
+
+    public SignalingContent(SignalingAction action, String roomId, String token) {
+        this(action, roomId, token, null, null, 0);
+    }
+
+    @Override
+    public ContentType getContentType() {
+        return ContentType.SIGNAL;
+    }
+
+    @Override
+    public void validate() {
+        if (action == null) {
+            throw new IllegalArgumentException("SignalingContent: action is required");
+        }
+    }
+
+    public SignalingAction getAction() { return action; }
+    public String getRoomId() { return roomId; }
+    public String getToken() { return token; }
+    public String getSdp() { return sdp; }
+    public String getIce() { return ice; }
+    public int getDuration() { return duration; }
+}

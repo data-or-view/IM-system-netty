@@ -1,0 +1,35 @@
+# Maven
+target/
+*.class
+*.jar
+*.war
+*.nar
+*.ear
+
+# IDE
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/
+.settings/
+.project
+.classpath
+.factorypath
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Temp
+/temp/
+
+# Build
+dependency-reduced-pom.xml
