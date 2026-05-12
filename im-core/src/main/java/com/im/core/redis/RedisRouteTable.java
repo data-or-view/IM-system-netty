@@ -4,7 +4,7 @@ import com.im.api.IRouteTable;
 import com.im.api.ISessionManager;
 import com.im.api.RouteNode;
 import io.lettuce.core.ScriptOutputType;
-import io.lettuce.core.api.async.RedisAsyncCommands;
+import io.lettuce.core.cluster.api.async.RedisAdvancedClusterAsyncCommands;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -31,7 +31,7 @@ import java.util.stream.Collectors;
  *   3. EXPIRE key 180                   ← 续 TTL
  *   4. 返回当前所有在线 platform
  *
- * 线程安全：Lettuce RedisAsyncCommands 是线程安全的，所有操作共享同一连接。
+ * 线程安全：Lettuce RedisAdvancedClusterAsyncCommands 是线程安全的，所有操作共享同一连接。
  */
 public class RedisRouteTable implements IRouteTable {
 
@@ -85,7 +85,7 @@ public class RedisRouteTable implements IRouteTable {
             return redis.call("ZRANGEBYSCORE", key, now, "+inf")
             """;
 
-    private final RedisAsyncCommands<String, String> async;
+    private final RedisAdvancedClusterAsyncCommands<String, String> async;
     private final RedisConfiguration redisConfig;
     private final ISessionManager sessionManager;
     private final String localNodeId;

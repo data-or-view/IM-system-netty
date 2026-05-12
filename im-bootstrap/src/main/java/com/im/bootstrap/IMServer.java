@@ -153,13 +153,31 @@ public class IMServer implements ILifecycle {
 
         // ── 集群基础设施（单机模式：本地实现；开启 Redis 配置后自动使用 RedisRouteTable） ──
         this.nodeDiscovery = new LocalNodeDiscovery();
+
+        // 支持 -Dredis.host 系统属性临时启用 Redis（开发测试用）
+        String redisProp = System.getProperty("redis.host");
+        if (redisProp != null && !redisProp.isEmpty()) {
+            config.setRedisHost(redisProp);
+            String redisPort = System.getProperty("redis.port");
+            if (redisPort != null && !redisPort.isEmpty()) config.setRedisPort(Integer.parseInt(redisPort));
+        }
+        // 支持 -Dredis.cluster.nodes="127.0.0.1:6379,127.0.0.1:6380,127.0.0.1:6381" 集群模式
+        String clusterProp = System.getProperty("redis.cluster.nodes");
+        if (clusterProp != null && !clusterProp.isEmpty() && !config.isRedisEnabled()) {
+            config.setRedisHost("cluster"); // 标记启用 Redis（实际使用 cluster nodes）
+        }
+
         if (config.isRedisEnabled()) {
-            RedisConfiguration redisConfig = RedisConfiguration.builder()
-                    .host(config.getRedisHost())
-                    .port(config.getRedisPort())
-                    .password(config.getRedisPassword())
-                    .database(config.getRedisDatabase())
-                    .build();
+            RedisConfiguration.Builder rcb = RedisConfiguration.builder()
+                    .password(config.getRedisPassword());
+            if (clusterProp != null && !clusterProp.isEmpty()) {
+                String[] nodes = clusterProp.split(",");
+                rcb.clusterNodes(nodes);
+                log.info("Using RedisClusterNodes: {}", clusterProp);
+            } else {
+                rcb.host(config.getRedisHost()).port(config.getRedisPort()).database(config.getRedisDatabase());
+            }
+            RedisConfiguration redisConfig = rcb.build();
             this.routeTable = new RedisRouteTable(redisConfig, sessionManager, nodeId);
             log.info("Using RedisRouteTable: {}:{}", config.getRedisHost(), config.getRedisPort());
         } else {
