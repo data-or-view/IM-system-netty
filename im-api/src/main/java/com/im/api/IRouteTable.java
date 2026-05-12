@@ -1,6 +1,8 @@
 package com.im.api;
 
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 用户路由表（userId → 节点）。
@@ -20,6 +22,8 @@ import java.util.List;
  *   └──────────────┴─────────────────────────────────┘
  */
 public interface IRouteTable {
+
+    // ========== 节点路由 ==========
 
     /**
      * 用户上线：注册 userId → nodeId 映射。
@@ -51,4 +55,37 @@ public interface IRouteTable {
     default boolean isOnline(String userId) {
         return lookup(userId) != null;
     }
+
+    // ========== 在线状态（Platform 级别） ==========
+
+    /**
+     * 用户指定平台上线。
+     * 对应场景：用户登录成功后，标记该 platform 在线。
+     */
+    void setOnline(String userId, int platformId);
+
+    /**
+     * 用户指定平台下线。
+     * 对应场景：用户断连或登出，移除该 platform。
+     */
+    void setOffline(String userId, int platformId);
+
+    /**
+     * 查询用户当前在线的所有平台 ID 列表。
+     * 空列表表示用户全平台离线。
+     */
+    List<Integer> getOnlinePlatforms(String userId);
+
+    /**
+     * 批量查询多个用户的在线平台。
+     */
+    default Map<String, List<Integer>> batchGetOnlinePlatforms(List<String> userIds) {
+        return Collections.emptyMap();
+    }
+
+    /**
+     * 续期用户指定平台的在线状态（心跳保活）。
+     * 延长该 platform 的过期时间。
+     */
+    void renewOnline(String userId, int platformId);
 }

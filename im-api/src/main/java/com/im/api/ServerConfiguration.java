@@ -65,6 +65,12 @@ public class ServerConfiguration {
     // Webhook
     private String webhookUrl = "";
 
+    // Redis（在线状态）
+    private String redisHost = "";
+    private int redisPort = 6379;
+    private String redisPassword = "";
+    private int redisDatabase = 0;
+
     // ========== Getters / Setters ==========
 
     public int getPort() { return port; }
@@ -115,4 +121,20 @@ public class ServerConfiguration {
 
     public String getWebhookUrl() { return webhookUrl; }
     public void setWebhookUrl(String webhookUrl) { this.webhookUrl = webhookUrl; }
+
+    // Redis
+
+    public boolean isRedisEnabled() { return redisHost != null && !redisHost.isEmpty(); }
+
+    public String getRedisHost() { return redisHost; }
+    public void setRedisHost(String redisHost) { this.redisHost = redisHost; }
+
+    public int getRedisPort() { return redisPort; }
+    public void setRedisPort(int redisPort) { this.redisPort = redisPort; }
+
+    public String getRedisPassword() { return redisPassword; }
+    public void setRedisPassword(String redisPassword) { this.redisPassword = redisPassword; }
+
+    public int getRedisDatabase() { return redisDatabase; }
+    public void setRedisDatabase(int redisDatabase) { this.redisDatabase = redisDatabase; }
 }

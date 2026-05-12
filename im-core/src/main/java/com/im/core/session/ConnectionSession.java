@@ -1,6 +1,7 @@
 package com.im.core.session;
 
 import com.im.api.IConnectionSession;
+import com.im.api.PlatformID;
 import io.netty.channel.Channel;
 
 import java.net.SocketAddress;
@@ -28,6 +29,7 @@ public class ConnectionSession implements IConnectionSession {
     private final long creationTime;
 
     private volatile String userId;
+    private volatile int platformId = PlatformID.DEFAULT;
     private volatile boolean authenticated;
     private final AtomicLong lastActiveTime;
 
@@ -46,6 +48,9 @@ public class ConnectionSession implements IConnectionSession {
     public String getUserId() { return userId; }
 
     @Override
+    public int getPlatformId() { return platformId; }
+
+    @Override
     public Channel getChannel() { return channel; }
 
     @Override
@@ -56,7 +61,13 @@ public class ConnectionSession implements IConnectionSession {
 
     @Override
     public void authenticate(String userId) {
+        authenticate(userId, PlatformID.DEFAULT);
+    }
+
+    @Override
+    public void authenticate(String userId, int platformId) {
         this.userId = userId;
+        this.platformId = platformId;
         this.authenticated = true;
         touch();
     }
@@ -75,6 +86,7 @@ public class ConnectionSession implements IConnectionSession {
         return "ConnectionSession{" +
                 "sessionId='" + sessionId + '\'' +
                 ", userId='" + userId + '\'' +
+                ", platformId=" + platformId +
                 ", remote=" + remoteAddress +
                 ", authenticated=" + authenticated +
                 '}';

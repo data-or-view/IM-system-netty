@@ -42,9 +42,24 @@ public interface IConnectionSession {
     boolean isAuthenticated();
 
     /**
-     * 标记为已验证。
+     * 标记为已验证，绑定 userId。
      */
     void authenticate(String userId);
+
+    /**
+     * 标记为已验证，绑定 userId + platformId。
+     */
+    default void authenticate(String userId, int platformId) {
+        authenticate(userId);
+    }
+
+    /**
+     * 平台 ID，对应 PlatformID 常量。
+     * 未认证明确定义平台时返回 {@link PlatformID#DEFAULT}。
+     */
+    default int getPlatformId() {
+        return PlatformID.DEFAULT;
+    }
 
     /**
      * 上次活跃时间戳（毫秒）。

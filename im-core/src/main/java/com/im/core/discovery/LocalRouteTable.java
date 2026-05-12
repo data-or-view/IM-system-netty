@@ -2,6 +2,7 @@ package com.im.core.discovery;
 
 import com.im.api.IRouteTable;
 import com.im.api.ISessionManager;
+import com.im.api.PlatformID;
 import com.im.api.RouteNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -67,5 +68,28 @@ public class LocalRouteTable implements IRouteTable {
             return List.of(rn);
         }
         return Collections.emptyList();
+    }
+
+    // ========== 在线状态（单机模式 = 查 SessionManager） ==========
+
+    @Override
+    public void setOnline(String userId, int platformId) {
+        log.info("Online status set: userId={}, platform={}", userId, platformId);
+    }
+
+    @Override
+    public void setOffline(String userId, int platformId) {
+        log.info("Online status removed: userId={}, platform={}", userId, platformId);
+    }
+
+    @Override
+    public List<Integer> getOnlinePlatforms(String userId) {
+        boolean online = sessionManager.getByUserId(userId) != null;
+        return online ? List.of(PlatformID.DEFAULT) : Collections.emptyList();
+    }
+
+    @Override
+    public void renewOnline(String userId, int platformId) {
+        // 心跳续期，单机模式下无需操作
     }
 }

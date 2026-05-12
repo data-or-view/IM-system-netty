@@ -41,6 +41,8 @@ import com.im.core.conversation.LocalConversationManager;
 import com.im.core.group.LocalGroupManager;
 import com.im.core.handler.AuthenticationInterceptor;
 import com.im.core.webhook.LocalWebhookManager;
+import com.im.core.redis.RedisConfiguration;
+import com.im.core.redis.RedisRouteTable;
 import com.im.core.delivery.DeliveryConsumer;
 import com.im.core.delivery.LocalClusterMessageBus;
 import com.im.core.delivery.PersistenceConsumer;
@@ -95,7 +97,7 @@ import java.util.concurrent.TimeUnit;
  *
  * TODO: 生产环境替换为：
  *   · LocalNodeDiscovery → RedisNodeDiscovery / EtcdNodeDiscovery
- *   · LocalRouteTable → RedisRouteTable
+ *   · LocalRouteTable → RedisRouteTable（在线状态 + 集群路由）
  *   · MemoryMessageQueue → KafkaQueue / RocketMQQueue
  */
 public class IMServer implements ILifecycle {
@@ -111,6 +113,7 @@ public class IMServer implements ILifecycle {
     // 集群基础设施
     private final INodeDiscovery nodeDiscovery;
     private final IRouteTable routeTable;
+    private final RedisConfiguration redisConfig;
     private final IClusterMessageBus clusterMessageBus;
 
     // 消息序号
@@ -148,9 +151,22 @@ public class IMServer implements ILifecycle {
         // ── 本节点标识 ──
         String nodeId = config.getNodeId();
 
-        // ── 集群基础设施（单机模式：本地实现） ──
+        // ── 集群基础设施（单机模式：本地实现；开启 Redis 配置后自动使用 RedisRouteTable） ──
         this.nodeDiscovery = new LocalNodeDiscovery();
-        this.routeTable = new LocalRouteTable(sessionManager, nodeId);
+        if (config.isRedisEnabled()) {
+            RedisConfiguration redisConfig = RedisConfiguration.builder()
+                    .host(config.getRedisHost())
+                    .port(config.getRedisPort())
+                    .password(config.getRedisPassword())
+                    .database(config.getRedisDatabase())
+                    .build();
+            this.routeTable = new RedisRouteTable(redisConfig, sessionManager, nodeId);
+            log.info("Using RedisRouteTable: {}:{}", config.getRedisHost(), config.getRedisPort());
+        } else {
+            this.routeTable = new LocalRouteTable(sessionManager, nodeId);
+            log.info("Using LocalRouteTable (no Redis configured)");
+        }
+        this.redisConfig = routeTable instanceof RedisRouteTable ? ((RedisRouteTable) routeTable).getRedisConfig() : null;
         this.clusterMessageBus = new LocalClusterMessageBus();
 
         // ── 消息序号 ──
@@ -187,7 +203,7 @@ public class IMServer implements ILifecycle {
 
         // ── 注册 IMessageHandler ──
         List<IMessageHandler> handlers = List.of(
-                new HeartbeatHandler(sessionManager),
+                new HeartbeatHandler(sessionManager, routeTable),
                 new LoginHandler(sessionManager, messageStore, routeTable, nodeId, authenticator),
                 ChatHandler.builder(messageQueue, messageStore, sequenceManager)
                         .groupManager(groupManager)
@@ -307,6 +323,7 @@ public class IMServer implements ILifecycle {
         connectionEventHandler.shutdown();
         pendingAcknowledgementManager.shutdown();
         sessionManager.clear();
+        if (redisConfig != null) redisConfig.close();
         if (serverChannel != null) serverChannel.close().sync();
         if (wsChannel != null) wsChannel.close().sync();
         if (workerGroup != null) workerGroup.shutdownGracefully();
