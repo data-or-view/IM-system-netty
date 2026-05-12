@@ -2,15 +2,22 @@ package com.im.api;
 
 /**
  * 好友申请记录。
+ *
+ * <p>对应 OpenIM {@code GetFriendApplyListResp}。</p>
+ *
+ * <p>包含完整的申请→审批链路：谁申请、附言、谁处理、处理结果、时间线。</p>
  */
 public class FriendApply {
 
     private String fromUserId;
     private String toUserId;
     private String reqMsg;
+    private String handlerUserId;
     private String handleMsg;
+
     /** 0=待处理, 1=已同意, 2=已拒绝 */
     private int handleResult;
+
     private long createTime;
     private long handleTime;
 
@@ -24,6 +31,9 @@ public class FriendApply {
 
     public String getReqMsg() { return reqMsg; }
     public void setReqMsg(String reqMsg) { this.reqMsg = reqMsg; }
+
+    public String getHandlerUserId() { return handlerUserId; }
+    public void setHandlerUserId(String handlerUserId) { this.handlerUserId = handlerUserId; }
 
     public String getHandleMsg() { return handleMsg; }
     public void setHandleMsg(String handleMsg) { this.handleMsg = handleMsg; }

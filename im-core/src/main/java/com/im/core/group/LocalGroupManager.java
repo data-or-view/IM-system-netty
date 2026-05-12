@@ -13,6 +13,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.stream.Collectors;
 
 /**
  * 本地内存群组管理器（单机开发/测试用）。
@@ -36,6 +37,9 @@ public class LocalGroupManager implements IGroupManager {
     /** userId → 加入的群集合 */
     private final ConcurrentMap<String, CopyOnWriteArraySet<String>> userGroups = new ConcurrentHashMap<>();
 
+    /** groupId → 成员详情（userId → 角色等信息） */
+    private final ConcurrentMap<String, ConcurrentMap<String, GroupMemberInformation>> memberInfos = new ConcurrentHashMap<>();
+
     /** groupId → 加群申请列表 */
     private final ConcurrentMap<String, CopyOnWriteArrayList<GroupApply>> joinRequests = new ConcurrentHashMap<>();
 
@@ -58,7 +62,8 @@ public class LocalGroupManager implements IGroupManager {
     }
 
     @Override
-    public void createGroup(String groupId, String ownerId, String groupName, List<String> members) {
+    public void createGroup(String groupId, String ownerId, String groupName, String faceUrl,
+                            List<String> members, int groupType, int needVerification) {
         if (groups.containsKey(groupId)) {
             log.warn("Group already exists: {}", groupId);
             return;
@@ -67,17 +72,33 @@ public class LocalGroupManager implements IGroupManager {
         memberSet.add(ownerId);
         memberSet.addAll(members);
         groups.put(groupId, memberSet);
-        groupInfos.put(groupId, new GroupInformation(groupId, groupName, ownerId));
+
+        GroupInformation info = new GroupInformation(groupId, groupName, ownerId);
+        info.setFaceUrl(faceUrl);
+        info.setGroupType(groupType);
+        info.setNeedVerification(needVerification);
+        groupInfos.put(groupId, info);
+
+        // 初始化成员角色
+        ConcurrentMap<String, GroupMemberInformation> memberMap = new ConcurrentHashMap<>();
+        memberMap.put(ownerId, createMemberInfo(groupId, ownerId, 200));
+        for (String m : members) {
+            memberMap.put(m, createMemberInfo(groupId, m, 1));
+        }
+        memberInfos.put(groupId, memberMap);
 
         addUserGroupIndex(ownerId, groupId);
         members.forEach(m -> addUserGroupIndex(m, groupId));
-        log.info("Group created: id={}, owner={}, members={}", groupId, ownerId, memberSet.size());
+
+        log.info("Group created: id={}, owner={}, members={}, type={}",
+                groupId, ownerId, memberSet.size(), groupType);
     }
 
     @Override
     public void disbandGroup(String groupId, String operatorId) {
         CopyOnWriteArraySet<String> removed = groups.remove(groupId);
         groupInfos.remove(groupId);
+        memberInfos.remove(groupId);
         if (removed != null) {
             removed.forEach(userId -> {
                 CopyOnWriteArraySet<String> joined = userGroups.get(userId);
@@ -88,12 +109,23 @@ public class LocalGroupManager implements IGroupManager {
     }
 
     @Override
-    public void setGroupInformation(String groupId, String groupName, String notification, String faceUrl) {
+    public void setGroupInformation(String groupId, String groupName, String notification,
+                                    String introduction, String faceUrl, int needVerification,
+                                    int lookMemberInfo, int applyMemberFriend,
+                                    String notificationUserId) {
         GroupInformation info = groupInfos.get(groupId);
         if (info != null) {
             if (groupName != null) info.setGroupName(groupName);
             if (notification != null) info.setNotification(notification);
+            if (introduction != null) info.setIntroduction(introduction);
             if (faceUrl != null) info.setFaceUrl(faceUrl);
+            if (needVerification >= 0) info.setNeedVerification(needVerification);
+            if (lookMemberInfo >= 0) info.setLookMemberInfo(lookMemberInfo);
+            if (applyMemberFriend >= 0) info.setApplyMemberFriend(applyMemberFriend);
+            if (notificationUserId != null) {
+                info.setNotificationUserId(notificationUserId);
+                info.setNotificationUpdateTime(System.currentTimeMillis());
+            }
             invalidateGroupCache(groupId);
         }
     }
@@ -107,6 +139,8 @@ public class LocalGroupManager implements IGroupManager {
         }
         if (memberSet.add(userId)) {
             addUserGroupIndex(userId, groupId);
+            memberInfos.computeIfAbsent(groupId, k -> new ConcurrentHashMap<>())
+                    .put(userId, createMemberInfo(groupId, userId, 1));
             GroupInformation info = groupInfos.get(groupId);
             if (info != null) info.setMemberCount(memberSet.size());
             invalidateMemberCache(groupId);
@@ -128,25 +162,34 @@ public class LocalGroupManager implements IGroupManager {
         removeMember(groupId, userId);
     }
 
-    private void removeMember(String groupId, String userId) {
-        CopyOnWriteArraySet<String> memberSet = groups.get(groupId);
-        if (memberSet != null && memberSet.remove(userId)) {
-            CopyOnWriteArraySet<String> joined = userGroups.get(userId);
-            if (joined != null) joined.remove(groupId);
-            GroupInformation info = groupInfos.get(groupId);
-            if (info != null) info.setMemberCount(memberSet.size());
-            log.info("Member removed: userId={} from group={}", userId, groupId);
-            invalidateMemberCache(groupId);
-        }
-    }
-
     @Override
     public void transferOwner(String groupId, String oldOwnerId, String newOwnerId) {
         GroupInformation info = groupInfos.get(groupId);
         if (info != null) {
             info.setOwnerUserId(newOwnerId);
+            // 更新角色
+            setMemberRoleLocal(groupId, oldOwnerId, 1);
+            setMemberRoleLocal(groupId, newOwnerId, 200);
             invalidateGroupCache(groupId);
             log.info("Owner transferred: group={}, from={}, to={}", groupId, oldOwnerId, newOwnerId);
+        }
+    }
+
+    @Override
+    public void setMemberRole(String groupId, String operatorId, String targetUserId, int roleLevel) {
+        setMemberRoleLocal(groupId, targetUserId, roleLevel);
+        log.info("Member role set: group={}, user={}, role={}", groupId, targetUserId, roleLevel);
+    }
+
+    @Override
+    public void muteMember(String groupId, String targetUserId, long muteEndTime) {
+        ConcurrentMap<String, GroupMemberInformation> memberMap = memberInfos.get(groupId);
+        if (memberMap != null) {
+            GroupMemberInformation member = memberMap.get(targetUserId);
+            if (member != null) {
+                member.setMuteEndTime(muteEndTime);
+                log.info("Member mute: group={}, user={}, muteEnd={}", groupId, targetUserId, muteEndTime);
+            }
         }
     }
 
@@ -169,9 +212,9 @@ public class LocalGroupManager implements IGroupManager {
         for (GroupApply apply : requests) {
             if (userId.equals(apply.getUserId()) && apply.getHandleResult() == 0) {
                 apply.setHandleResult(agreed ? 1 : 2);
-                apply.setHandleUserId(operatorId);
-                apply.setHandleMsg(handleMsg);
-                apply.setHandleTime(System.currentTimeMillis());
+                apply.setHandlerUserId(operatorId);
+                apply.setHandledMsg(handleMsg);
+                apply.setHandledTime(System.currentTimeMillis());
                 if (agreed) addMember(groupId, userId);
                 break;
             }
@@ -179,9 +222,24 @@ public class LocalGroupManager implements IGroupManager {
     }
 
     @Override
-    public List<GroupApply> getJoinRequests(String groupId) {
+    public List<GroupApply> getJoinRequests(String groupId, boolean onlyPending) {
         CopyOnWriteArrayList<GroupApply> requests = joinRequests.get(groupId);
-        return requests != null ? requests : List.of();
+        if (requests == null) return List.of();
+        if (onlyPending) {
+            return requests.stream()
+                    .filter(a -> a.getHandleResult() == 0)
+                    .collect(Collectors.toList());
+        }
+        return List.copyOf(requests);
+    }
+
+    @Override
+    public List<GroupMemberInformation> getMemberList(String groupId) {
+        ConcurrentMap<String, GroupMemberInformation> memberMap = memberInfos.get(groupId);
+        if (memberMap == null) return List.of();
+        return memberMap.values().stream()
+                .sorted((a, b) -> Integer.compare(b.getRoleLevel(), a.getRoleLevel()))
+                .collect(Collectors.toList());
     }
 
     @Override
@@ -202,7 +260,6 @@ public class LocalGroupManager implements IGroupManager {
 
     @Override
     public boolean isMember(String groupId, String userId) {
-        // isMember 优先走 memberListCache（批量读取缓存一次）
         if (memberListCache != null) {
             List<String> members = memberListCache.getOrLoad(
                     memberListKey(groupId),
@@ -246,8 +303,52 @@ public class LocalGroupManager implements IGroupManager {
         GroupInformation info = groupInfos.get(groupId);
         if (info == null) return null;
         if (info.getOwnerUserId().equals(userId)) return "owner";
+        ConcurrentMap<String, GroupMemberInformation> memberMap = memberInfos.get(groupId);
+        if (memberMap != null) {
+            GroupMemberInformation member = memberMap.get(userId);
+            if (member != null) {
+                if (member.getRoleLevel() >= 100) return "admin";
+                return "member";
+            }
+        }
         if (isMember(groupId, userId)) return "member";
         return null;
+    }
+
+    // ── 内部方法 ──
+
+    private GroupMemberInformation createMemberInfo(String groupId, String userId, int roleLevel) {
+        GroupMemberInformation info = new GroupMemberInformation();
+        info.setGroupId(groupId);
+        info.setUserId(userId);
+        info.setRoleLevel(roleLevel);
+        info.setJoinedAt(System.currentTimeMillis());
+        return info;
+    }
+
+    private void setMemberRoleLocal(String groupId, String userId, int roleLevel) {
+        ConcurrentMap<String, GroupMemberInformation> memberMap =
+                memberInfos.computeIfAbsent(groupId, k -> new ConcurrentHashMap<>());
+        GroupMemberInformation member = memberMap.get(userId);
+        if (member != null) {
+            member.setRoleLevel(roleLevel);
+        } else {
+            memberMap.put(userId, createMemberInfo(groupId, userId, roleLevel));
+        }
+    }
+
+    private void removeMember(String groupId, String userId) {
+        CopyOnWriteArraySet<String> memberSet = groups.get(groupId);
+        if (memberSet != null && memberSet.remove(userId)) {
+            CopyOnWriteArraySet<String> joined = userGroups.get(userId);
+            if (joined != null) joined.remove(groupId);
+            ConcurrentMap<String, GroupMemberInformation> memberMap = memberInfos.get(groupId);
+            if (memberMap != null) memberMap.remove(userId);
+            GroupInformation info = groupInfos.get(groupId);
+            if (info != null) info.setMemberCount(memberSet.size());
+            log.info("Member removed: userId={} from group={}", userId, groupId);
+            invalidateMemberCache(groupId);
+        }
     }
 
     // ── 缓存失效（SafeCache 保证 delete 不抛异常） ──

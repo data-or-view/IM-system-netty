@@ -12,9 +12,6 @@ import java.util.Set;
  *   · CreateGroup → 创建群
  *   · JoinGroup / QuitGroup
  *   · ApplicationGroupResponse → 审批加群申请
- *
- * 当前实现：LocalGroupManager（内存 HashMap）
- * 生产环境：DBGroupManager（MySQL/PostgreSQL）或 RedisGroupManager
  */
 public interface IGroupManager {
 
@@ -23,12 +20,16 @@ public interface IGroupManager {
     /**
      * 创建群组。
      *
-     * @param groupId  群 ID
-     * @param ownerId  群主 ID
-     * @param groupName 群名称
-     * @param members  初始成员列表
+     * @param groupId         群 ID
+     * @param ownerId         群主 ID
+     * @param groupName       群名称
+     * @param faceUrl         群头像（可选）
+     * @param members         初始成员列表
+     * @param groupType       群类型: 0=私有群, 1=公开群
+     * @param needVerification 加群验证: 0=无条件, 1=需验证, 2=需邀请, 3=不允许
      */
-    void createGroup(String groupId, String ownerId, String groupName, List<String> members);
+    void createGroup(String groupId, String ownerId, String groupName, String faceUrl,
+                     List<String> members, int groupType, int needVerification);
 
     /**
      * 解散群组。
@@ -37,9 +38,22 @@ public interface IGroupManager {
     void disbandGroup(String groupId, String operatorId);
 
     /**
-     * 修改群信息（名称/公告等）。
+     * 修改群信息。
+     *
+     * @param groupId              群 ID
+     * @param groupName            群名称（null=不更新）
+     * @param notification         群公告（null=不更新）
+     * @param introduction         群简介（null=不更新）
+     * @param faceUrl              群头像（null=不更新）
+     * @param needVerification     加群验证（-1=不更新）
+     * @param lookMemberInfo       成员信息可见（-1=不更新）
+     * @param applyMemberFriend    允许互加好友（-1=不更新）
+     * @param notificationUserId   公告更新人（null=不更新）
      */
-    void setGroupInformation(String groupId, String groupName, String notification, String faceUrl);
+    void setGroupInformation(String groupId, String groupName, String notification,
+                             String introduction, String faceUrl, int needVerification,
+                             int lookMemberInfo, int applyMemberFriend,
+                             String notificationUserId);
 
     // ========== 成员管理 ==========
 
@@ -69,6 +83,22 @@ public interface IGroupManager {
      */
     void transferOwner(String groupId, String oldOwnerId, String newOwnerId);
 
+    /**
+     * 设置成员角色。
+     *
+     * @param roleLevel 1=普通成员, 100=管理员, 200=群主
+     */
+    void setMemberRole(String groupId, String operatorId, String targetUserId, int roleLevel);
+
+    /**
+     * 禁言/解除禁言成员。
+     *
+     * @param groupId        群 ID
+     * @param targetUserId   目标用户
+     * @param muteEndTime    禁言截止时间(毫秒)，0=解除禁言
+     */
+    void muteMember(String groupId, String targetUserId, long muteEndTime);
+
     // ========== 加群申请流程 ==========
 
     /**
@@ -81,19 +111,27 @@ public interface IGroupManager {
      *
      * @param agreed true=同意, false=拒绝
      */
-    void respondJoinRequest(String groupId, String userId, String operatorId, String handleMsg, boolean agreed);
+    void respondJoinRequest(String groupId, String userId, String operatorId,
+                            String handleMsg, boolean agreed);
 
     /**
-     * 获取待处理的加群申请列表。
+     * 获取加群申请列表。
+     *
+     * @param groupId     群 ID（null=获取用户自己的所有申请记录）
+     * @param onlyPending true=只查待处理的
      */
-    List<GroupApply> getJoinRequests(String groupId);
+    List<GroupApply> getJoinRequests(String groupId, boolean onlyPending);
 
     // ========== 查询 ==========
 
     /**
+     * 获取群成员信息列表。
+     */
+    List<GroupMemberInformation> getMemberList(String groupId);
+
+    /**
      * 获取群成员 ID 列表。
      *
-     * @param groupId 群 ID
      * @return 成员 userId 集合（含群主），群不存在返回空集
      */
     Set<String> getMemberIds(String groupId);
@@ -104,6 +142,13 @@ public interface IGroupManager {
     boolean isMember(String groupId, String userId);
 
     /**
+     * 获取用户在群内的角色。
+     *
+     * @return "owner" / "admin" / "member" / null（非成员）
+     */
+    String getRole(String groupId, String userId);
+
+    /**
      * 用户加入的群列表。
      */
     Set<String> getJoinedGroups(String userId);
@@ -112,11 +157,4 @@ public interface IGroupManager {
      * 获取群信息。
      */
     GroupInformation getGroupInformation(String groupId);
-
-    /**
-     * 获取群角色（owner/admin/member）。
-     *
-     * @return "owner" / "admin" / "member" / null（非成员）
-     */
-    String getRole(String groupId, String userId);
 }

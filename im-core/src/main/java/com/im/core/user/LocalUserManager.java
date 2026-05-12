@@ -94,7 +94,8 @@ public class LocalUserManager implements IUserManager {
     }
 
     @Override
-    public void updateUserInformation(String userId, String nickname, String faceUrl, String ex) {
+    public void updateUserInformation(String userId, String nickname, String faceUrl,
+                                      String ex, int globalRecvMsgOpt) {
         UserInformation info = users.get(userId);
         if (info == null) {
             throw new ImException(ImErrorCode.NOT_FOUND, "User not found: " + userId);
@@ -102,6 +103,7 @@ public class LocalUserManager implements IUserManager {
         if (nickname != null) info.setNickname(nickname);
         if (faceUrl != null) info.setFaceUrl(faceUrl);
         if (ex != null) info.setEx(ex);
+        if (globalRecvMsgOpt >= 0) info.setGlobalRecvMsgOpt(globalRecvMsgOpt);
         if (userCache != null) userCache.delete(userId);
     }
 

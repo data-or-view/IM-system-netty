@@ -37,6 +37,9 @@ public class LocalFriendManager implements IFriendManager {
     /** ownerUserId → friendUserId → remark */
     private final ConcurrentMap<String, ConcurrentMap<String, String>> remarks = new ConcurrentHashMap<>();
 
+    /** ownerUserId → friendUserId → isPinned */
+    private final ConcurrentMap<String, ConcurrentMap<String, Boolean>> pinnedFlags = new ConcurrentHashMap<>();
+
     /** fromUserId → toUserId → 申请记录（最新的一个） */
     private final ConcurrentMap<String, ConcurrentMap<String, FriendApply>> applies = new ConcurrentHashMap<>();
 
@@ -71,6 +74,7 @@ public class LocalFriendManager implements IFriendManager {
         FriendApply apply = fromApplies.get(userId);
         if (apply == null) return;
         apply.setHandleResult(agreed ? 1 : 2);
+        apply.setHandlerUserId(userId);
         apply.setHandleMsg(handleMsg);
         apply.setHandleTime(System.currentTimeMillis());
         if (agreed) {
@@ -81,11 +85,12 @@ public class LocalFriendManager implements IFriendManager {
     }
 
     @Override
-    public List<FriendApply> getFriendApplyList(String userId) {
+    public List<FriendApply> getFriendApplyList(String userId, boolean onlyPending) {
         List<FriendApply> result = new ArrayList<>();
         for (ConcurrentMap<String, FriendApply> fromApplies : applies.values()) {
             FriendApply apply = fromApplies.get(userId);
-            if (apply != null && apply.getHandleResult() == 0) {
+            if (apply != null) {
+                if (onlyPending && apply.getHandleResult() != 0) continue;
                 result.add(apply);
             }
         }
@@ -98,6 +103,8 @@ public class LocalFriendManager implements IFriendManager {
         if (set != null) set.remove(friendUserId);
         ConcurrentMap<String, String> remarkMap = remarks.get(ownerUserId);
         if (remarkMap != null) remarkMap.remove(friendUserId);
+        ConcurrentMap<String, Boolean> pinnedMap = pinnedFlags.get(ownerUserId);
+        if (pinnedMap != null) pinnedMap.remove(friendUserId);
         invalidateFriendCache(ownerUserId, friendUserId);
         log.info("Friend deleted: owner={}, friend={}", ownerUserId, friendUserId);
     }
@@ -122,6 +129,10 @@ public class LocalFriendManager implements IFriendManager {
             fi.setFriendUserId(fid);
             ConcurrentMap<String, String> remarkMap = remarks.get(userId);
             if (remarkMap != null) fi.setRemark(remarkMap.get(fid));
+            ConcurrentMap<String, Boolean> pinnedMap = pinnedFlags.get(userId);
+            if (pinnedMap != null && pinnedMap.get(fid) != null) {
+                fi.setPinned(pinnedMap.get(fid));
+            }
             return fi;
         }).collect(Collectors.toList());
     }
@@ -135,6 +146,12 @@ public class LocalFriendManager implements IFriendManager {
     @Override
     public void setFriendRemark(String ownerUserId, String friendUserId, String remark) {
         remarks.computeIfAbsent(ownerUserId, k -> new ConcurrentHashMap<>()).put(friendUserId, remark);
+    }
+
+    @Override
+    public void setFriendPinned(String ownerUserId, String friendUserId, boolean pinned) {
+        pinnedFlags.computeIfAbsent(ownerUserId, k -> new ConcurrentHashMap<>()).put(friendUserId, pinned);
+        log.info("Friend pin: owner={}, friend={}, pinned={}", ownerUserId, friendUserId, pinned);
     }
 
     @Override

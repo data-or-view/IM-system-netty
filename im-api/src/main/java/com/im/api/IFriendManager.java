@@ -40,9 +40,12 @@ public interface IFriendManager {
     void respondFriendApply(String userId, String fromUserId, String handleMsg, boolean agreed);
 
     /**
-     * 获取好友申请列表（等待处理的）。
+     * 获取好友申请列表。
+     *
+     * @param userId 用户 ID
+     * @param onlyPending true=只查待处理的, false=全部
      */
-    List<FriendApply> getFriendApplyList(String userId);
+    List<FriendApply> getFriendApplyList(String userId, boolean onlyPending);
 
     // ========== 好友管理 ==========
 
@@ -65,6 +68,11 @@ public interface IFriendManager {
      * 设置好友备注。
      */
     void setFriendRemark(String ownerUserId, String friendUserId, String remark);
+
+    /**
+     * 设置好友置顶。
+     */
+    void setFriendPinned(String ownerUserId, String friendUserId, boolean pinned);
 
     // ========== 黑名单 ==========
 

@@ -44,6 +44,13 @@ public interface IUserManager {
 
     /**
      * 更新用户资料。
+     *
+     * @param userId           用户 ID
+     * @param nickname         昵称（null 表示不更新）
+     * @param faceUrl          头像 URL（null 表示不更新）
+     * @param ex               扩展字段（null 表示不更新）
+     * @param globalRecvMsgOpt 全局消息接收选项（-1 表示不更新）
      */
-    void updateUserInformation(String userId, String nickname, String faceUrl, String ex);
+    void updateUserInformation(String userId, String nickname, String faceUrl,
+                               String ex, int globalRecvMsgOpt);
 }
