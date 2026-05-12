@@ -79,4 +79,10 @@ public class AuthenticationInterceptor implements IMInterceptor {
     public String name() {
         return "auth";
     }
+
+    /** 鉴权必须最先执行 */
+    @Override
+    public int order() {
+        return Integer.MIN_VALUE;
+    }
 }

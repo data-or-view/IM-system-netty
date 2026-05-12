@@ -37,6 +37,22 @@ public interface IMInterceptor {
     String name();
 
     /**
+     * 排序优先级（数值越小越先执行）。
+     * <p>
+     * 参考 Spring 的 {@code Ordered} 接口语义：
+     * <pre>
+     * Integer.MIN_VALUE → 最先执行（如鉴权）
+     * 0                → 默认
+     * Integer.MAX_VALUE → 最后执行（如审计日志）
+     * </pre>
+     *
+     * @return 排序值，默认 0
+     */
+    default int order() {
+        return 0;
+    }
+
+    /**
      * 前置拦截（handler 执行前调用）。
      *
      * @param ctx ChannelHandlerContext

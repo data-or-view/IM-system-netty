@@ -49,23 +49,46 @@ public class ChatHandler implements IMessageHandler {
     private final IGroupManager groupManager;
     private final IWebhookManager webhookManager;
 
-    public ChatHandler(IMessageQueue messageQueue, IMessageStore messageStore, ISequenceManager sequenceManager) {
-        this(messageQueue, messageStore, sequenceManager, null, null);
+    private ChatHandler(Builder builder) {
+        this.messageQueue = builder.messageQueue;
+        this.messageStore = builder.messageStore;
+        this.sequenceManager = builder.sequenceManager;
+        this.groupManager = builder.groupManager;
+        this.webhookManager = builder.webhookManager;
     }
 
-    public ChatHandler(IMessageQueue messageQueue, IMessageStore messageStore,
-                       ISequenceManager sequenceManager, IGroupManager groupManager) {
-        this(messageQueue, messageStore, sequenceManager, groupManager, null);
+    public static Builder builder(IMessageQueue messageQueue, IMessageStore messageStore,
+                                  ISequenceManager sequenceManager) {
+        return new Builder(messageQueue, messageStore, sequenceManager);
     }
 
-    public ChatHandler(IMessageQueue messageQueue, IMessageStore messageStore,
-                       ISequenceManager sequenceManager, IGroupManager groupManager,
-                       IWebhookManager webhookManager) {
-        this.messageQueue = messageQueue;
-        this.messageStore = messageStore;
-        this.sequenceManager = sequenceManager;
-        this.groupManager = groupManager;
-        this.webhookManager = webhookManager;
+    public static class Builder {
+        private final IMessageQueue messageQueue;
+        private final IMessageStore messageStore;
+        private final ISequenceManager sequenceManager;
+        private IGroupManager groupManager;
+        private IWebhookManager webhookManager;
+
+        private Builder(IMessageQueue messageQueue, IMessageStore messageStore,
+                        ISequenceManager sequenceManager) {
+            this.messageQueue = messageQueue;
+            this.messageStore = messageStore;
+            this.sequenceManager = sequenceManager;
+        }
+
+        public Builder groupManager(IGroupManager groupManager) {
+            this.groupManager = groupManager;
+            return this;
+        }
+
+        public Builder webhookManager(IWebhookManager webhookManager) {
+            this.webhookManager = webhookManager;
+            return this;
+        }
+
+        public ChatHandler build() {
+            return new ChatHandler(this);
+        }
     }
 
     @Override

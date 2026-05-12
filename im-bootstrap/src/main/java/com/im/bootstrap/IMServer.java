@@ -189,7 +189,10 @@ public class IMServer implements ILifecycle {
         List<IMessageHandler> handlers = List.of(
                 new HeartbeatHandler(sessionManager),
                 new LoginHandler(sessionManager, messageStore, routeTable, nodeId, authenticator),
-                new ChatHandler(messageQueue, messageStore, sequenceManager, groupManager, webhookManager),
+                ChatHandler.builder(messageQueue, messageStore, sequenceManager)
+                        .groupManager(groupManager)
+                        .webhookManager(webhookManager)
+                        .build(),
                 new PullMessageHandler(messageStore, sequenceManager),
                 new ConversationGetHandler(conversationManager),
                 new ConversationSetHandler(conversationManager)

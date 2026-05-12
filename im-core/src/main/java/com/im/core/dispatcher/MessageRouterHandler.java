@@ -14,6 +14,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -87,10 +88,11 @@ public class MessageRouterHandler extends SimpleChannelInboundHandler<IMCommand>
         }
     }
 
-    /** 注册拦截器（追加到链尾） */
+    /** 注册拦截器（追加到链尾，按 order() 自动排序） */
     public MessageRouterHandler addInterceptor(IMInterceptor interceptor) {
         interceptors.add(interceptor);
-        log.info("Interceptor registered: {}", interceptor.name());
+        interceptors.sort(Comparator.comparingInt(IMInterceptor::order));
+        log.info("Interceptor registered: {} (order={})", interceptor.name(), interceptor.order());
         return this;
     }
 
