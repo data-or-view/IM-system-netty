@@ -4,21 +4,9 @@ import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 
 /**
- * 用户实体（示例：映射 {@code im_users} 表）。
+ * 用户实体，映射 {@code im_users} 表。
  *
- * <p>后续以此模式扩展：MessageEntity、ConversationEntity、GroupEntity、FriendEntity 等。</p>
- *
- * <pre>
- *     // 构造示例
- *     UserEntity user = new UserEntity();
- *     user.setUserId("alice");
- *     user.setNickname("Alice");
- *
- *     // 使用 Mapper
- *     userMapper.insert(user);
- * </pre>
- *
- * @see com.im.core.db.mapper.UserMapper
+ * <p>对应 OpenIM {@code model.User}：用户基本信息 + 全局消息接收选项。</p>
  */
 @TableName("im_users")
 public class UserEntity {
@@ -32,6 +20,15 @@ public class UserEntity {
     @TableField("face_url")
     private String faceUrl;
 
+    @TableField("ex")
+    private String ex;
+
+    @TableField("app_manger_level")
+    private int appMangerLevel;
+
+    @TableField("global_recv_msg_opt")
+    private int globalRecvMsgOpt;
+
     @TableField("status")
     private int status;
 
@@ -41,8 +38,6 @@ public class UserEntity {
     @TableField("updated_at")
     private long updatedAt;
 
-    // ── getters / setters ──
-
     public String getUserId() { return userId; }
     public void setUserId(String userId) { this.userId = userId; }
 
@@ -51,6 +46,15 @@ public class UserEntity {
 
     public String getFaceUrl() { return faceUrl; }
     public void setFaceUrl(String faceUrl) { this.faceUrl = faceUrl; }
+
+    public String getEx() { return ex; }
+    public void setEx(String ex) { this.ex = ex; }
+
+    public int getAppMangerLevel() { return appMangerLevel; }
+    public void setAppMangerLevel(int appMangerLevel) { this.appMangerLevel = appMangerLevel; }
+
+    public int getGlobalRecvMsgOpt() { return globalRecvMsgOpt; }
+    public void setGlobalRecvMsgOpt(int globalRecvMsgOpt) { this.globalRecvMsgOpt = globalRecvMsgOpt; }
 
     public int getStatus() { return status; }
     public void setStatus(int status) { this.status = status; }

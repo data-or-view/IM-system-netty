@@ -14,6 +14,19 @@ import org.apache.ibatis.transaction.jdbc.JdbcTransactionFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.im.core.db.mapper.BlacklistMapper;
+import com.im.core.db.mapper.ConversationMapper;
+import com.im.core.db.mapper.FriendMapper;
+import com.im.core.db.mapper.FriendRequestMapper;
+import com.im.core.db.mapper.GroupMapper;
+import com.im.core.db.mapper.GroupMemberMapper;
+import com.im.core.db.mapper.GroupRequestMapper;
+import com.im.core.db.mapper.MessageMapper;
+import com.im.core.db.mapper.ObjectMapper;
+import com.im.core.db.mapper.SequenceMapper;
+import com.im.core.db.mapper.SeqUserMapper;
+import com.im.core.db.mapper.UserMapper;
+
 import javax.sql.DataSource;
 
 /**
@@ -145,8 +158,19 @@ public final class MyBatisPlusFactory {
         interceptor.addInnerInterceptor(new PaginationInnerInterceptor(DbType.MYSQL));
         configuration.addInterceptor(interceptor);
 
-        // 注册 Mapper（各 DbXxxManager 需要的 Mapper 在此注册）
-        // configuration.addMapper(XxxMapper.class);
+        // 注册所有 Mapper
+        configuration.addMapper(UserMapper.class);
+        configuration.addMapper(FriendMapper.class);
+        configuration.addMapper(FriendRequestMapper.class);
+        configuration.addMapper(BlacklistMapper.class);
+        configuration.addMapper(GroupMapper.class);
+        configuration.addMapper(GroupMemberMapper.class);
+        configuration.addMapper(GroupRequestMapper.class);
+        configuration.addMapper(ConversationMapper.class);
+        configuration.addMapper(MessageMapper.class);
+        configuration.addMapper(SequenceMapper.class);
+        configuration.addMapper(SeqUserMapper.class);
+        configuration.addMapper(ObjectMapper.class);
 
         return new MybatisSqlSessionFactoryBuilder().build(configuration);
     }
