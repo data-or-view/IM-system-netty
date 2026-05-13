@@ -64,6 +64,12 @@ public class ConversationEntity {
     @TableField("min_seq")
     private long minSeq;
 
+    @TableField("unread_count")
+    private int unreadCount;
+
+    public int getUnreadCount() { return unreadCount; }
+    public void setUnreadCount(int unreadCount) { this.unreadCount = unreadCount; }
+
     @TableField("is_msg_destruct")
     private int isMsgDestruct;
 

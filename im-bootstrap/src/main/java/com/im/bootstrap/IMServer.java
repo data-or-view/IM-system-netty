@@ -37,6 +37,7 @@ import com.im.codec.IMEncoder;
 import com.im.core.PendingAcknowledgementManager;
 import com.im.core.auth.HmacTokenAuthenticator;
 import com.im.core.cache.ConcurrentHashCache;
+import com.im.core.conversation.DbConversationManager;
 import com.im.core.conversation.LocalConversationManager;
 import com.im.core.group.DbGroupManager;
 import com.im.core.group.LocalGroupManager;
@@ -62,7 +63,9 @@ import com.im.core.handler.*;
 import com.im.core.mq.MemoryMessageQueue;
 import com.im.core.seq.LocalSequenceManager;
 import com.im.core.session.SessionManager;
+import com.im.core.redis.RedisStateStore;
 import com.im.core.seq.RedisSequenceManager;
+import com.im.core.store.LocalStateStore;
 import com.im.core.store.DbMessageStore;
 import com.im.core.store.LocalMessageStore;
 import com.im.core.util.IMExecutors;
@@ -126,6 +129,7 @@ public class IMServer implements ILifecycle {
     private final IRouteTable routeTable;
     private final RedisConfiguration redisConfig;
     private final IClusterMessageBus clusterMessageBus;
+    private final IClusterStateStore stateStore;
 
     // 消息序号
     private final ISequenceManager sequenceManager;
@@ -208,6 +212,12 @@ public class IMServer implements ILifecycle {
         this.redisConfig = routeTable instanceof RedisRouteTable ? ((RedisRouteTable) routeTable).getRedisConfig() : null;
         this.clusterMessageBus = new LocalClusterMessageBus();
 
+        // ── 集群状态存储（Redis 可用时使用 RedisStateStore） ──
+        this.stateStore = this.redisConfig != null
+                ? new RedisStateStore(this.redisConfig)
+                : new LocalStateStore();
+        log.info("StateStore: {}", this.redisConfig != null ? "RedisStateStore" : "LocalStateStore");
+
         // ── 消息序号（Redis 可用时用持久化 INCR 序号） ──
         this.sequenceManager = this.redisConfig != null
                 ? new RedisSequenceManager(this.redisConfig)
@@ -225,9 +235,13 @@ public class IMServer implements ILifecycle {
                 ? new DbGroupManager()
                 : new LocalGroupManager(groupInfoCache, groupMemberCache);
 
-        // ── 会话管理（带缓存） ──
+        // ── 会话管理（数据库模式下用 DbConversationManager 持久化） ──
         ICache<String, List<Conversation>> conversationCache = new ConcurrentHashCache<>();
-        this.conversationManager = new LocalConversationManager(conversationCache);
+        this.conversationManager = dbEnabled(config)
+                ? new DbConversationManager()
+                : new LocalConversationManager(conversationCache);
+        log.info("ConversationManager: {}", dbEnabled(config)
+                ? "DbConversationManager" : "LocalConversationManager");
 
         // ── 数据库管理器（优先数据库实现，降级到内存） ──
         // 启动时 -Ddb.enabled=true 或指定 -Ddb.jdbcUrl 启用数据库模式
