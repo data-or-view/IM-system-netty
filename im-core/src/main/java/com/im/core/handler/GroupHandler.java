@@ -88,7 +88,7 @@ public class GroupHandler implements IMessageHandler {
         if (groupName == null || groupName.isEmpty()) throw new ImException(ImErrorCode.BAD_REQUEST, "missing groupName");
 
         int groupType = intHeader(msg, "groupType", 0);
-        int needVerification = intHeader(msg, "needVerification", 1);
+        int needVerification = intHeader(msg, "needVerification", 0);
 
         // 解析 members JSON
         List<String> members = List.of();

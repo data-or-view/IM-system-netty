@@ -159,6 +159,8 @@ public class DeliveryConsumer implements ILifecycle {
         copy.putHeader("fromUserId", original.getHeader("fromUserId"));
         copy.putHeader("groupId", original.getHeader("groupId"));
         copy.putHeader("conversationId", original.getHeader("conversationId"));
+        copy.putHeader("content", original.getHeader("content"));
+        copy.putHeader("contentType", original.getHeader("contentType"));
         copy.putHeader("_ms", original.getHeader("_ms"));
         copy.putHeader("_ct", original.getHeader("_ct"));
         copy.putHeader("toUserId", userId);

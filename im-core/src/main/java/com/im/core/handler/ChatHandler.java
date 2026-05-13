@@ -43,6 +43,10 @@ public class ChatHandler implements IMessageHandler {
     public static final String CONTENT_TYPE_HEADER = "_ct";
     public static final String MSG_SEQ_HEADER = "_ms";
 
+    /** 客户端未传 _mid 时，服务端自动生成 */
+    private static final java.util.concurrent.atomic.AtomicLong msgIdCounter =
+            new java.util.concurrent.atomic.AtomicLong(System.currentTimeMillis());
+
     private final IMessageQueue messageQueue;
     private final IMessageStore messageStore;
     private final ISequenceManager sequenceManager;
@@ -102,7 +106,14 @@ public class ChatHandler implements IMessageHandler {
             return;
         }
 
-        // 2. 解析消息内容
+        // 2. 确保 messageId 存在（客户端未传 _mid 时服务端自动生成）
+        if (msg.getMessageId() == null || msg.getMessageId().isEmpty()) {
+            String serverMid = "srv_" + msgIdCounter.incrementAndGet();
+            msg.setMessageId(serverMid);
+            log.debug("Auto-generated messageId: {} for seqId={}", serverMid, msg.getSeqId());
+        }
+
+        // 3. 解析消息内容
         IMessageContent content = null;
         String ctRaw = msg.getHeader(CONTENT_TYPE_HEADER);
         if (ctRaw != null) {

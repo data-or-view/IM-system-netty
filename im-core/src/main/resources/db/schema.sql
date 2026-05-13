@@ -116,7 +116,7 @@ CREATE TABLE IF NOT EXISTS im_group_members (
     user_id           VARCHAR(64)  NOT NULL COMMENT '用户ID',
     nickname          VARCHAR(128) NOT NULL DEFAULT '' COMMENT '用户在群里的昵称（冗余）',
     face_url          VARCHAR(512) NOT NULL DEFAULT '' COMMENT '用户在群里的头像（冗余）',
-    role_level        TINYINT      NOT NULL DEFAULT 0  COMMENT '角色: 1=普通成员, 100=管理员, 200=群主',
+    role_level        INT          NOT NULL DEFAULT 0  COMMENT '角色: 0=普通, 100=管理员, 200=群主',
     join_source       TINYINT      NOT NULL DEFAULT 0  COMMENT '入群来源',
     inviter_user_id   VARCHAR(64)  NOT NULL DEFAULT '' COMMENT '邀请人ID',
     operator_user_id  VARCHAR(64)  NOT NULL DEFAULT '' COMMENT '操作人ID',

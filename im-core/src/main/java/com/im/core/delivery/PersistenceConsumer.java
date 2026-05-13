@@ -42,9 +42,19 @@ public class PersistenceConsumer implements ILifecycle {
             String messageId = msg.getMessageId();
             String fromUserId = msg.getHeader("fromUserId");
 
-            // ① 持久化消息
+            // ① 持久化消息（ChatHandler 已做 write-ahead 保存，此处为最终存储，允许重复）
             if (messageStore != null) {
-                messageStore.save(msg);
+                try {
+                    messageStore.save(msg);
+                } catch (Exception e) {
+                    String err = e.getMessage();
+                    // Duplicate key: 写前日志已保存，正常
+                    if (err != null && err.contains("Duplicate entry")) {
+                        log.debug("Msg already saved (dup), seqId={}, mid={}", msg.getSeqId(), messageId);
+                    } else {
+                        log.warn("Persistence save failed: seqId={}, err={}", msg.getSeqId(), err);
+                    }
+                }
             }
 
             // ② 更新会话

@@ -130,6 +130,7 @@ class IMClient {
     if (!result || result.status !== 'OK') {
       throw new IMError(result?._err || 'UNKNOWN', '注册失败', result?.reason);
     }
+    this.userId = userId;
   }
 
   async login(userId, password) {
@@ -234,6 +235,36 @@ class IMClient {
   }
 
   /** 发送单聊消息 */
+  async createGroup(groupId, groupName, members = [], timeoutMs = 5000) {
+    const result = await this.sendAndWait({
+      _op: String(CMD.GROUP_CREATE),
+      userId: this.userId,
+      groupId,
+      groupName,
+      members: JSON.stringify(members),
+      Authorization: `Bearer ${this.token}`,
+    }, [CMD.GROUP_CREATE_ACK, CMD.ERROR], timeoutMs);
+    if (!result || result.status !== 'OK') {
+      throw new IMError(result?._err || 'UNKNOWN', '创建群失败', result?.reason);
+    }
+    return result;
+  }
+
+  async sendGroupMessage(groupId, contentType, content, timeoutMs = 5000) {
+    const result = await this.sendAndWait({
+      _op: String(CMD.GROUP_CHAT),
+      fromUserId: this.userId,
+      groupId,
+      contentType: String(contentType),
+      content,
+      Authorization: `Bearer ${this.token}`,
+    }, [CMD.GROUP_CHAT_ACK, CMD.ERROR, CMD.GROUP_CHAT], timeoutMs);
+    if (!result || (result.status !== 'OK' && result.status !== 'RECEIVED')) {
+      throw new IMError(result?._err || 'UNKNOWN', '发送群消息失败', result?.reason);
+    }
+    return result;
+  }
+
   async sendMessage(toUserId, contentType, content, timeoutMs = 5000) {
     const result = await this.sendAndWait({
       _op: String(CMD.SINGLE_CHAT),
