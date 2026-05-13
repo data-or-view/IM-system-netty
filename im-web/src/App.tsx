@@ -1,51 +1,160 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { StoreProvider, useStore } from "@/store/store";
 import { imConnection } from "@/protocol/connection";
+import { CMD } from "@/protocol/protocol";
 import LoginPage from "@/pages/LoginPage";
 import ChatLayout from "@/pages/ChatLayout";
 
+/** WebSocket 服务器地址 */
+function getWsHost(): string {
+  if (typeof window !== "undefined") {
+    return window.location.hostname;
+  }
+  return "localhost";
+}
+
 function AppContent() {
-  const { state, login } = useStore();
+  const { state, dispatch, login: storeLogin } = useStore();
   const [connecting, setConnecting] = useState(false);
+  const [statusMsg, setStatusMsg] = useState("");
+  const connectingRef = useRef(false);
 
+  // ====== 全局消息监听（处理 LOGIN_ACK 更新状态） ======
+  // 只在组件挂载时注册一次
+  const [listenerReady] = useState(() => {
+    imConnection.on("message", (frame) => {
+      if (!frame) return;
+      const header = frame.header;
+      const op = parseInt(header._op || "0");
+
+      if (op === CMD.LOGIN_ACK && header.status === "OK" && header.token) {
+        localStorage.setItem("im_token", header.token);
+        dispatch({
+          type: "SET_AUTH",
+          userId: header.userId || localStorage.getItem("im_userId") || "",
+          token: header.token,
+        });
+        // 登录成功后拉取数据
+        setTimeout(() => {
+          imConnection.fetchConversations();
+          imConnection.fetchFriendList();
+        }, 200);
+      }
+    });
+
+    // 连接状态
+    imConnection.on("open", () => {
+      dispatch({ type: "SET_CONNECTED", connected: true });
+    });
+    imConnection.on("close", () => {
+      dispatch({ type: "SET_CONNECTED", connected: false });
+    });
+
+    return true;
+  });
+
+  /** 登录 */
   const handleLogin = useCallback(
-    (userId: string) => {
-      if (connecting) return;
+    (userId: string, password?: string) => {
+      if (connectingRef.current) return;
+      connectingRef.current = true;
       setConnecting(true);
+      setStatusMsg("连接中...");
 
-      // 先连接，连接成功后发送登录
-      imConnection.connect("localhost", 8081);
+      const host = getWsHost();
+      imConnection.connect(host, 8081);
 
-      // 监听连接打开，然后登录
       const unsub = imConnection.on("open", () => {
-        login(userId);
-        setConnecting(false);
+        storeLogin(userId, password);
+        setStatusMsg("登录中...");
         unsub();
       });
 
-      // 5 秒超时
+      if (imConnection.connected) {
+        storeLogin(userId, password);
+        setStatusMsg("登录中...");
+      }
+
       setTimeout(() => {
         setConnecting(false);
-        // 可能已经打开了，没触发 onopen？重试一次
+        connectingRef.current = false;
         if (!imConnection.connected) {
-          imConnection.connect("localhost", 8081);
-          setTimeout(() => {
-            if (imConnection.connected) {
-              login(userId);
-            }
-          }, 500);
+          setStatusMsg("连接超时，请检查服务是否运行");
         }
       }, 5000);
     },
-    [login, connecting]
+    [storeLogin]
   );
 
-  // 已经登录且有 token → 直接进入聊天页
+  /** 注册 → 成功后自动登录 */
+  const handleRegister = useCallback(
+    (userId: string, password?: string) => {
+      if (connectingRef.current) return;
+      connectingRef.current = true;
+      setConnecting(true);
+      setStatusMsg("注册中...");
+
+      const host = getWsHost();
+      imConnection.connect(host, 8081);
+
+      let cleanedUp = false;
+      const cleanup = () => {
+        if (cleanedUp) return;
+        cleanedUp = true;
+        connectingRef.current = false;
+        setConnecting(false);
+      };
+
+      // 监听 REGISTER_ACK
+      const unsubMsg = imConnection.on("message", (frame) => {
+        if (!frame) return;
+        const op = parseInt(frame.header._op || "0");
+        if (op === CMD.REGISTER_ACK && frame.header.status === "OK") {
+          unsubMsg();
+          setStatusMsg("注册成功，正在登录...");
+          setTimeout(() => {
+            storeLogin(userId, password);
+            cleanup();
+          }, 300);
+        } else if (op === CMD.REGISTER_ACK) {
+          unsubMsg();
+          setStatusMsg(`注册失败: ${frame.header.reason || "未知错误"}`);
+          cleanup();
+        }
+      });
+
+      const unsubOpen = imConnection.on("open", () => {
+        unsubOpen();
+        imConnection.register(userId, password);
+      });
+
+      if (imConnection.connected) {
+        imConnection.register(userId, password);
+      }
+
+      setTimeout(() => {
+        if (!cleanedUp) {
+          setStatusMsg("连接超时，请检查服务是否运行");
+          cleanup();
+        }
+      }, 5000);
+    },
+    [storeLogin]
+  );
+
+  // 已登录 → 显示聊天界面
   if (state.token && state.userId) {
     return <ChatLayout />;
   }
 
-  return <LoginPage onLogin={handleLogin} />;
+  return (
+    <LoginPage
+      onLogin={handleLogin}
+      onRegister={handleRegister}
+      connecting={connecting}
+      statusMsg={statusMsg}
+    />
+  );
 }
 
 export default function App() {

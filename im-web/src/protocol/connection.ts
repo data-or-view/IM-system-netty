@@ -53,11 +53,25 @@ export class IMConnection {
   }
 
   /** 快速登录 */
-  login(userId: string) {
-    this.send({
+  login(userId: string, password?: string) {
+    const header: IMHeader = {
       _op: String(CMD.LOGIN),
       userId,
-    });
+    };
+    if (password) header.password = password;
+    this.send(header);
+  }
+
+  /** 注册 */
+  register(userId: string, password?: string, nickname?: string, faceUrl?: string) {
+    const header: IMHeader = {
+      _op: String(CMD.REGISTER),
+      userId,
+    };
+    if (password) header.password = password;
+    if (nickname) header.nickname = nickname;
+    if (faceUrl) header.faceUrl = faceUrl;
+    this.send(header);
   }
 
   /** 发送单聊消息 */

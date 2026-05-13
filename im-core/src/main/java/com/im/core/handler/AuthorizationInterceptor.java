@@ -107,6 +107,7 @@ public class AuthorizationInterceptor implements IMInterceptor {
         // PUBLIC：无需登录
         for (CommandType t : Set.of(
                 CommandType.LOGIN,
+                CommandType.REGISTER,
                 CommandType.HEARTBEAT,
                 CommandType.HEARTBEAT_ACK
         )) {

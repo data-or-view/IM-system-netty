@@ -15,6 +15,7 @@ public class UserInformation {
     private String userId;
     private String nickname;
     private String faceUrl;
+    private String password;
     private String ex;
 
     /** 管理员级别: 0=普通, 1=管理员, 2=超管 */
@@ -43,6 +44,9 @@ public class UserInformation {
 
     public String getFaceUrl() { return faceUrl; }
     public void setFaceUrl(String faceUrl) { this.faceUrl = faceUrl; }
+
+    public String getPassword() { return password; }
+    public void setPassword(String password) { this.password = password; }
 
     public String getEx() { return ex; }
     public void setEx(String ex) { this.ex = ex; }

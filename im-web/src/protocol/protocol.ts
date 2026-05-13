@@ -10,7 +10,7 @@
  * body: 二进制 raw bytes
  */
 
-export const MAGIC = 0xcafe;
+export const MAGIC = 0xacac;
 export const VERSION = 1;
 
 export interface IMHeader {
@@ -51,10 +51,11 @@ export interface IMBinaryFrame {
 export function encodeFrame(header: IMHeader, body?: Uint8Array): Uint8Array {
   const headerJson = JSON.stringify(header);
   const headerBytes = new TextEncoder().encode(headerJson);
-  const bodyLen = body?.length ?? 0;
+  const contentLen = body?.length ?? 0;
+  const bodyLen = headerBytes.length + contentLen;
   const hasBody = body != null && body.length > 0;
 
-  const buf = new ArrayBuffer(9 + headerBytes.length + bodyLen);
+  const buf = new ArrayBuffer(10 + bodyLen);
   const dv = new DataView(buf);
 
   // magic
@@ -63,15 +64,15 @@ export function encodeFrame(header: IMHeader, body?: Uint8Array): Uint8Array {
   dv.setUint8(2, VERSION);
   // flags
   dv.setUint8(3, hasBody ? 1 : 0);
-  // body length
+  // body length = header JSON + body content
   dv.setUint32(4, bodyLen);
   // header length
   dv.setUint16(8, headerBytes.length);
   // header JSON
-  new Uint8Array(buf, 9, headerBytes.length).set(headerBytes);
-  // body
+  new Uint8Array(buf, 10, headerBytes.length).set(headerBytes);
+  // body content
   if (body && body.length > 0) {
-    new Uint8Array(buf, 9 + headerBytes.length, body.length).set(body);
+    new Uint8Array(buf, 10 + headerBytes.length, body.length).set(body);
   }
 
   return new Uint8Array(buf);
@@ -89,13 +90,13 @@ export function decodeFrame(buffer: Uint8Array): [IMBinaryFrame, Uint8Array] | n
 
   const bodyLen = dv.getUint32(4);
   const headerLen = dv.getUint16(8);
-  const total = 9 + headerLen + bodyLen;
+  const total = 10 + headerLen + bodyLen;
 
   if (buffer.length < total) return null;
 
-  const headerJson = new TextDecoder().decode(buffer.subarray(9, 9 + headerLen));
+  const headerJson = new TextDecoder().decode(buffer.subarray(10, 10 + headerLen));
   const header: IMHeader = JSON.parse(headerJson);
-  const body = bodyLen > 0 ? buffer.subarray(9 + headerLen, total) : undefined;
+  const body = bodyLen > 0 ? buffer.subarray(10 + headerLen, total) : undefined;
 
   return [{ header, body }, buffer.subarray(total)];
 }
@@ -134,6 +135,8 @@ export const CMD = {
   GROUP_KICK_ACK: 87,
   GROUP_INFO_UPDATE: 88,
   GROUP_INFO_UPDATE_ACK: 89,
+  REGISTER: 14,
+  REGISTER_ACK: 15,
   USER_SEARCH: 92,
   USER_SEARCH_ACK: 93,
 } as const;

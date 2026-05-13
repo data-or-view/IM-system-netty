@@ -10,7 +10,7 @@ import { LogOut } from "lucide-react";
 export default function ChatLayout() {
   const { state, dispatch, logout } = useStore();
 
-  // 监听 WebSocket 消息
+  // 监听业务消息
   useEffect(() => {
     const unsubMessage = imConnection.on("message", (frame) => {
       if (!frame) return;
@@ -18,25 +18,12 @@ export default function ChatLayout() {
       const op = parseInt(header._op || "0");
 
       switch (op) {
-        case CMD.LOGIN_ACK: {
-          if (header.status === "OK" && header.token) {
-            localStorage.setItem("im_token", header.token);
-            dispatch({
-              type: "SET_AUTH",
-              userId: header.userId || localStorage.getItem("im_userId") || "",
-              token: header.token,
-            });
-            // 登录成功后拉取初始数据
-            setTimeout(() => {
-              imConnection.fetchConversations();
-              imConnection.fetchFriendList();
-            }, 200);
-          }
+        case CMD.LOGIN_ACK:
+          // LOGIN_ACK 已在 App.tsx 全局处理
           break;
-        }
 
         case CMD.SINGLE_CHAT: {
-          // 收到新消息（可能是自己的发信回显或别人发来的）
+          // 收到新消息
           const msg = messageFromHeader(header);
           if (msg) {
             dispatch({ type: "APPEND_MESSAGE", conversationId: msg.conversationId, msg });
@@ -45,12 +32,10 @@ export default function ChatLayout() {
         }
 
         case CMD.CONVERSATION_GET_ACK: {
-          // 会话列表返回 —— 简化处理
           break;
         }
 
         case CMD.FRIEND_LIST_ACK: {
-          // 好友列表返回 —— 简化处理
           break;
         }
       }
@@ -58,7 +43,6 @@ export default function ChatLayout() {
 
     const unsubOpen = imConnection.on("open", () => {
       dispatch({ type: "SET_CONNECTED", connected: true });
-      // 如果有缓存的 token 则自动重连后登录
       const cachedToken = localStorage.getItem("im_token");
       const cachedUserId = localStorage.getItem("im_userId");
       if (!cachedToken && cachedUserId) {

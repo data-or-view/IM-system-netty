@@ -140,11 +140,21 @@ public class IMCommand {
         Object opVal = mutable.remove("_op");
         if (opVal instanceof Number n) {
             cmd.type = CommandType.fromCode(n.shortValue());
+        } else if (opVal instanceof String s && !s.isEmpty()) {
+            try {
+                cmd.type = CommandType.fromCode(Short.parseShort(s));
+            } catch (NumberFormatException ignored) {
+            }
         }
 
         Object seqVal = mutable.remove("_seq");
         if (seqVal instanceof Number n) {
             cmd.seqId = n.intValue();
+        } else if (seqVal instanceof String s && !s.isEmpty()) {
+            try {
+                cmd.seqId = Integer.parseInt(s);
+            } catch (NumberFormatException ignored) {
+            }
         }
 
         Object midVal = mutable.remove("_mid");
@@ -155,16 +165,31 @@ public class IMCommand {
         Object tsVal = mutable.remove("_ts");
         if (tsVal instanceof Number n) {
             cmd.timestamp = n.longValue();
+        } else if (tsVal instanceof String s && !s.isEmpty()) {
+            try {
+                cmd.timestamp = Long.parseLong(s);
+            } catch (NumberFormatException ignored) {
+            }
         }
 
         Object verVal = mutable.remove("_ver");
         if (verVal instanceof Number n) {
             cmd.version = n.byteValue();
+        } else if (verVal instanceof String s && !s.isEmpty()) {
+            try {
+                cmd.version = Byte.parseByte(s);
+            } catch (NumberFormatException ignored) {
+            }
         }
 
         Object flgVal = mutable.remove("_flg");
         if (flgVal instanceof Number n) {
             cmd.flags = n.byteValue();
+        } else if (flgVal instanceof String s && !s.isEmpty()) {
+            try {
+                cmd.flags = Byte.parseByte(s);
+            } catch (NumberFormatException ignored) {
+            }
         }
 
         // 剩余字段都是用户自定义 headers

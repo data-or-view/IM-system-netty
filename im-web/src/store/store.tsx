@@ -141,7 +141,8 @@ function reducer(state: State, action: Action): State {
 interface StoreContextType {
   state: State;
   dispatch: React.Dispatch<Action>;
-  login: (userId: string) => void;
+  login: (userId: string, password?: string) => void;
+  register: (userId: string, password?: string) => void;
   logout: () => void;
   sendMessage: (toUserId: string, content: string) => void;
   fetchConversations: () => void;
@@ -155,9 +156,14 @@ const StoreContext = createContext<StoreContextType | null>(null);
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initialState);
 
-  const login = useCallback((userId: string) => {
+  const login = useCallback((userId: string, password?: string) => {
     localStorage.setItem("im_userId", userId);
-    imConnection.login(userId);
+    imConnection.login(userId, password);
+  }, []);
+
+  const register = useCallback((userId: string, password?: string) => {
+    localStorage.setItem("im_userId", userId);
+    imConnection.register(userId, password);
   }, []);
 
   const logout = useCallback(() => {
@@ -184,7 +190,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   return (
     <StoreContext.Provider
-      value={{ state, dispatch, login, logout, sendMessage, fetchConversations, fetchFriends }}
+      value={{ state, dispatch, login, register, logout, sendMessage, fetchConversations, fetchFriends }}
     >
       {children}
     </StoreContext.Provider>

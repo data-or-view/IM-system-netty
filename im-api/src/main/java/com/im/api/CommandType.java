@@ -21,6 +21,10 @@ public enum CommandType {
     LOGIN_ACK(11),
     /** 登出 */
     LOGOUT(12),
+    /** 注册请求 */
+    REGISTER(14),
+    /** 注册响应 */
+    REGISTER_ACK(15),
 
     // ========== 消息 (20-49) ==========
     /** 单聊消息 */

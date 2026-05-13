@@ -247,6 +247,7 @@ public class IMServer implements ILifecycle {
         List<IMessageHandler> handlers = List.of(
                 new HeartbeatHandler(sessionManager, routeTable),
                 new LoginHandler(sessionManager, messageStore, routeTable, nodeId, authenticator, userManager),
+                new RegisterHandler(userManager),
                 ChatHandler.builder(messageQueue, messageStore, sequenceManager)
                         .groupManager(groupManager)
                         .webhookManager(webhookManager)
@@ -342,8 +343,11 @@ public class IMServer implements ILifecycle {
                                     "/ws", null, true, 65536));
                             // 0xACAC 二进制帧解析（从 BinaryWebSocketFrame.content() 读取）
                             p.addLast(new WebSocketIMDecoder());
-                            p.addLast(new IMEncoder());
+                            // 出站：IMCommand → ByteBuf(0xACAC) → BinaryWebSocketFrame
+                            // 注意 ByteBufToWebSocketHandler 必须在 IMEncoder 之前，
+                            // 因为出站从tail→head: IMEncoder→ByteBufToWSHandler→WSProtocolHandler
                             p.addLast(byteBufToWebSocketHandler);
+                            p.addLast(new IMEncoder());
                             // 无 IdleStateHandler —— WebSocket 原生 Ping/Pong 保活
                             p.addLast(connectionEventHandler);
                             p.addLast(routerHandler);

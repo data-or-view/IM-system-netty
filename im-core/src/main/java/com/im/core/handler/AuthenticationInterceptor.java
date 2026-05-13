@@ -28,6 +28,7 @@ public class AuthenticationInterceptor implements IMInterceptor {
     /** 不需要 token 的白名单命令 */
     private static final Set<CommandType> WHITE_LIST = Set.of(
             CommandType.LOGIN,
+            CommandType.REGISTER,
             CommandType.HEARTBEAT,
             CommandType.HEARTBEAT_ACK
     );

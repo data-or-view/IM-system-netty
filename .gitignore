@@ -33,3 +33,8 @@ logs/
 
 # Build
 dependency-reduced-pom.xml
+
+# Node
+node_modules/
+dist/
+*.log
