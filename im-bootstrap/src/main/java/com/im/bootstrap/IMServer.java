@@ -39,6 +39,7 @@ import com.im.core.auth.HmacTokenAuthenticator;
 import com.im.core.cache.ConcurrentHashCache;
 import com.im.core.conversation.DbConversationManager;
 import com.im.core.conversation.LocalConversationManager;
+import com.im.core.discovery.RedisNodeDiscovery;
 import com.im.core.group.DbGroupManager;
 import com.im.core.group.LocalGroupManager;
 import com.im.core.handler.AuthenticationInterceptor;
@@ -176,9 +177,6 @@ public class IMServer implements ILifecycle {
         // ── 本节点标识 ──
         String nodeId = config.getNodeId();
 
-        // ── 集群基础设施（单机模式：本地实现；开启 Redis 配置后自动使用 RedisRouteTable） ──
-        this.nodeDiscovery = new LocalNodeDiscovery();
-
         // 支持 -Dredis.host 系统属性临时启用 Redis（开发测试用）
         String redisProp = System.getProperty("redis.host");
         if (redisProp != null && !redisProp.isEmpty()) {
@@ -211,6 +209,12 @@ public class IMServer implements ILifecycle {
         }
         this.redisConfig = routeTable instanceof RedisRouteTable ? ((RedisRouteTable) routeTable).getRedisConfig() : null;
         this.clusterMessageBus = new LocalClusterMessageBus();
+
+        // ── 集群基础设施 ──
+        this.nodeDiscovery = this.redisConfig != null
+                ? new RedisNodeDiscovery(this.redisConfig)
+                : new LocalNodeDiscovery();
+        log.info("NodeDiscovery: {}", this.redisConfig != null ? "RedisNodeDiscovery" : "LocalNodeDiscovery");
 
         // ── 集群状态存储（Redis 可用时使用 RedisStateStore） ──
         this.stateStore = this.redisConfig != null
