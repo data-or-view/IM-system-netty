@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS im_users (
     ex                   TEXT                   COMMENT '扩展字段（JSON字符串，给开发者自定义）',
     app_manger_level     TINYINT      NOT NULL DEFAULT 0  COMMENT '管理员级别: 0=普通, 1=管理员, 2=超管',
     global_recv_msg_opt  TINYINT      NOT NULL DEFAULT 0  COMMENT '全局消息接收: 0=正常, 1=免打扰, 2=不接收',
+    status               TINYINT      NOT NULL DEFAULT 1  COMMENT '状态: 0=禁用, 1=正常',
     created_at           BIGINT       NOT NULL DEFAULT 0  COMMENT '创建时间(毫秒)',
     updated_at           BIGINT       NOT NULL DEFAULT 0  COMMENT '更新时间(毫秒)',
     INDEX idx_created_at (created_at)
@@ -39,6 +40,7 @@ CREATE TABLE IF NOT EXISTS im_friends (
     operator_user_id  VARCHAR(64)  NOT NULL DEFAULT '' COMMENT '操作人ID',
     ex                TEXT         COMMENT '扩展字段',
     is_pinned         TINYINT      NOT NULL DEFAULT 0  COMMENT '是否在好友列表置顶: 0=否, 1=是',
+    status            TINYINT      NOT NULL DEFAULT 1  COMMENT '状态: 0=删除, 1=正常',
     created_at        BIGINT       NOT NULL DEFAULT 0  COMMENT '成为好友时间',
     UNIQUE KEY uk_owner_friend (owner_user_id, friend_user_id),
     INDEX idx_friend_user (friend_user_id)
@@ -171,6 +173,7 @@ CREATE TABLE IF NOT EXISTS im_conversations (
     ex                  TEXT         COMMENT '扩展字段',
     max_seq             BIGINT       NOT NULL DEFAULT 0  COMMENT '该会话已接收最大序号',
     min_seq             BIGINT       NOT NULL DEFAULT 0  COMMENT '该会话最小可用序号',
+    unread_count        INT          NOT NULL DEFAULT 0  COMMENT '未读数',
     is_msg_destruct     TINYINT      NOT NULL DEFAULT 0  COMMENT '是否开启消息自毁: 0=否, 1=是',
     msg_destruct_time   INT          NOT NULL DEFAULT 0  COMMENT '自毁时间(秒)',
     created_at          BIGINT       NOT NULL DEFAULT 0  COMMENT '创建时间',
