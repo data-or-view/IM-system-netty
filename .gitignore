@@ -28,6 +28,9 @@ Thumbs.db
 *.log
 logs/
 
+# Backup
+*.bak
+
 # Temp
 /temp/
 

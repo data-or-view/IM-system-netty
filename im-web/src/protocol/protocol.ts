@@ -20,6 +20,7 @@ export interface IMHeader {
   _ts?: string;
   _ver?: string;
   _flg?: string;
+  _traceId?: string;
   status?: string;
   token?: string;
   reason?: string;
@@ -135,10 +136,14 @@ export const CMD = {
   GROUP_KICK_ACK: 87,
   GROUP_INFO_UPDATE: 88,
   GROUP_INFO_UPDATE_ACK: 89,
+  GROUP_SEARCH: 94,
+  GROUP_SEARCH_ACK: 95,
   REGISTER: 14,
   REGISTER_ACK: 15,
   USER_SEARCH: 92,
   USER_SEARCH_ACK: 93,
+  FILE_UPLOAD: 100,
+  FILE_UPLOAD_ACK: 101,
 } as const;
 
 export type CmdValue = (typeof CMD)[keyof typeof CMD];

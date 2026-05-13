@@ -43,15 +43,19 @@ public class AuthenticationInterceptor implements IMInterceptor {
 
     @Override
     public boolean preHandle(ChannelHandlerContext ctx, IMCommand msg) {
+        String traceId = msg.getHeader("_traceId");
+
         // 白名单直接放行
         if (WHITE_LIST.contains(msg.getType())) {
+            log.debug("[{}] WHITELIST: type={}", traceId != null ? traceId : "-", msg.getType());
             return true;
         }
 
         // 取 token（去掉可选的 "Bearer " 前缀）
         String token = msg.getHeader(TOKEN_HEADER);
         if (token == null || token.isBlank()) {
-            log.warn("Request without token: type={}, seqId={}", msg.getType(), msg.getSeqId());
+            log.warn("[{}] Request without token: type={}, seqId={}",
+                    traceId != null ? traceId : "-", msg.getType(), msg.getSeqId());
             return false;
         }
         if (token.startsWith("Bearer ")) {
@@ -61,12 +65,11 @@ public class AuthenticationInterceptor implements IMInterceptor {
         // 验证
         try {
             String userId = authenticator.authenticate(token);
-            // 写入 fromUserId（后续 handler 可直接用）
-            msg.putHeader("fromUserId", userId);
             msg.putHeader("_uid", userId);
+            log.debug("[{}] AUTH OK: userId={}, type={}", traceId != null ? traceId : "-", userId, msg.getType());
             return true;
         } catch (Exception e) {
-            log.warn("Token validation failed: {}", e.getMessage());
+            log.warn("[{}] Token validation failed: {}", traceId != null ? traceId : "-", e.getMessage());
             return false;
         }
     }

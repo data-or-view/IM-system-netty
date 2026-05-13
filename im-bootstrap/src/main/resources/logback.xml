@@ -9,6 +9,8 @@
         <appender-ref ref="STDOUT"/>
     </root>
 
-    <!-- Netty 连接日志调试（需要时取消注释） -->
-    <!-- <logger name="io.netty.handler.logging.LoggingHandler" level="DEBUG"/> -->
+    <!-- 关闭 Netty 连接日志（太吵） -->
+    <logger name="io.netty.handler.logging.LoggingHandler" level="WARN"/>
+    <logger name="io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler" level="WARN"/>
+    <logger name="io.netty.handler.codec.http.HttpObjectAggregator" level="WARN"/>
 </configuration>

@@ -34,16 +34,28 @@ public class WebSocketIMDecoder extends MessageToMessageDecoder<WebSocketFrame> 
         }
 
         ByteBuf content = frame.content();
-        if (content.readableBytes() < IMDecoder.FIXED_HEADER_LENGTH) {
-            log.warn("WebSocket frame too short: {} bytes", content.readableBytes());
+        int readable = content.readableBytes();
+        log.debug("WS frame received: {} bytes", readable);
+
+        if (readable < IMDecoder.FIXED_HEADER_LENGTH) {
+            log.warn("WebSocket frame too short: {} bytes", readable);
             ctx.close();
             return;
         }
 
+        // 打印前几个字节用于调试
+        int markIdx = content.readerIndex();
+        short magic = content.readShort();
+        content.readerIndex(markIdx);
+        log.debug("WS frame magic=0x{}", Integer.toHexString(magic & 0xFFFF));
+
         try {
             IMCommand cmd = IMDecoder.decodeFrame(content);
             if (cmd != null) {
+                log.debug("WS frame decoded: type={}, seqId={}", cmd.getType(), cmd.getSeqId());
                 out.add(cmd);
+            } else {
+                log.warn("WS frame decode returned null (incomplete frame)");
             }
         } catch (CorruptedFrameException e) {
             log.warn("Invalid binary frame, closing ws: {}", e.getMessage());

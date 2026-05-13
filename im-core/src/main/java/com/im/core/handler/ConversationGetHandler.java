@@ -34,7 +34,7 @@ public class ConversationGetHandler implements IMessageHandler {
 
     @Override
     public void handle(ChannelHandlerContext ctx, IMCommand msg) {
-        String userId = msg.getHeader("fromUserId");
+        String userId = msg.getHeader("_uid");
         if (userId == null || userId.isBlank()) {
             sendError(ctx, msg, "fromUserId is required");
             return;

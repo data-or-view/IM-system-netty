@@ -32,6 +32,7 @@
         <mybatis-plus.version>3.5.9</mybatis-plus.version>
         <hikaricp.version>6.2.1</hikaricp.version>
         <mysql.version>8.4.0</mysql.version>
+        <minio.version>8.5.17</minio.version>
     </properties>
 
     <dependencyManagement>
@@ -149,6 +150,13 @@
                 <groupId>io.lettuce</groupId>
                 <artifactId>lettuce-core</artifactId>
                 <version>${lettuce.version}</version>
+            </dependency>
+
+            <!-- MinIO Object Storage -->
+            <dependency>
+                <groupId>io.minio</groupId>
+                <artifactId>minio</artifactId>
+                <version>${minio.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

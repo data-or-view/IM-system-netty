@@ -93,7 +93,16 @@ public class ChatHandler implements IMessageHandler {
 
     @Override
     public void handle(ChannelHandlerContext ctx, IMCommand msg) {
-        // 1. 解析消息内容
+        // 1. 验证发送者身份（防止伪造 fromUserId）
+        String fromUserId = msg.getHeader("fromUserId");
+        String uid = msg.getHeader("_uid");
+        if (fromUserId == null || !fromUserId.equals(uid)) {
+            log.warn("Spoofing attempt: fromUserId={}, _uid={}", fromUserId, uid);
+            sendError(ctx, msg, "fromUserId mismatch");
+            return;
+        }
+
+        // 2. 解析消息内容
         IMessageContent content = null;
         String ctRaw = msg.getHeader(CONTENT_TYPE_HEADER);
         if (ctRaw != null) {

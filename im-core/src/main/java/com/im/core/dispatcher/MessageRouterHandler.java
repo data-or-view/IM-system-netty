@@ -128,8 +128,9 @@ public class MessageRouterHandler extends SimpleChannelInboundHandler<IMCommand>
                 IMInterceptor interceptor = interceptors.get(idx);
                 try {
                     if (!interceptor.preHandle(ctx, msg)) {
-                        log.debug("Interceptor '{}' blocked request type={}, seqId={}",
-                                interceptor.name(), msg.getType(), msg.getSeqId());
+                        String tid = msg.getHeader("_traceId");
+                        log.debug("[{}] Interceptor '{}' blocked request type={}, seqId={}",
+                                tid != null ? tid : "-", interceptor.name(), msg.getType(), msg.getSeqId());
                         // 阻断：已通过的拦截器反序回调
                         for (int i = idx - 1; i >= 0; i--) {
                             afterCompleteSafe(interceptors.get(i), ctx, msg, null);

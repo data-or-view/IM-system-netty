@@ -70,9 +70,15 @@ public class LocalFriendManager implements IFriendManager {
     @Override
     public void respondFriendApply(String userId, String fromUserId, String handleMsg, boolean agreed) {
         ConcurrentMap<String, FriendApply> fromApplies = applies.get(fromUserId);
-        if (fromApplies == null) return;
+        if (fromApplies == null) {
+            log.warn("respondFriendApply: no applies from {}", fromUserId);
+            return;
+        }
         FriendApply apply = fromApplies.get(userId);
-        if (apply == null) return;
+        if (apply == null) {
+            log.warn("respondFriendApply: no apply from {} to {} (applies keys: {})", fromUserId, userId, fromApplies.keySet());
+            return;
+        }
         apply.setHandleResult(agreed ? 1 : 2);
         apply.setHandlerUserId(userId);
         apply.setHandleMsg(handleMsg);
@@ -81,6 +87,7 @@ public class LocalFriendManager implements IFriendManager {
             addFriend(userId, fromUserId);
             addFriend(fromUserId, userId);
             invalidateFriendCache(userId, fromUserId);
+            log.info("Friend added: {} <-> {}", userId, fromUserId);
         }
     }
 

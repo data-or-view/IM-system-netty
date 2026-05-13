@@ -14,44 +14,10 @@ function getWsHost(): string {
 }
 
 function AppContent() {
-  const { state, dispatch, login: storeLogin } = useStore();
+  const { state, login: storeLogin } = useStore();
   const [connecting, setConnecting] = useState(false);
   const [statusMsg, setStatusMsg] = useState("");
   const connectingRef = useRef(false);
-
-  // ====== 全局消息监听（处理 LOGIN_ACK 更新状态） ======
-  // 只在组件挂载时注册一次
-  const [listenerReady] = useState(() => {
-    imConnection.on("message", (frame) => {
-      if (!frame) return;
-      const header = frame.header;
-      const op = parseInt(header._op || "0");
-
-      if (op === CMD.LOGIN_ACK && header.status === "OK" && header.token) {
-        localStorage.setItem("im_token", header.token);
-        dispatch({
-          type: "SET_AUTH",
-          userId: header.userId || localStorage.getItem("im_userId") || "",
-          token: header.token,
-        });
-        // 登录成功后拉取数据
-        setTimeout(() => {
-          imConnection.fetchConversations();
-          imConnection.fetchFriendList();
-        }, 200);
-      }
-    });
-
-    // 连接状态
-    imConnection.on("open", () => {
-      dispatch({ type: "SET_CONNECTED", connected: true });
-    });
-    imConnection.on("close", () => {
-      dispatch({ type: "SET_CONNECTED", connected: false });
-    });
-
-    return true;
-  });
 
   /** 登录 */
   const handleLogin = useCallback(
@@ -105,7 +71,6 @@ function AppContent() {
         setConnecting(false);
       };
 
-      // 监听 REGISTER_ACK
       const unsubMsg = imConnection.on("message", (frame) => {
         if (!frame) return;
         const op = parseInt(frame.header._op || "0");
@@ -142,7 +107,6 @@ function AppContent() {
     [storeLogin]
   );
 
-  // 已登录 → 显示聊天界面
   if (state.token && state.userId) {
     return <ChatLayout />;
   }

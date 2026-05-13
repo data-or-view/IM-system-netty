@@ -30,11 +30,11 @@ public class ConversationSetHandler implements IMessageHandler {
 
     @Override
     public void handle(ChannelHandlerContext ctx, IMCommand msg) {
-        String userId = msg.getHeader("fromUserId");
+        String userId = msg.getHeader("_uid");
         String conversationId = msg.getHeader("conversationId");
 
         if (userId == null || conversationId == null) {
-            sendError(ctx, msg, "fromUserId and conversationId are required");
+            sendError(ctx, msg, "_uid and conversationId are required");
             return;
         }
 

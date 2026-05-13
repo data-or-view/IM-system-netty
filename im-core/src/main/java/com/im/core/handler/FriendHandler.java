@@ -89,6 +89,8 @@ public class FriendHandler implements IMessageHandler {
         String fromUserId = msg.getHeader("fromUserId");
         String handleMsg = msg.getHeader("handleMsg");
         String agreedStr = msg.getHeader("agreed");
+        log.info("FRIEND_APPROVE DEBUG: userId={}, fromUserId={}, agreedStr={}, allHeaders={}",
+                userId, fromUserId, agreedStr, msg.getHeaders());
         if (fromUserId == null || fromUserId.isEmpty()) {
             throw new ImException(ImErrorCode.BAD_REQUEST, "missing fromUserId");
         }

@@ -8,6 +8,7 @@
  */
 
 import { type IMHeader, type IMBinaryFrame, encodeFrame, decodeFrame, CMD } from "./protocol";
+import { nextTraceId, logDebug, logInfo, logWarn, logError } from "@/utils/logger";
 
 export type WsEventType = "open" | "close" | "error" | "message";
 export type WsEventListener = (frame: IMBinaryFrame | null) => void;
@@ -43,12 +44,22 @@ export class IMConnection {
     this.connected = false;
   }
 
-  /** 发送 JSON header 帧 */
+  /** 发送 JSON header 帧（自动附加 Authorization token） */
   send(header: IMHeader, body?: Uint8Array) {
     if (this.ws?.readyState === WebSocket.OPEN) {
+      const traceId = nextTraceId();
       header._seq = String(++this.seqCounter);
       header._ts = String(Date.now());
+      header._traceId = traceId;
+      // 自动附加 Authorization 头
+      const token = localStorage.getItem("im_token");
+      if (token) {
+        header.Authorization = `Bearer ${token}`;
+      }
+      logDebug(traceId, 'ws.send', { op: header._op, seq: header._seq });
       this.ws.send(encodeFrame(header, body));
+    } else {
+      logWarn('noid', 'ws.send.fail', { reason: 'not connected' });
     }
   }
 
@@ -93,12 +104,78 @@ export class IMConnection {
     });
   }
 
-  /** 获取好友列表 */
+  /** 拉取好友列表 */
   fetchFriendList() {
     this.send({
       _op: String(CMD.FRIEND_LIST),
       userId: this.getUserId(),
     });
+  }
+
+  /** 搜索用户 */
+  searchUser(keyword: string, limit = 20) {
+    this.send({ _op: String(CMD.USER_SEARCH), keyword, limit: String(limit), userId: this.getUserId() });
+  }
+
+  /** 搜索群组 */
+  searchGroup(keyword: string, limit = 20) {
+    this.send({ _op: String(CMD.GROUP_SEARCH), keyword, limit: String(limit), userId: this.getUserId() });
+  }
+
+  /** 申请加好友 */
+  applyFriend(targetUserId: string, reqMsg?: string) {
+    this.send({ _op: String(CMD.FRIEND_APPLY), userId: this.getUserId(), toUserId: targetUserId, ...(reqMsg ? { reqMsg } : {}) });
+  }
+
+  /** 上传文件（小文件，通过 WebSocket 以二进制帧发送） */
+  uploadFile(file: File, onProgress?: (pct: number) => void): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const arrayBuffer = reader.result as ArrayBuffer;
+        const body = new Uint8Array(arrayBuffer);
+
+        // 用 onmessage 一次性监听 FILE_UPLOAD_ACK
+        const handler = (frame: IMBinaryFrame | null) => {
+          if (!frame) return;
+          const op = parseInt(frame.header._op || "0");
+          if (op === CMD.FILE_UPLOAD_ACK && frame.header.status === "OK") {
+            resolve(frame.header.fileUrl);
+          } else if (op === CMD.ERROR) {
+            reject(new Error(`Upload failed: ${frame.header.reason || frame.header.detail}`));
+          }
+        };
+        this.once(handler);
+
+        this.send(
+          { _op: String(CMD.FILE_UPLOAD), fileName: file.name, mimeType: file.type || "application/octet-stream" },
+          body
+        );
+        if (onProgress) onProgress(100);
+      };
+      reader.onerror = () => reject(new Error("File read failed"));
+      reader.readAsArrayBuffer(file);
+    });
+  }
+
+  /** 同意好友申请 */
+  approveFriend(fromUserId: string, agreed = true) {
+    this.send({ _op: String(CMD.FRIEND_APPROVE), userId: this.getUserId(), fromUserId, agreed: String(agreed) });
+  }
+
+  /** 删除好友 */
+  removeFriend(targetUserId: string) {
+    this.send({ _op: String(CMD.FRIEND_REMOVE), userId: this.getUserId(), friendUserId: targetUserId });
+  }
+
+  /** 加入群组 */
+  joinGroup(groupId: string, reqMsg?: string) {
+    this.send({ _op: String(CMD.GROUP_JOIN), userId: this.getUserId(), groupId, ...(reqMsg ? { reqMsg } : {}) });
+  }
+
+  /** 退出群组 */
+  quitGroup(groupId: string) {
+    this.send({ _op: String(CMD.GROUP_QUIT), userId: this.getUserId(), groupId });
   }
 
   on(event: WsEventType, cb: WsEventListener) {
@@ -107,6 +184,15 @@ export class IMConnection {
     }
     this.listeners.get(event)!.add(cb);
     return () => this.listeners.get(event)?.delete(cb);
+  }
+
+  /** 一次性监听（自动取消注册） */
+  once(event: WsEventType, cb: WsEventListener) {
+    const wrapper: WsEventListener = (frame) => {
+      cb(frame);
+      this.off(event, wrapper);
+    };
+    this.on(event, wrapper);
   }
 
   off(event: WsEventType, cb: WsEventListener) {
@@ -145,21 +231,22 @@ export class IMConnection {
     };
 
     this.ws.onmessage = (event) => {
-      const raw = new Uint8Array(event.data);
-      this.buffer = concatBytes(this.buffer, raw);
-
-      while (this.buffer.length > 0) {
-        try {
-          const result = decodeFrame(this.buffer);
-          if (!result) break;
-          const [frame, rest] = result;
-          this.buffer = rest;
-          this.emit("message", frame);
-        } catch {
-          // 解析失败，清空 buffer 避免死循环
-          this.buffer = new Uint8Array(0);
-        }
+      // 记录 data 类型以便调试
+      const dataType = typeof event.data;
+      const ctorName = event.data?.constructor?.name ?? 'null';
+      if (dataType === 'string' || (dataType === 'object' && ctorName !== 'ArrayBuffer' && ctorName !== 'Uint8Array')) {
+        logWarn('noid', 'ws.unknownframe', { type: dataType, ctor: ctorName, len: event.data?.length ?? event.data?.size ?? '?' });
+        return;
       }
+      const raw = new Uint8Array(event.data);
+      // 如果前 2 字节不是 0xACAC，打印前 40 字节的 hex 用于调试
+      if (raw.length < 2 || raw[0] !== 0xAC || raw[1] !== 0xAC) {
+        const hexPrefix = Array.from(raw.slice(0, 40)).map(b => b.toString(16).padStart(2, '0')).join(' ');
+        const asText = raw.length > 0 ? new TextDecoder().decode(raw.slice(0, 40)) : '';
+        logWarn('noid', 'ws.badframe', { len: raw.length, hex: hexPrefix, asText: asText.replace(/[\x00-\x1f\x7f-\x9f]/g, '?') });
+        return;
+      }
+      this.buffer = concatBytes(this.buffer, raw);
     };
   }
 

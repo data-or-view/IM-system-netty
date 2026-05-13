@@ -50,6 +50,8 @@ import com.im.core.friend.DbFriendManager;
 import com.im.core.friend.LocalFriendManager;
 import com.im.core.user.DbUserManager;
 import com.im.core.user.LocalUserManager;
+import com.im.core.file.MinioFileStorageService;
+import com.im.core.handler.FileUploadHandler;
 import com.im.core.delivery.DeliveryConsumer;
 import com.im.core.delivery.LocalClusterMessageBus;
 import com.im.core.delivery.PersistenceConsumer;
@@ -149,6 +151,7 @@ public class IMServer implements ILifecycle {
 
     // Webhook
     private final IWebhookManager webhookManager;
+    private final IFileStorageService fileStorage;
 
     private EventLoopGroup bossGroup;
     private EventLoopGroup workerGroup;
@@ -229,6 +232,11 @@ public class IMServer implements ILifecycle {
         // ── Webhook ──
         this.webhookManager = new LocalWebhookManager(config.getWebhookUrl());
 
+        // ── 文件存储 ──
+        this.fileStorage = new MinioFileStorageService();
+        log.info("FileStorage: MinIO (bucket=im-system, endpoint={})",
+                System.getenv().getOrDefault("MINIO_ENDPOINT", "http://127.0.0.1:9000"));
+
         // ── 消息基础设施 ──
         this.messageStore = new LocalMessageStore();
         this.messageQueue = new MemoryMessageQueue();
@@ -256,8 +264,10 @@ public class IMServer implements ILifecycle {
                 new ConversationGetHandler(conversationManager),
                 new ConversationSetHandler(conversationManager),
                 new GroupHandler(groupManager),
+                new GroupSearchHandler(groupManager),
                 new FriendHandler(friendManager),
-                new UserSearchHandler(userManager)
+                new UserSearchHandler(userManager),
+                new FileUploadHandler(fileStorage)
         );
 
         this.routerHandler = new MessageRouterHandler(handlers, config.getBusinessThreads());

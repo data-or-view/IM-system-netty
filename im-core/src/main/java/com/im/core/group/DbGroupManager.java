@@ -475,4 +475,21 @@ public class DbGroupManager implements IGroupManager {
         ga.setHandledTime(entity.getHandledTime());
         return ga;
     }
+
+    @Override
+    public List<GroupInformation> searchGroups(String keyword, int limit) {
+        try (SqlSession session = MyBatisPlusFactory.openSession()) {
+            GroupMapper mapper = session.getMapper(GroupMapper.class);
+            var qw = new LambdaQueryWrapper<GroupEntity>()
+                    .like(GroupEntity::getGroupName, keyword)
+                    .eq(GroupEntity::getStatus, 0)
+                    .orderByDesc(GroupEntity::getCreatedAt)
+                    .last("LIMIT " + limit);
+            List<GroupEntity> entities = mapper.selectList(qw);
+            return entities.stream().map(this::toGroupInfo).collect(Collectors.toList());
+        } catch (Exception e) {
+            log.warn("searchGroups error: {}", e.getMessage());
+            return List.of();
+        }
+    }
 }

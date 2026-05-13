@@ -368,4 +368,14 @@ public class LocalGroupManager implements IGroupManager {
     private void addUserGroupIndex(String userId, String groupId) {
         userGroups.computeIfAbsent(userId, k -> new CopyOnWriteArraySet<>()).add(groupId);
     }
+
+    @Override
+    public List<GroupInformation> searchGroups(String keyword, int limit) {
+        return groupInfos.values().stream()
+                .filter(info -> info.getGroupName() != null
+                        && info.getGroupName().toLowerCase().contains(keyword.toLowerCase()))
+                .sorted((a, b) -> Long.compare(b.getCreateTime(), a.getCreateTime()))
+                .limit(limit)
+                .collect(Collectors.toList());
+    }
 }

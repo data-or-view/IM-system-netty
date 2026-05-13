@@ -157,4 +157,10 @@ public interface IGroupManager {
      * 获取群信息。
      */
     GroupInformation getGroupInformation(String groupId);
+
+    /**
+     * 搜索群组（按群名关键词）。
+     * @return 匹配的群组列表，按创建时间倒序
+     */
+    List<GroupInformation> searchGroups(String keyword, int limit);
 }

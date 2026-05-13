@@ -1,75 +1,158 @@
-import { useStore, type Conversation } from "@/store/store";
+import { useState } from "react";
+import { useStore, type Conversation, type FriendInfo, type GroupInfo } from "@/store/store";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
+import {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+  TooltipProvider,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { MessageCircle, Users, Search } from "lucide-react";
-import { useState } from "react";
+import {
+  MessageCircle,
+  Users,
+  UserPlus,
+  Search,
+  MoreHorizontal,
+  UserMinus,
+  LogOut,
+} from "lucide-react";
+import UserSearchDialog from "./sidebar/UserSearchDialog";
+import GroupSearchDialog from "./sidebar/GroupSearchDialog";
+import { toast } from "sonner";
+
+type Tab = "chats" | "contacts" | "groups";
 
 export default function Sidebar() {
-  const { state, dispatch, fetchConversations } = useStore();
-  const [tab, setTab] = useState<"chats" | "friends">("chats");
+  const { state } = useStore();
+  const [tab, setTab] = useState<Tab>("chats");
+  const [searchUserOpen, setSearchUserOpen] = useState(false);
+  const [searchGroupOpen, setSearchGroupOpen] = useState(false);
 
   return (
-    <div className="flex h-full w-72 flex-col border-r bg-card">
-      {/* Header */}
-      <div className="flex items-center justify-between border-b px-4 py-3">
-        <h2 className="font-semibold">{state.userId}</h2>
-        <div className="flex gap-1">
-          <button
-            onClick={() => setTab("chats")}
-            className={cn(
-              "rounded-md p-1.5 transition-colors",
-              tab === "chats" ? "bg-accent text-accent-foreground" : "hover:bg-accent/50"
-            )}
-          >
-            <MessageCircle className="h-4 w-4" />
-          </button>
-          <button
-            onClick={() => setTab("friends")}
-            className={cn(
-              "rounded-md p-1.5 transition-colors",
-              tab === "friends" ? "bg-accent text-accent-foreground" : "hover:bg-accent/50"
-            )}
-          >
-            <Users className="h-4 w-4" />
-          </button>
+    <TooltipProvider>
+      <div className="flex h-full w-72 flex-col border-r bg-card">
+        {/* Header with tabs */}
+        <div className="flex items-center justify-between border-b px-3 py-2.5">
+          <span className="truncate text-sm font-semibold">{state.userId}</span>
+          <div className="flex gap-0.5">
+            <TabButton active={tab === "chats"} onClick={() => setTab("chats")} tip="聊天">
+              <MessageCircle className="h-4 w-4" />
+            </TabButton>
+            <TabButton active={tab === "contacts"} onClick={() => setTab("contacts")} tip="通讯录">
+              <Users className="h-4 w-4" />
+            </TabButton>
+          </div>
         </div>
-      </div>
 
-      {/* Tab Content */}
-      {tab === "chats" ? <ChatList /> : <FriendList />}
-    </div>
+        {/* Tab content */}
+        {tab === "chats" && (
+          <ChatList
+            onSearchUser={() => setSearchUserOpen(true)}
+            onSearchGroup={() => setSearchGroupOpen(true)}
+          />
+        )}
+        {tab === "contacts" && <ContactList onSearchUser={() => setSearchUserOpen(true)} />}
+        {tab === "groups" && <GroupList onSearchGroup={() => setSearchGroupOpen(true)} />}
+
+        {/* Dialogs */}
+        <UserSearchDialog open={searchUserOpen} onOpenChange={setSearchUserOpen} />
+        <GroupSearchDialog open={searchGroupOpen} onOpenChange={setSearchGroupOpen} />
+      </div>
+    </TooltipProvider>
   );
 }
 
-function ChatList() {
-  const { state, fetchConversations } = useStore();
-  const { conversations, activeConversationId, connected } = state;
+// ====== Tab button ======
+
+function TabButton({
+  active,
+  onClick,
+  tip,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  tip: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          onClick={onClick}
+          className={cn(
+            "rounded-md p-1.5 transition-colors",
+            active
+              ? "bg-accent text-accent-foreground"
+              : "text-muted-foreground hover:bg-accent/50"
+          )}
+        >
+          {children}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">{tip}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+// ====== Chat List ======
+
+function ChatList({
+  onSearchUser,
+  onSearchGroup,
+}: {
+  onSearchUser: () => void;
+  onSearchGroup: () => void;
+}) {
+  const { state } = useStore();
 
   return (
     <div className="flex flex-1 flex-col">
-      <div className="border-b px-4 py-2">
-        <button
-          onClick={fetchConversations}
-          className="w-full rounded-md bg-secondary px-3 py-1.5 text-left text-sm text-muted-foreground hover:bg-secondary/80"
-        >
-          <Search className="mr-2 inline h-3.5 w-3.5" />
-          搜索或开始新聊天
-        </button>
+      {/* Quick actions */}
+      <div className="flex gap-1 border-b px-3 py-2">
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={onSearchUser}
+                className="flex-1 rounded-md bg-secondary px-2 py-1.5 text-left text-xs text-muted-foreground hover:bg-secondary/80"
+              >
+                <UserPlus className="mr-1 inline h-3 w-3" /> 加好友
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>搜索并添加好友</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={onSearchGroup}
+                className="flex-1 rounded-md bg-secondary px-2 py-1.5 text-left text-xs text-muted-foreground hover:bg-secondary/80"
+              >
+                <Users className="mr-1 inline h-3 w-3" /> 加群
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>搜索并加入群组</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
       </div>
 
-      {!connected && (
+      {!state.connected && (
         <div className="px-4 py-2 text-center text-xs text-muted-foreground">未连接</div>
       )}
 
       <ScrollArea className="flex-1">
-        {conversations.length === 0 && connected && (
-          <div className="p-4 text-center text-sm text-muted-foreground">
-            暂无会话
-          </div>
+        {state.conversations.length === 0 && state.connected && (
+          <div className="p-4 text-center text-sm text-muted-foreground">暂无会话</div>
         )}
-
-        {conversations.map((conv) => (
+        {state.conversations.map((conv) => (
           <ConversationItem key={conv.conversationId} conv={conv} />
         ))}
       </ScrollArea>
@@ -78,14 +161,14 @@ function ChatList() {
 }
 
 function ConversationItem({ conv }: { conv: Conversation }) {
-  const { state } = useStore();
+  const { state, dispatch } = useStore();
   const isActive = state.activeConversationId === conv.conversationId;
 
   return (
     <button
-      onClick={() => {
-        // Change active conversation
-      }}
+      onClick={() =>
+        dispatch({ type: "SET_ACTIVE_CONVERSATION", conversationId: conv.conversationId })
+      }
       className={cn(
         "flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-accent/50",
         isActive && "bg-accent"
@@ -93,11 +176,8 @@ function ConversationItem({ conv }: { conv: Conversation }) {
     >
       <Avatar className="h-10 w-10">
         <AvatarImage src={conv.faceUrl} />
-        <AvatarFallback>
-          {conv.showName.charAt(0).toUpperCase()}
-        </AvatarFallback>
+        <AvatarFallback>{conv.showName.charAt(0).toUpperCase()}</AvatarFallback>
       </Avatar>
-
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between">
           <span className="truncate text-sm font-medium">{conv.showName}</span>
@@ -109,7 +189,7 @@ function ConversationItem({ conv }: { conv: Conversation }) {
         </div>
         <div className="flex items-center justify-between">
           <span className="truncate text-xs text-muted-foreground">
-            {conv.latestMsg || ""}
+            {conv.latestMsg || conv.conversationType === 2 ? `[群聊] ${conv.groupName || ""}` : ""}
           </span>
           {conv.unreadCount > 0 && (
             <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary text-[10px] text-primary-foreground">
@@ -122,57 +202,155 @@ function ConversationItem({ conv }: { conv: Conversation }) {
   );
 }
 
-function FriendList() {
-  const { state, fetchFriends } = useStore();
+// ====== Contact List ======
+
+function ContactList({ onSearchUser }: { onSearchUser: () => void }) {
+  const { state, removeFriend } = useStore();
+  const friends = state.friends;
 
   return (
-    <ScrollArea className="flex-1">
-      <div className="border-b px-4 py-2">
+    <div className="flex flex-1 flex-col">
+      <div className="flex items-center gap-1 border-b px-3 py-2">
         <button
-          onClick={fetchFriends}
-          className="w-full rounded-md bg-secondary px-3 py-1.5 text-left text-sm text-muted-foreground hover:bg-secondary/80"
+          onClick={onSearchUser}
+          className="flex-1 rounded-md bg-secondary px-2 py-1.5 text-left text-xs text-muted-foreground hover:bg-secondary/80"
         >
-          刷新好友列表
+          <UserPlus className="mr-1 inline h-3 w-3" /> 添加好友
         </button>
       </div>
 
-      {state.friends.length === 0 && (
-        <div className="p-4 text-center text-sm text-muted-foreground">
-          暂无好友
-        </div>
-      )}
+      <ScrollArea className="flex-1">
+        {friends.length === 0 && (
+          <div className="p-4 text-center text-sm text-muted-foreground">暂无好友</div>
+        )}
 
-      {state.friends.map((friend) => (
-        <div
-          key={friend.friendUserId}
-          className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-accent/50"
-        >
-          <Avatar className="h-10 w-10">
-            <AvatarImage src={friend.faceUrl} />
-            <AvatarFallback>
-              {(friend.remark || friend.nickname || friend.friendUserId).charAt(0).toUpperCase()}
-            </AvatarFallback>
-          </Avatar>
-          <div className="min-w-0 flex-1">
-            <span className="text-sm font-medium">
-              {friend.remark || friend.nickname || friend.friendUserId}
-            </span>
+        {friends.map((friend) => (
+          <div
+            key={friend.friendUserId}
+            className="group flex items-center justify-between px-4 py-2.5 transition-colors hover:bg-accent/50"
+          >
+            <div className="flex items-center gap-3">
+              <Avatar className="h-9 w-9">
+                <AvatarImage src={friend.faceUrl} />
+                <AvatarFallback>
+                  {(friend.remark || friend.nickname || friend.friendUserId).charAt(0).toUpperCase()}
+                </AvatarFallback>
+              </Avatar>
+              <div>
+                <div className="text-sm font-medium">
+                  {friend.remark || friend.nickname || friend.friendUserId}
+                </div>
+                <div className="text-xs text-muted-foreground">ID: {friend.friendUserId}</div>
+              </div>
+            </div>
+
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className="invisible rounded-md p-1 text-muted-foreground opacity-0 transition-all hover:bg-accent group-hover:visible group-hover:opacity-100">
+                  <MoreHorizontal className="h-4 w-4" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem
+                  className="text-destructive"
+                  onClick={() => {
+                    removeFriend(friend.friendUserId);
+                    toast("已删除好友");
+                  }}
+                >
+                  <UserMinus className="mr-2 h-4 w-4" />
+                  删除好友
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
-        </div>
-      ))}
-    </ScrollArea>
+        ))}
+      </ScrollArea>
+    </div>
   );
 }
+
+// ====== Group List ======
+
+function GroupList({ onSearchGroup }: { onSearchGroup: () => void }) {
+  const { state, quitGroup } = useStore();
+  // 从 conversations 提取群组列表
+  const groups: GroupInfo[] = state.conversations
+    .filter((c) => c.conversationType === 2)
+    .map((c) => ({
+      groupId: c.groupId || c.conversationId,
+      groupName: c.showName,
+      faceUrl: c.faceUrl,
+    }));
+
+  return (
+    <div className="flex flex-1 flex-col">
+      <div className="flex items-center gap-1 border-b px-3 py-2">
+        <button
+          onClick={onSearchGroup}
+          className="flex-1 rounded-md bg-secondary px-2 py-1.5 text-left text-xs text-muted-foreground hover:bg-secondary/80"
+        >
+          <Search className="mr-1 inline h-3 w-3" /> 搜索群组
+        </button>
+      </div>
+
+      <ScrollArea className="flex-1">
+        {groups.length === 0 && (
+          <div className="p-4 text-center text-sm text-muted-foreground">暂无群组</div>
+        )}
+
+        {groups.map((g) => (
+          <div
+            key={g.groupId}
+            className="group flex items-center justify-between px-4 py-2.5 transition-colors hover:bg-accent/50"
+          >
+            <div className="flex items-center gap-3">
+              <Avatar className="h-9 w-9">
+                <AvatarImage src={g.faceUrl} />
+                <AvatarFallback>{g.groupName.charAt(0).toUpperCase()}</AvatarFallback>
+              </Avatar>
+              <div>
+                <div className="text-sm font-medium">{g.groupName}</div>
+                <div className="text-xs text-muted-foreground">ID: {g.groupId}</div>
+              </div>
+            </div>
+
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className="invisible rounded-md p-1 text-muted-foreground opacity-0 transition-all hover:bg-accent group-hover:visible group-hover:opacity-100">
+                  <MoreHorizontal className="h-4 w-4" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem
+                  className="text-destructive"
+                  onClick={() => {
+                    quitGroup(g.groupId);
+                    toast("已退出群组");
+                  }}
+                >
+                  <LogOut className="mr-2 h-4 w-4" />
+                  退出群组
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        ))}
+      </ScrollArea>
+    </div>
+  );
+}
+
+// ====== Time formatter ======
 
 function formatTime(ts: number): string {
   const d = new Date(ts);
   const now = new Date();
   const diff = now.getTime() - d.getTime();
-
   if (diff < 60000) return "刚刚";
   if (diff < 3600000) return `${Math.floor(diff / 60000)}分钟前`;
-  if (d.getDate() === now.getDate()) {
-    return `${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`;
+  if (d.getDate() === now.getDate() && d.getMonth() === now.getMonth()) {
+    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
   }
   return `${d.getMonth() + 1}/${d.getDate()}`;
 }
