@@ -246,7 +246,7 @@ public class IMServer implements ILifecycle {
         // ── 注册 IMessageHandler ──
         List<IMessageHandler> handlers = List.of(
                 new HeartbeatHandler(sessionManager, routeTable),
-                new LoginHandler(sessionManager, messageStore, routeTable, nodeId, authenticator),
+                new LoginHandler(sessionManager, messageStore, routeTable, nodeId, authenticator, userManager),
                 ChatHandler.builder(messageQueue, messageStore, sequenceManager)
                         .groupManager(groupManager)
                         .webhookManager(webhookManager)
@@ -262,6 +262,7 @@ public class IMServer implements ILifecycle {
         this.routerHandler = new MessageRouterHandler(handlers, config.getBusinessThreads());
         // ── 注册认证拦截器（第一个执行，优先验证 token） ──
         this.routerHandler.addInterceptor(new AuthenticationInterceptor(authenticator));
+        this.routerHandler.addInterceptor(new AuthorizationInterceptor(authenticator));
     }
 
     @Override

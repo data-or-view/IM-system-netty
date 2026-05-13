@@ -8,6 +8,7 @@ import com.im.api.IMessageHandler;
 import com.im.api.IMessageStore;
 import com.im.api.IRouteTable;
 import com.im.api.ISessionManager;
+import com.im.api.IUserManager;
 import com.im.api.PlatformID;
 import io.netty.channel.ChannelHandlerContext;
 import org.slf4j.Logger;
@@ -41,6 +42,7 @@ public class LoginHandler implements IMessageHandler {
     private final IRouteTable routeTable;
     private final String localNodeId;
     private final IAuthenticator authenticator;
+    private final IUserManager userManager;
 
     public LoginHandler(ISessionManager sessionManager) {
         this(sessionManager, null, null, "local", null);
@@ -58,11 +60,18 @@ public class LoginHandler implements IMessageHandler {
     public LoginHandler(ISessionManager sessionManager, IMessageStore messageStore,
                         IRouteTable routeTable, String localNodeId,
                         IAuthenticator authenticator) {
+        this(sessionManager, messageStore, routeTable, localNodeId, authenticator, null);
+    }
+
+    public LoginHandler(ISessionManager sessionManager, IMessageStore messageStore,
+                        IRouteTable routeTable, String localNodeId,
+                        IAuthenticator authenticator, IUserManager userManager) {
         this.sessionManager = sessionManager;
         this.messageStore = messageStore;
         this.routeTable = routeTable;
         this.localNodeId = localNodeId;
         this.authenticator = authenticator;
+        this.userManager = userManager;
     }
 
     @Override
@@ -86,10 +95,22 @@ public class LoginHandler implements IMessageHandler {
 
         // TODO: 接入真实密码/验证码验证（当前是直通模式）
 
-        // ② 签发 token
+        // ② 签发 token（含 appManagerLevel）
+        int appManagerLevel = 0;
+        if (userManager != null) {
+            try {
+                com.im.api.UserInformation userInfo = userManager.getUserInformation(userId);
+                if (userInfo != null) {
+                    // UserInformation.getAppManagerLevel() 或 from ex field
+                    // 当前版本默认为 0，后续可通过管理 API 设置
+                }
+            } catch (Exception e) {
+                log.warn("Failed to load user info for role: {}", e.getMessage());
+            }
+        }
         String token = null;
         if (authenticator != null) {
-            token = authenticator.issueToken(userId, TOKEN_TTL);
+            token = authenticator.issueToken(userId, TOKEN_TTL, appManagerLevel);
         }
 
         // ③ 绑定 userId 到当前 channel（含 platformId）

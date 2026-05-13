@@ -46,9 +46,16 @@ public class HmacTokenAuthenticator implements IAuthenticator {
 
     @Override
     public String issueToken(String userId, Duration ttl) {
+        return issueToken(userId, ttl, 0);
+    }
+
+    @Override
+    public String issueToken(String userId, Duration ttl, int appManagerLevel) {
         long now = Instant.now().getEpochSecond();
         long exp = now + ttl.toSeconds();
-        String payload = "{\"uid\":\"" + escapeJson(userId) + "\",\"exp\":" + exp + ",\"iat\":" + now + "}";
+        String payload = "{\"uid\":\"" + escapeJson(userId)
+                + "\",\"lvl\":" + appManagerLevel
+                + ",\"exp\":" + exp + ",\"iat\":" + now + "}";
         String payloadB64 = Base64.getUrlEncoder().withoutPadding()
                 .encodeToString(payload.getBytes(StandardCharsets.UTF_8));
 
@@ -56,8 +63,21 @@ public class HmacTokenAuthenticator implements IAuthenticator {
         String signature = sign(signingInput);
 
         String token = signingInput + "." + signature;
-        log.debug("Issued token for user={}, exp={}", userId, exp);
+        log.debug("Issued token for user={}, lvl={}, exp={}", userId, appManagerLevel, exp);
         return token;
+    }
+
+    @Override
+    public int getAppManagerLevel(String token) {
+        if (token == null || token.isBlank()) return 0;
+        String[] parts = token.split("\\.");
+        if (parts.length != 3) return 0;
+        try {
+            String payloadJson = new String(Base64.getUrlDecoder().decode(parts[1]), StandardCharsets.UTF_8);
+            return Integer.parseInt(extractJsonField(payloadJson, "lvl"));
+        } catch (Exception e) {
+            return 0;
+        }
     }
 
     @Override
