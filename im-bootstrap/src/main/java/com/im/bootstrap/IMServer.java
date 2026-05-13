@@ -38,6 +38,7 @@ import com.im.core.PendingAcknowledgementManager;
 import com.im.core.auth.HmacTokenAuthenticator;
 import com.im.core.cache.ConcurrentHashCache;
 import com.im.core.conversation.LocalConversationManager;
+import com.im.core.group.DbGroupManager;
 import com.im.core.group.LocalGroupManager;
 import com.im.core.handler.AuthenticationInterceptor;
 import com.im.core.webhook.LocalWebhookManager;
@@ -208,7 +209,10 @@ public class IMServer implements ILifecycle {
         // ── 群聊（带缓存） ──
         ICache<String, com.im.api.GroupInformation> groupInfoCache = new ConcurrentHashCache<>();
         ICache<String, List<String>> groupMemberCache = new ConcurrentHashCache<>();
-        this.groupManager = new LocalGroupManager(groupInfoCache, groupMemberCache);
+        // 数据库模式下 DbGroupManager 自己管理数据，不使用缓存层
+        this.groupManager = dbEnabled(config)
+                ? new DbGroupManager()
+                : new LocalGroupManager(groupInfoCache, groupMemberCache);
 
         // ── 会话管理（带缓存） ──
         ICache<String, List<Conversation>> conversationCache = new ConcurrentHashCache<>();
@@ -250,6 +254,7 @@ public class IMServer implements ILifecycle {
                 new PullMessageHandler(messageStore, sequenceManager),
                 new ConversationGetHandler(conversationManager),
                 new ConversationSetHandler(conversationManager),
+                new GroupHandler(groupManager),
                 new FriendHandler(friendManager),
                 new UserSearchHandler(userManager)
         );
