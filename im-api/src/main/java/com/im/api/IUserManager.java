@@ -53,4 +53,12 @@ public interface IUserManager {
      */
     void updateUserInformation(String userId, String nickname, String faceUrl,
                                String ex, int globalRecvMsgOpt);
+
+    /**
+     * 搜索用户（按昵称或 user_id 模糊匹配）。
+     *
+     * @param keyword 搜索关键词
+     * @param limit   最大返回条数（默认 20）
+     */
+    List<UserInformation> searchUsers(String keyword, int limit);
 }

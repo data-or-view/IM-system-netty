@@ -43,6 +43,12 @@ import com.im.core.handler.AuthenticationInterceptor;
 import com.im.core.webhook.LocalWebhookManager;
 import com.im.core.redis.RedisConfiguration;
 import com.im.core.redis.RedisRouteTable;
+import com.im.core.db.MyBatisPlusFactory;
+import com.im.core.db.DatabaseConfiguration;
+import com.im.core.friend.DbFriendManager;
+import com.im.core.friend.LocalFriendManager;
+import com.im.core.user.DbUserManager;
+import com.im.core.user.LocalUserManager;
 import com.im.core.delivery.DeliveryConsumer;
 import com.im.core.delivery.LocalClusterMessageBus;
 import com.im.core.delivery.PersistenceConsumer;
@@ -128,6 +134,12 @@ public class IMServer implements ILifecycle {
     // 会话管理
     private final IConversationManager conversationManager;
 
+    // 好友管理
+    private final IFriendManager friendManager;
+
+    // 用户管理
+    private final IUserManager userManager;
+
     // 消息管道
     private final IMessageQueue messageQueue;
     private final PersistenceConsumer persistenceConsumer;
@@ -202,6 +214,14 @@ public class IMServer implements ILifecycle {
         ICache<String, List<Conversation>> conversationCache = new ConcurrentHashCache<>();
         this.conversationManager = new LocalConversationManager(conversationCache);
 
+        // ── 数据库管理器（优先数据库实现，降级到内存） ──
+        // 启动时 -Ddb.enabled=true 或指定 -Ddb.jdbcUrl 启用数据库模式
+        this.friendManager = dbEnabled(config) ? new DbFriendManager() : new LocalFriendManager();
+        this.userManager = dbEnabled(config) ? new DbUserManager() : new LocalUserManager();
+        log.info("FriendManager: {} / UserManager: {}",
+                dbEnabled(config) ? "DbFriendManager" : "LocalFriendManager",
+                dbEnabled(config) ? "DbUserManager" : "LocalUserManager");
+
         // ── Webhook ──
         this.webhookManager = new LocalWebhookManager(config.getWebhookUrl());
 
@@ -229,7 +249,9 @@ public class IMServer implements ILifecycle {
                         .build(),
                 new PullMessageHandler(messageStore, sequenceManager),
                 new ConversationGetHandler(conversationManager),
-                new ConversationSetHandler(conversationManager)
+                new ConversationSetHandler(conversationManager),
+                new FriendHandler(friendManager),
+                new UserSearchHandler(userManager)
         );
 
         this.routerHandler = new MessageRouterHandler(handlers, config.getBusinessThreads());
@@ -380,6 +402,13 @@ public class IMServer implements ILifecycle {
 
     // ========== main ==========
 
+    private static boolean dbEnabled(ServerConfiguration config) {
+        String dbProp = System.getProperty("db.enabled");
+        if ("true".equalsIgnoreCase(dbProp)) return true;
+        String jdbcUrl = System.getProperty("db.jdbcUrl");
+        return jdbcUrl != null && !jdbcUrl.isEmpty();
+    }
+
     public static void main(String[] args) throws Exception {
         ServerConfiguration config = new ServerConfiguration();
         if (args.length > 0) {
@@ -387,6 +416,27 @@ public class IMServer implements ILifecycle {
         }
         if (args.length > 1) {
             config.setNodeId(args[1]);
+        }
+
+        // 数据库初始化（如果启用了 DB）
+        if (dbEnabled(config)) {
+            DatabaseConfiguration dbConfig = DatabaseConfiguration.develop();
+            String urlProp = System.getProperty("db.jdbcUrl");
+            if (urlProp != null && !urlProp.isEmpty()) {
+                dbConfig = new DatabaseConfiguration.Builder()
+                        .jdbcUrl(urlProp)
+                        .username(System.getProperty("db.username", "root"))
+                        .password(System.getProperty("db.password", "password"))
+                        .build();
+            }
+            try {
+                MyBatisPlusFactory.init(dbConfig);
+                log.info("Database initialized: {}", dbConfig.getJdbcUrl());
+            } catch (Exception e) {
+                log.error("Failed to initialize database, falling back to in-memory storage", e);
+            }
+        } else {
+            log.info("Database disabled (use -Ddb.enabled=true or -Ddb.jdbcUrl to enable)");
         }
 
         IMServer server = new IMServer(config);

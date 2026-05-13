@@ -116,4 +116,14 @@ public class LocalUserManager implements IUserManager {
     public void setOffline(String userId) {
         onlineStatus.remove(userId);
     }
+
+    @Override
+    public List<UserInformation> searchUsers(String keyword, int limit) {
+        String lower = keyword.toLowerCase();
+        return users.values().stream()
+                .filter(u -> u.getUserId().toLowerCase().contains(lower)
+                        || u.getNickname().toLowerCase().contains(lower))
+                .limit(limit)
+                .toList();
+    }
 }
