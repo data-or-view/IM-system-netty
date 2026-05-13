@@ -1,8 +1,13 @@
 package com.im.api;
 
+import java.util.List;
+import java.util.Properties;
+
 /**
  * 服务端配置 POJO。
  * 纯数据类，不含业务逻辑。
+ *
+ * <p>可通过 {@link #from(Properties)} 或 {@link #from(PropertiesSource)} 加载。</p>
  */
 public class ServerConfiguration {
 
@@ -70,6 +75,62 @@ public class ServerConfiguration {
     private int redisPort = 6379;
     private String redisPassword = "";
     private int redisDatabase = 0;
+
+    // ========== Factory Methods ==========
+
+    /**
+     * 从 {@link Properties} 加载配置。
+     *
+     * <p>键命名空间为 {@code im.server.xxx}、{@code im.redis.xxx} 等。</p>
+     *
+     * <pre>
+     * Properties props = new Properties();
+     * props.setProperty("im.server.port", "8081");
+     * props.setProperty("im.token.secret", "my-secret");
+     * ServerConfiguration config = ServerConfiguration.from(props);
+     * </pre>
+     */
+    public static ServerConfiguration from(Properties props) {
+        ServerConfiguration cfg = new ServerConfiguration();
+        cfg.port = get(props, "im.server.port", DEFAULT_PORT);
+        cfg.bossThreads = get(props, "im.server.boss-threads", DEFAULT_BOSS_THREADS);
+        cfg.workerThreads = get(props, "im.server.worker-threads", DEFAULT_WORKER_THREADS);
+        cfg.businessThreads = get(props, "im.server.business-threads", DEFAULT_BUSINESS_THREADS);
+        cfg.idleTimeSeconds = get(props, "im.server.idle-timeout", DEFAULT_IDLE_TIME_SECONDS);
+        cfg.heartbeatTimeoutSeconds = get(props, "im.server.heartbeat-timeout", DEFAULT_HEARTBEAT_TIMEOUT_SECONDS);
+        cfg.maxFrameLength = get(props, "im.server.max-frame-length", DEFAULT_MAX_FRAME_LENGTH);
+        cfg.socketReceiveBufferSize = get(props, "im.server.socket-rcv-buf", DEFAULT_SOCKET_RECEIVE_BUFFER);
+        cfg.socketSendBufferSize = get(props, "im.server.socket-snd-buf", DEFAULT_SOCKET_SEND_BUFFER);
+        cfg.useEpoll = get(props, "im.server.use-epoll", true);
+        cfg.nodeId = get(props, "im.node.id", DEFAULT_NODE_ID);
+        cfg.tokenSecret = get(props, "im.token.secret", DEFAULT_TOKEN_SECRET);
+        cfg.webSocketPort = get(props, "im.ws.port", DEFAULT_WEB_SOCKET_PORT);
+        cfg.webSocketEnabled = get(props, "im.ws.enabled", DEFAULT_WEB_SOCKET_ENABLED);
+        cfg.webhookUrl = get(props, "im.webhook.url", "");
+        cfg.redisHost = get(props, "im.redis.host", "");
+        cfg.redisPort = get(props, "im.redis.port", 6379);
+        cfg.redisPassword = get(props, "im.redis.password", "");
+        cfg.redisDatabase = get(props, "im.redis.database", 0);
+        return cfg;
+    }
+
+    private static String get(Properties props, String key, String def) {
+        String val = props.getProperty(key);
+        return val != null ? val : def;
+    }
+
+    private static int get(Properties props, String key, int def) {
+        String val = props.getProperty(key);
+        if (val == null) return def;
+        try { return Integer.parseInt(val.trim()); }
+        catch (NumberFormatException e) { return def; }
+    }
+
+    private static boolean get(Properties props, String key, boolean def) {
+        String val = props.getProperty(key);
+        if (val == null) return def;
+        return "true".equalsIgnoreCase(val.trim());
+    }
 
     // ========== Getters / Setters ==========
 

@@ -34,6 +34,7 @@
         <mysql.version>8.4.0</mysql.version>
         <minio.version>8.5.17</minio.version>
         <failsafe.version>3.3.2</failsafe.version>
+        <snakeyaml.version>2.4</snakeyaml.version>
     </properties>
 
     <dependencyManagement>
@@ -165,6 +166,13 @@
                 <groupId>dev.failsafe</groupId>
                 <artifactId>failsafe</artifactId>
                 <version>${failsafe.version}</version>
+            </dependency>
+
+            <!-- SnakeYAML: 配置解析 -->
+            <dependency>
+                <groupId>org.yaml</groupId>
+                <artifactId>snakeyaml</artifactId>
+                <version>${snakeyaml.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

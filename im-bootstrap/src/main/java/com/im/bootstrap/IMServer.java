@@ -21,9 +21,11 @@ package com.im.bootstrap;
  * </ol>
  *
  * <h3>配置</h3>
- * 配置项参考 {@link ServerConfiguration}，通过 Maven + ServerConfiguration 类加载。
+ * 使用多层配置源: {@code -D} 参数 > 环境变量 > {@code config/application.yml} > 代码默认值。
+ * 所有键使用 {@code im.} 前缀。向后兼容无前缀的旧键（{@code db.enabled}、{@code redis.host} 等）。
  *
  * @see ServerConfiguration
+ * @see com.im.core.config.PropertySources
  * @see ChatHandler
  * @see MessageRouterHandler
  */
@@ -37,6 +39,7 @@ import com.im.codec.IMEncoder;
 import com.im.core.PendingAcknowledgementManager;
 import com.im.core.auth.HmacTokenAuthenticator;
 import com.im.core.cache.ConcurrentHashCache;
+import com.im.core.config.*;
 import com.im.core.conversation.DbConversationManager;
 import com.im.core.conversation.LocalConversationManager;
 import com.im.core.discovery.RedisNodeDiscovery;
@@ -92,6 +95,7 @@ import org.slf4j.LoggerFactory;
 import java.net.InetAddress;
 import java.util.List;
 import java.util.Map;
+import java.util.Properties;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
@@ -174,7 +178,7 @@ public class IMServer implements ILifecycle {
     /** 数据库初始化是否失败（如果失败则降级为内存实现） */
     private static boolean databaseFailed = false;
 
-    public IMServer(ServerConfiguration config) {
+    public IMServer(ServerConfiguration config, PropertySources props) {
         this.config = config;
         this.sessionManager = new SessionManager();
         this.pendingAcknowledgementManager = new PendingAcknowledgementManager();
@@ -182,32 +186,37 @@ public class IMServer implements ILifecycle {
         // ── 本节点标识 ──
         String nodeId = config.getNodeId();
 
-        // 支持 -Dredis.host 系统属性临时启用 Redis（开发测试用）
-        String redisProp = System.getProperty("redis.host");
-        if (redisProp != null && !redisProp.isEmpty()) {
-            config.setRedisHost(redisProp);
-            String redisPort = System.getProperty("redis.port");
-            if (redisPort != null && !redisPort.isEmpty()) config.setRedisPort(Integer.parseInt(redisPort));
-        }
-        // 支持 -Dredis.cluster.nodes="127.0.0.1:6379,127.0.0.1:6380,127.0.0.1:6381" 集群模式
-        String clusterProp = System.getProperty("redis.cluster.nodes");
-        if (clusterProp != null && !clusterProp.isEmpty() && !config.isRedisEnabled()) {
-            config.setRedisHost("cluster"); // 标记启用 Redis（实际使用 cluster nodes）
+        // ── Redis 配置（支持新旧键名） ──
+        String redisClusterNodes = nonNull(
+                props.get("im.redis.cluster.nodes"),
+                props.get("redis.cluster.nodes"));
+        String redisHost = nonNull(
+                props.get("im.redis.host"),
+                props.get("redis.host"), config.getRedisHost());
+
+        if (redisClusterNodes != null && !redisClusterNodes.isEmpty()) {
+            // 集群模式（优先级高于单机 host:port）
+            config.setRedisHost("cluster");
+        } else if (redisHost != null && !redisHost.isEmpty()) {
+            config.setRedisHost(redisHost);
+            String redisPort = nonNull(
+                    props.get("im.redis.port"),
+                    props.get("redis.port"), String.valueOf(config.getRedisPort()));
+            if (redisPort != null) config.setRedisPort(Integer.parseInt(redisPort));
         }
 
         if (config.isRedisEnabled()) {
             RedisConfiguration.Builder rcb = RedisConfiguration.builder()
                     .password(config.getRedisPassword());
-            if (clusterProp != null && !clusterProp.isEmpty()) {
-                String[] nodes = clusterProp.split(",");
+            if (redisClusterNodes != null && !redisClusterNodes.isEmpty()) {
+                String[] nodes = redisClusterNodes.split(",");
                 rcb.clusterNodes(nodes);
-                log.info("Using RedisClusterNodes: {}", clusterProp);
+                log.info("Using RedisClusterNodes: {}", redisClusterNodes);
             } else {
                 rcb.host(config.getRedisHost()).port(config.getRedisPort()).database(config.getRedisDatabase());
             }
-            RedisConfiguration redisConfig = rcb.build();
-            this.routeTable = new RedisRouteTable(redisConfig, sessionManager, nodeId);
-            log.info("Using RedisRouteTable: {}:{}", config.getRedisHost(), config.getRedisPort());
+            this.routeTable = new RedisRouteTable(rcb.build(), sessionManager, nodeId);
+            log.info("Using RedisRouteTable: {}", config.getRedisHost());
         } else {
             this.routeTable = new LocalRouteTable(sessionManager, nodeId);
             log.info("Using LocalRouteTable (no Redis configured)");
@@ -256,7 +265,6 @@ public class IMServer implements ILifecycle {
                 ? "DbConversationManager" : "LocalConversationManager");
 
         // ── 数据库管理器（优先数据库实现，降级到内存） ──
-        // 启动时 -Ddb.enabled=true 或指定 -Ddb.jdbcUrl 启用数据库模式
         this.friendManager = dbEnabled(config) ? new DbFriendManager(retryExecutor) : new LocalFriendManager();
         this.userManager = dbEnabled(config) ? new DbUserManager(retryExecutor) : new LocalUserManager();
         log.info("FriendManager: {} / UserManager: {}",
@@ -391,8 +399,6 @@ public class IMServer implements ILifecycle {
                             // 0xACAC 二进制帧解析（从 BinaryWebSocketFrame.content() 读取）
                             p.addLast(new WebSocketIMDecoder());
                             // 出站：IMCommand → ByteBuf(0xACAC) → BinaryWebSocketFrame
-                            // 注意 ByteBufToWebSocketHandler 必须在 IMEncoder 之前，
-                            // 因为出站从tail→head: IMEncoder→ByteBufToWSHandler→WSProtocolHandler
                             p.addLast(byteBufToWebSocketHandler);
                             p.addLast(new IMEncoder());
                             // 无 IdleStateHandler —— WebSocket 原生 Ping/Pong 保活
@@ -441,51 +447,72 @@ public class IMServer implements ILifecycle {
         return new NodeInformation(config.getNodeId(), host, config.getPort(), attrs);
     }
 
-    public ISessionManager getSessionManager() {
-        return sessionManager;
-    }
+    // ── 工具 ──
 
-    public IMessageQueue getMessageQueue() {
-        return messageQueue;
-    }
-
-    public INodeDiscovery getNodeDiscovery() {
-        return nodeDiscovery;
-    }
-
-    public IRouteTable getRouteTable() {
-        return routeTable;
+    private static String nonNull(String... vals) {
+        for (String v : vals) {
+            if (v != null && !v.isEmpty()) return v;
+        }
+        return null;
     }
 
     // ========== main ==========
 
     private static boolean dbEnabled(ServerConfiguration config) {
         if (databaseFailed) return false;
-        String dbProp = System.getProperty("db.enabled");
+        // 通过 -D 或 YAML 的 im.db.enabled / db.enabled
+        String dbProp = System.getProperty("im.db.enabled");
+        if (dbProp == null) dbProp = System.getProperty("db.enabled");
         if ("true".equalsIgnoreCase(dbProp)) return true;
-        String jdbcUrl = System.getProperty("db.jdbcUrl");
+        String jdbcUrl = System.getProperty("im.db.jdbc-url");
+        if (jdbcUrl == null) jdbcUrl = System.getProperty("db.jdbcUrl");
         return jdbcUrl != null && !jdbcUrl.isEmpty();
     }
 
-    public static void main(String[] args) throws Exception {
-        ServerConfiguration config = new ServerConfiguration();
-        if (args.length > 0) {
-            config.setPort(Integer.parseInt(args[0]));
-        }
-        if (args.length > 1) {
-            config.setNodeId(args[1]);
-        }
+    /**
+     * 构建多层配置源。
+     *
+     * <p>优先级: {@code -D} 参数 > 环境变量 > config/application.yml > 代码默认值。</p>
+     */
+    static PropertySources loadPropertySources() {
+        return PropertySources.builder()
+                .add(new SystemPropertySource())
+                .add(new EnvPropertySource())
+                .add(new YamlPropertySource("config/application.yml"))
+                .build();
+    }
 
-        // 数据库初始化（如果启用了 DB）
-        if (dbEnabled(config)) {
-            DatabaseConfiguration dbConfig = DatabaseConfiguration.develop();
-            String urlProp = System.getProperty("db.jdbcUrl");
-            if (urlProp != null && !urlProp.isEmpty()) {
+    public static void main(String[] args) throws Exception {
+        // ── 配置源初始化 ──
+        PropertySources props = loadPropertySources();
+        props.logSources();
+
+        // ── 数据库初始化（如果启用了 DB） ──
+        String dbEnabled = nonNull(
+                props.get("im.db.enabled"),
+                props.get("db.enabled"));
+        String jdbcUrl = nonNull(
+                props.get("im.db.jdbc-url"),
+                props.get("im.db.jdbcUrl"),
+                props.get("db.jdbcUrl"));
+
+        if ("true".equalsIgnoreCase(dbEnabled) || (jdbcUrl != null && !jdbcUrl.isEmpty())) {
+            String dbUser = nonNull(
+                    props.get("im.db.username"),
+                    props.get("db.username"), "root");
+            String dbPass = nonNull(
+                    props.get("im.db.password"),
+                    props.get("db.password"), "password");
+
+            DatabaseConfiguration dbConfig;
+            if (jdbcUrl != null && !jdbcUrl.isEmpty()) {
                 dbConfig = new DatabaseConfiguration.Builder()
-                        .jdbcUrl(urlProp)
-                        .username(System.getProperty("db.username", "root"))
-                        .password(System.getProperty("db.password", "password"))
+                        .jdbcUrl(jdbcUrl)
+                        .username(dbUser)
+                        .password(dbPass)
                         .build();
+            } else {
+                dbConfig = DatabaseConfiguration.develop();
             }
             try {
                 MyBatisPlusFactory.init(dbConfig);
@@ -495,10 +522,32 @@ public class IMServer implements ILifecycle {
                 databaseFailed = true;
             }
         } else {
-            log.info("Database disabled (use -Ddb.enabled=true or -Ddb.jdbcUrl to enable)");
+            log.info("Database disabled (set im.db.enabled=true or db.enabled=true to enable)");
         }
 
-        IMServer server = new IMServer(config);
+        // ── 构建配置对象 ──
+        Properties serverProps = new Properties();
+        // 读取所有 im.* 键，构建 Properties 供 ServerConfiguration.from() 使用
+        String[] knownKeys = {
+                "im.server.port", "im.server.boss-threads", "im.server.worker-threads",
+                "im.server.business-threads", "im.server.idle-timeout", "im.server.heartbeat-timeout",
+                "im.server.max-frame-length", "im.server.socket-rcv-buf", "im.server.socket-snd-buf",
+                "im.server.use-epoll", "im.node.id", "im.token.secret",
+                "im.ws.port", "im.ws.enabled", "im.webhook.url",
+                "im.redis.host", "im.redis.port", "im.redis.password", "im.redis.database"
+        };
+        for (String key : knownKeys) {
+            String val = props.get(key);
+            if (val != null) serverProps.setProperty(key, val);
+        }
+
+        // 命令行参数覆盖（向后兼容）
+        if (args.length > 0) serverProps.setProperty("im.server.port", args[0]);
+        if (args.length > 1) serverProps.setProperty("im.node.id", args[1]);
+
+        ServerConfiguration config = ServerConfiguration.from(serverProps);
+
+        IMServer server = new IMServer(config, props);
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             try { server.shutdown(); } catch (Exception e) { log.error("Shutdown error", e); }
