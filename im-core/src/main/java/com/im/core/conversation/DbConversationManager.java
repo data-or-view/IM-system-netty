@@ -10,6 +10,9 @@ import com.im.core.db.entity.ConversationEntity;
 import com.im.core.db.entity.SeqUserEntity;
 import com.im.core.db.mapper.ConversationMapper;
 import com.im.core.db.mapper.SeqUserMapper;
+import com.im.core.retry.RetryConfig;
+import com.im.core.retry.RetryExecutor;
+import com.im.core.retry.RetryStrategies;
 import org.apache.ibatis.session.SqlSession;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,6 +34,13 @@ import java.util.stream.Collectors;
 public class DbConversationManager implements IConversationManager {
 
     private static final Logger log = LoggerFactory.getLogger(DbConversationManager.class);
+    private static final RetryConfig CFG = RetryStrategies.DB_WRITE;
+
+    private final RetryExecutor retryExecutor;
+
+    public DbConversationManager(RetryExecutor retryExecutor) {
+        this.retryExecutor = retryExecutor;
+    }
 
     @Override
     public List<Conversation> getConversations(String ownerUserId) {
@@ -58,147 +68,168 @@ public class DbConversationManager implements IConversationManager {
 
     @Override
     public void updateOnMessage(String ownerUserId, String conversationId, IMCommand msg, boolean isSelf) {
-        try (SqlSession session = MyBatisPlusFactory.openSession()) {
-            ConversationMapper mapper = session.getMapper(ConversationMapper.class);
+        retryExecutor.execute(CFG, () -> {
+            try (SqlSession session = MyBatisPlusFactory.openSession()) {
+                ConversationMapper mapper = session.getMapper(ConversationMapper.class);
 
-            // 构造附加信息 JSON（存储 lastMsgId / lastMsgContent）
-            String attachedInfo = buildAttachedInfo(msg);
+                // 构造附加信息 JSON（存储 lastMsgId / lastMsgContent）
+                String attachedInfo = buildAttachedInfo(msg);
 
-            // 计算会话类型
-            int convType = conversationId != null && conversationId.startsWith("group_")
-                    ? Conversation.SESSION_TYPE_GROUP : Conversation.SESSION_TYPE_SINGLE;
+                // 计算会话类型
+                int convType = conversationId != null && conversationId.startsWith("group_")
+                        ? Conversation.SESSION_TYPE_GROUP : Conversation.SESSION_TYPE_SINGLE;
 
-            // 提取对方 userId
-            String targetUserId = null;
-            if (convType == Conversation.SESSION_TYPE_SINGLE) {
-                String from = msg.getHeader("fromUserId");
-                String to = msg.getHeader("toUserId");
-                targetUserId = from != null && from.equals(ownerUserId) ? to : from;
+                // 提取对方 userId
+                String targetUserId = null;
+                if (convType == Conversation.SESSION_TYPE_SINGLE) {
+                    String from = msg.getHeader("fromUserId");
+                    String to = msg.getHeader("toUserId");
+                    targetUserId = from != null && from.equals(ownerUserId) ? to : from;
+                }
+
+                long now = System.currentTimeMillis();
+                long newSeq = msg.getSeqId();
+
+                // 插入或更新
+                mapper.upsertConversation(
+                        ownerUserId, conversationId, convType,
+                        targetUserId, msg.getHeader("groupId"),
+                        attachedInfo, newSeq, now
+                );
+
+                // 更新未读数：send 方的会话（isSelf=true）不加
+                if (!isSelf) {
+                    mapper.incrementUnread(ownerUserId, conversationId);
+                }
+
+                session.commit();
             }
-
-            long now = System.currentTimeMillis();
-            long newSeq = msg.getSeqId();
-
-            // 插入或更新
-            mapper.upsertConversation(
-                    ownerUserId, conversationId, convType,
-                    targetUserId, msg.getHeader("groupId"),
-                    attachedInfo, newSeq, now
-            );
-
-            // 更新未读数：send 方的会话（isSelf=true）不加
-            if (!isSelf) {
-                mapper.incrementUnread(ownerUserId, conversationId);
-            }
-
-            session.commit();
-        }
+            return null;
+        });
     }
 
     @Override
     public void markRead(String ownerUserId, String conversationId, long readSeq) {
-        try (SqlSession session = MyBatisPlusFactory.openSession()) {
-            ConversationMapper mapper = session.getMapper(ConversationMapper.class);
-            mapper.resetUnread(ownerUserId, conversationId);
-            mapper.updateUpdatedAt(ownerUserId, conversationId, System.currentTimeMillis());
-            session.commit();
-        }
+        retryExecutor.execute(CFG, () -> {
+            try (SqlSession session = MyBatisPlusFactory.openSession()) {
+                ConversationMapper mapper = session.getMapper(ConversationMapper.class);
+                mapper.resetUnread(ownerUserId, conversationId);
+                mapper.updateUpdatedAt(ownerUserId, conversationId, System.currentTimeMillis());
+                session.commit();
+            }
+            return null;
+        });
     }
 
     @Override
     public void setPinned(String ownerUserId, String conversationId, boolean pinned) {
-        try (SqlSession session = MyBatisPlusFactory.openSession()) {
-            ConversationMapper mapper = session.getMapper(ConversationMapper.class);
-            mapper.update(
-                    null,
-                    new LambdaUpdateWrapper<ConversationEntity>()
-                            .eq(ConversationEntity::getOwnerUserId, ownerUserId)
-                            .eq(ConversationEntity::getConversationId, conversationId)
-                            .set(ConversationEntity::getIsPinned, pinned ? 1 : 0)
-                            .set(ConversationEntity::getUpdatedAt, System.currentTimeMillis())
-            );
-            session.commit();
-        }
+        retryExecutor.execute(CFG, () -> {
+            try (SqlSession session = MyBatisPlusFactory.openSession()) {
+                ConversationMapper mapper = session.getMapper(ConversationMapper.class);
+                mapper.update(
+                        null,
+                        new LambdaUpdateWrapper<ConversationEntity>()
+                                .eq(ConversationEntity::getOwnerUserId, ownerUserId)
+                                .eq(ConversationEntity::getConversationId, conversationId)
+                                .set(ConversationEntity::getIsPinned, pinned ? 1 : 0)
+                                .set(ConversationEntity::getUpdatedAt, System.currentTimeMillis())
+                );
+                session.commit();
+            }
+            return null;
+        });
     }
 
     @Override
     public void setRecvMsgOpt(String ownerUserId, String conversationId, int recvMsgOpt) {
-        try (SqlSession session = MyBatisPlusFactory.openSession()) {
-            ConversationMapper mapper = session.getMapper(ConversationMapper.class);
-            mapper.update(
-                    null,
-                    new LambdaUpdateWrapper<ConversationEntity>()
-                            .eq(ConversationEntity::getOwnerUserId, ownerUserId)
-                            .eq(ConversationEntity::getConversationId, conversationId)
-                            .set(ConversationEntity::getRecvMsgOpt, recvMsgOpt)
-                            .set(ConversationEntity::getUpdatedAt, System.currentTimeMillis())
-            );
-            session.commit();
-        }
+        retryExecutor.execute(CFG, () -> {
+            try (SqlSession session = MyBatisPlusFactory.openSession()) {
+                ConversationMapper mapper = session.getMapper(ConversationMapper.class);
+                mapper.update(
+                        null,
+                        new LambdaUpdateWrapper<ConversationEntity>()
+                                .eq(ConversationEntity::getOwnerUserId, ownerUserId)
+                                .eq(ConversationEntity::getConversationId, conversationId)
+                                .set(ConversationEntity::getRecvMsgOpt, recvMsgOpt)
+                                .set(ConversationEntity::getUpdatedAt, System.currentTimeMillis())
+                );
+                session.commit();
+            }
+            return null;
+        });
     }
 
     @Override
     public void setBurnDuration(String ownerUserId, String conversationId, int burnDuration) {
-        try (SqlSession session = MyBatisPlusFactory.openSession()) {
-            ConversationMapper mapper = session.getMapper(ConversationMapper.class);
-            mapper.update(
-                    null,
-                    new LambdaUpdateWrapper<ConversationEntity>()
-                            .eq(ConversationEntity::getOwnerUserId, ownerUserId)
-                            .eq(ConversationEntity::getConversationId, conversationId)
-                            .set(ConversationEntity::getBurnDuration, burnDuration)
-                            .set(ConversationEntity::getUpdatedAt, System.currentTimeMillis())
-            );
-            session.commit();
-        }
+        retryExecutor.execute(CFG, () -> {
+            try (SqlSession session = MyBatisPlusFactory.openSession()) {
+                ConversationMapper mapper = session.getMapper(ConversationMapper.class);
+                mapper.update(
+                        null,
+                        new LambdaUpdateWrapper<ConversationEntity>()
+                                .eq(ConversationEntity::getOwnerUserId, ownerUserId)
+                                .eq(ConversationEntity::getConversationId, conversationId)
+                                .set(ConversationEntity::getBurnDuration, burnDuration)
+                                .set(ConversationEntity::getUpdatedAt, System.currentTimeMillis())
+                );
+                session.commit();
+            }
+            return null;
+        });
     }
 
     @Override
     public void createSingleConversation(String ownerUserId, String targetUserId, String conversationId) {
-        try (SqlSession session = MyBatisPlusFactory.openSession()) {
-            ConversationMapper mapper = session.getMapper(ConversationMapper.class);
-            // 检查是否已存在
-            ConversationEntity existing = mapper.selectByUserAndConversation(ownerUserId, conversationId);
-            if (existing != null) return;
+        retryExecutor.execute(CFG, () -> {
+            try (SqlSession session = MyBatisPlusFactory.openSession()) {
+                ConversationMapper mapper = session.getMapper(ConversationMapper.class);
+                // 检查是否已存在
+                ConversationEntity existing = mapper.selectByUserAndConversation(ownerUserId, conversationId);
+                if (existing != null) return null;
 
-            ConversationEntity entity = new ConversationEntity();
-            entity.setOwnerUserId(ownerUserId);
-            entity.setConversationId(conversationId);
-            entity.setConversationType(Conversation.SESSION_TYPE_SINGLE);
-            entity.setUserId(targetUserId);
-            entity.setCreatedAt(System.currentTimeMillis());
-            entity.setUpdatedAt(System.currentTimeMillis());
-            mapper.insert(entity);
-            session.commit();
-            log.debug("Single conversation created: owner={}, conv={}, target={}",
-                    ownerUserId, conversationId, targetUserId);
-        }
+                ConversationEntity entity = new ConversationEntity();
+                entity.setOwnerUserId(ownerUserId);
+                entity.setConversationId(conversationId);
+                entity.setConversationType(Conversation.SESSION_TYPE_SINGLE);
+                entity.setUserId(targetUserId);
+                entity.setCreatedAt(System.currentTimeMillis());
+                entity.setUpdatedAt(System.currentTimeMillis());
+                mapper.insert(entity);
+                session.commit();
+                log.debug("Single conversation created: owner={}, conv={}, target={}",
+                        ownerUserId, conversationId, targetUserId);
+            }
+            return null;
+        });
     }
 
     @Override
     public void createGroupConversations(List<String> memberIds, String groupId, String conversationId) {
         if (memberIds == null || memberIds.isEmpty()) return;
 
-        try (SqlSession session = MyBatisPlusFactory.openSession()) {
-            ConversationMapper mapper = session.getMapper(ConversationMapper.class);
-            long now = System.currentTimeMillis();
+        retryExecutor.execute(CFG, () -> {
+            try (SqlSession session = MyBatisPlusFactory.openSession()) {
+                ConversationMapper mapper = session.getMapper(ConversationMapper.class);
+                long now = System.currentTimeMillis();
 
-            for (String memberId : memberIds) {
-                ConversationEntity existing = mapper.selectByUserAndConversation(memberId, conversationId);
-                if (existing != null) continue;
+                for (String memberId : memberIds) {
+                    ConversationEntity existing = mapper.selectByUserAndConversation(memberId, conversationId);
+                    if (existing != null) continue;
 
-                ConversationEntity entity = new ConversationEntity();
-                entity.setOwnerUserId(memberId);
-                entity.setConversationId(conversationId);
-                entity.setConversationType(Conversation.SESSION_TYPE_GROUP);
-                entity.setGroupId(groupId);
-                entity.setCreatedAt(now);
-                entity.setUpdatedAt(now);
-                mapper.insert(entity);
+                    ConversationEntity entity = new ConversationEntity();
+                    entity.setOwnerUserId(memberId);
+                    entity.setConversationId(conversationId);
+                    entity.setConversationType(Conversation.SESSION_TYPE_GROUP);
+                    entity.setGroupId(groupId);
+                    entity.setCreatedAt(now);
+                    entity.setUpdatedAt(now);
+                    mapper.insert(entity);
+                }
+                session.commit();
+                log.debug("Group conversations created: groupId={}, members={}", groupId, memberIds.size());
             }
-            session.commit();
-            log.debug("Group conversations created: groupId={}, members={}", groupId, memberIds.size());
-        }
+            return null;
+        });
     }
 
     // ========== Entity ↔ Conversation 转换 ==========

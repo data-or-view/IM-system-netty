@@ -65,6 +65,8 @@ import com.im.core.mq.MemoryMessageQueue;
 import com.im.core.seq.LocalSequenceManager;
 import com.im.core.session.SessionManager;
 import com.im.core.redis.RedisStateStore;
+import com.im.core.retry.RetryExecutor;
+import com.im.core.retry.FailsafeRetryExecutor;
 import com.im.core.seq.RedisSequenceManager;
 import com.im.core.store.LocalStateStore;
 import com.im.core.store.DbMessageStore;
@@ -134,6 +136,9 @@ public class IMServer implements ILifecycle {
 
     // 消息序号
     private final ISequenceManager sequenceManager;
+
+    // 重试模板
+    private final RetryExecutor retryExecutor;
 
     // 认证
     private final HmacTokenAuthenticator authenticator;
@@ -231,26 +236,29 @@ public class IMServer implements ILifecycle {
         // ── 认证 ──
         this.authenticator = new HmacTokenAuthenticator(config.getTokenSecret());
 
+        // ── 重试模板（DB 操作指数退避重试） ──
+        this.retryExecutor = new FailsafeRetryExecutor();
+
         // ── 群聊（带缓存） ──
         ICache<String, com.im.api.GroupInformation> groupInfoCache = new ConcurrentHashCache<>();
         ICache<String, List<String>> groupMemberCache = new ConcurrentHashCache<>();
         // 数据库模式下 DbGroupManager 自己管理数据，不使用缓存层
         this.groupManager = dbEnabled(config)
-                ? new DbGroupManager()
+                ? new DbGroupManager(retryExecutor)
                 : new LocalGroupManager(groupInfoCache, groupMemberCache);
 
         // ── 会话管理（数据库模式下用 DbConversationManager 持久化） ──
         ICache<String, List<Conversation>> conversationCache = new ConcurrentHashCache<>();
         this.conversationManager = dbEnabled(config)
-                ? new DbConversationManager()
+                ? new DbConversationManager(retryExecutor)
                 : new LocalConversationManager(conversationCache);
         log.info("ConversationManager: {}", dbEnabled(config)
                 ? "DbConversationManager" : "LocalConversationManager");
 
         // ── 数据库管理器（优先数据库实现，降级到内存） ──
         // 启动时 -Ddb.enabled=true 或指定 -Ddb.jdbcUrl 启用数据库模式
-        this.friendManager = dbEnabled(config) ? new DbFriendManager() : new LocalFriendManager();
-        this.userManager = dbEnabled(config) ? new DbUserManager() : new LocalUserManager();
+        this.friendManager = dbEnabled(config) ? new DbFriendManager(retryExecutor) : new LocalFriendManager();
+        this.userManager = dbEnabled(config) ? new DbUserManager(retryExecutor) : new LocalUserManager();
         log.info("FriendManager: {} / UserManager: {}",
                 dbEnabled(config) ? "DbFriendManager" : "LocalFriendManager",
                 dbEnabled(config) ? "DbUserManager" : "LocalUserManager");
@@ -265,7 +273,7 @@ public class IMServer implements ILifecycle {
 
         // ── 消息基础设施（数据库模式下用 DbMessageStore 持久化） ──
         this.messageStore = dbEnabled(config)
-                ? new DbMessageStore()
+                ? new DbMessageStore(retryExecutor)
                 : new LocalMessageStore();
         log.info("MessageStore: {}", dbEnabled(config) ? "DbMessageStore" : "LocalMessageStore");
         this.messageQueue = new MemoryMessageQueue();

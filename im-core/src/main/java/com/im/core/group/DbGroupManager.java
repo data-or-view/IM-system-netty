@@ -14,6 +14,9 @@ import com.im.core.db.mapper.GroupMapper;
 import com.im.core.db.mapper.GroupMemberMapper;
 import com.im.core.db.mapper.GroupRequestMapper;
 import com.im.core.db.mapper.UserMapper;
+import com.im.core.retry.RetryConfig;
+import com.im.core.retry.RetryExecutor;
+import com.im.core.retry.RetryStrategies;
 import org.apache.ibatis.session.SqlSession;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,11 +34,19 @@ import java.util.stream.Collectors;
 public class DbGroupManager implements IGroupManager {
 
     private static final Logger log = LoggerFactory.getLogger(DbGroupManager.class);
+    private static final RetryConfig CFG = RetryStrategies.DB_WRITE;
+
+    private final RetryExecutor retryExecutor;
+
+    public DbGroupManager(RetryExecutor retryExecutor) {
+        this.retryExecutor = retryExecutor;
+    }
 
     @Override
     public void createGroup(String groupId, String ownerId, String groupName, String faceUrl,
                             List<String> members, int groupType, int needVerification) {
         long now = System.currentTimeMillis();
+        retryExecutor.execute(CFG, () -> {
         try (SqlSession session = MyBatisPlusFactory.openSession()) {
             GroupMapper groupMapper = session.getMapper(GroupMapper.class);
             GroupMemberMapper memberMapper = session.getMapper(GroupMemberMapper.class);
@@ -71,19 +82,22 @@ public class DbGroupManager implements IGroupManager {
             log.info("Group created: groupId={}, name={}, owner={}, members={}",
                     groupId, groupName, ownerId, members != null ? members.size() : 0);
         }
+                    return null;
+        });
     }
 
     @Override
     public void disbandGroup(String groupId, String operatorId) {
+        retryExecutor.execute(CFG, () -> {
         try (SqlSession session = MyBatisPlusFactory.openSession()) {
             GroupMapper groupMapper = session.getMapper(GroupMapper.class);
             GroupMemberMapper memberMapper = session.getMapper(GroupMemberMapper.class);
 
             GroupEntity entity = groupMapper.selectById(groupId);
-            if (entity == null) return;
+            if (entity == null) return null;
             if (!entity.getOwnerUserId().equals(operatorId)) {
                 log.warn("Only owner can disband group: groupId={}, operator={}", groupId, operatorId);
-                return;
+                return null;
             }
             entity.setStatus(0); // 标记解散
             entity.setUpdatedAt(System.currentTimeMillis());
@@ -95,6 +109,8 @@ public class DbGroupManager implements IGroupManager {
             session.commit();
             log.info("Group disbanded: groupId={}", groupId);
         }
+                    return null;
+        });
     }
 
     @Override
@@ -102,10 +118,11 @@ public class DbGroupManager implements IGroupManager {
                                      String introduction, String faceUrl, int needVerification,
                                      int lookMemberInfo, int applyMemberFriend,
                                      String notificationUserId) {
+        retryExecutor.execute(CFG, () -> {
         try (SqlSession session = MyBatisPlusFactory.openSession()) {
             GroupMapper mapper = session.getMapper(GroupMapper.class);
             GroupEntity entity = mapper.selectById(groupId);
-            if (entity == null) return;
+            if (entity == null) return null;
             if (groupName != null) entity.setGroupName(groupName);
             if (notification != null) entity.setNotification(notification);
             if (introduction != null) entity.setIntroduction(introduction);
@@ -121,15 +138,18 @@ public class DbGroupManager implements IGroupManager {
             mapper.updateById(entity);
             session.commit();
         }
+                    return null;
+        });
     }
 
     @Override
     public void addMember(String groupId, String userId) {
         long now = System.currentTimeMillis();
+        retryExecutor.execute(CFG, () -> {
         try (SqlSession session = MyBatisPlusFactory.openSession()) {
             GroupMapper groupMapper = session.getMapper(GroupMapper.class);
             GroupMemberMapper memberMapper = session.getMapper(GroupMemberMapper.class);
-            if (isMemberInSession(memberMapper, groupId, userId)) return;
+            if (isMemberInSession(memberMapper, groupId, userId)) return null;
             addMemberRecord(memberMapper, groupId, userId, 1, 3, null, userId, now);
             GroupEntity entity = groupMapper.selectById(groupId);
             if (entity != null) {
@@ -138,6 +158,8 @@ public class DbGroupManager implements IGroupManager {
             }
             session.commit();
         }
+                    return null;
+        });
     }
 
     @Override
@@ -147,14 +169,15 @@ public class DbGroupManager implements IGroupManager {
 
     @Override
     public void kickMember(String groupId, String operatorId, String targetUserId) {
+        retryExecutor.execute(CFG, () -> {
         try (SqlSession session = MyBatisPlusFactory.openSession()) {
             GroupMapper groupMapper = session.getMapper(GroupMapper.class);
             GroupMemberMapper memberMapper = session.getMapper(GroupMemberMapper.class);
             // 操作者必须是群主或管理员
             GroupMemberEntity operator = getMemberInSession(memberMapper, groupId, operatorId);
             GroupMemberEntity target = getMemberInSession(memberMapper, groupId, targetUserId);
-            if (operator == null || target == null) return;
-            if (operator.getRoleLevel() < 100 || target.getRoleLevel() >= operator.getRoleLevel()) return;
+            if (operator == null || target == null) return null;
+            if (operator.getRoleLevel() < 100 || target.getRoleLevel() >= operator.getRoleLevel()) return null;
 
             LambdaQueryWrapper<GroupMemberEntity> qw = new LambdaQueryWrapper<>();
             qw.eq(GroupMemberEntity::getGroupId, groupId)
@@ -168,10 +191,13 @@ public class DbGroupManager implements IGroupManager {
             session.commit();
             log.info("Kicked: groupId={}, target={}, operator={}", groupId, targetUserId, operatorId);
         }
+                    return null;
+        });
     }
 
     @Override
     public void quitGroup(String groupId, String userId) {
+        retryExecutor.execute(CFG, () -> {
         try (SqlSession session = MyBatisPlusFactory.openSession()) {
             GroupMapper groupMapper = session.getMapper(GroupMapper.class);
             GroupMemberMapper memberMapper = session.getMapper(GroupMemberMapper.class);
@@ -187,10 +213,13 @@ public class DbGroupManager implements IGroupManager {
             session.commit();
             log.info("Quit: groupId={}, userId={}", groupId, userId);
         }
+                    return null;
+        });
     }
 
     @Override
     public void transferOwner(String groupId, String oldOwnerId, String newOwnerId) {
+        retryExecutor.execute(CFG, () -> {
         try (SqlSession session = MyBatisPlusFactory.openSession()) {
             GroupMapper groupMapper = session.getMapper(GroupMapper.class);
             GroupMemberMapper memberMapper = session.getMapper(GroupMemberMapper.class);
@@ -216,10 +245,13 @@ public class DbGroupManager implements IGroupManager {
             }
             session.commit();
         }
+                    return null;
+        });
     }
 
     @Override
     public void setMemberRole(String groupId, String operatorId, String targetUserId, int roleLevel) {
+        retryExecutor.execute(CFG, () -> {
         try (SqlSession session = MyBatisPlusFactory.openSession()) {
             GroupMemberMapper mapper = session.getMapper(GroupMemberMapper.class);
             GroupMemberEntity member = getMemberInSession(mapper, groupId, targetUserId);
@@ -229,10 +261,13 @@ public class DbGroupManager implements IGroupManager {
                 session.commit();
             }
         }
+                    return null;
+        });
     }
 
     @Override
     public void muteMember(String groupId, String targetUserId, long muteEndTime) {
+        retryExecutor.execute(CFG, () -> {
         try (SqlSession session = MyBatisPlusFactory.openSession()) {
             GroupMemberMapper mapper = session.getMapper(GroupMemberMapper.class);
             GroupMemberEntity member = getMemberInSession(mapper, groupId, targetUserId);
@@ -242,29 +277,32 @@ public class DbGroupManager implements IGroupManager {
                 session.commit();
             }
         }
+                    return null;
+        });
     }
 
     @Override
     public void joinGroup(String groupId, String userId, String reqMsg) {
         long now = System.currentTimeMillis();
+        retryExecutor.execute(CFG, () -> {
         try (SqlSession session = MyBatisPlusFactory.openSession()) {
             GroupRequestMapper mapper = session.getMapper(GroupRequestMapper.class);
             GroupMapper groupMapper = session.getMapper(GroupMapper.class);
             GroupEntity group = groupMapper.selectById(groupId);
-            if (group == null) return;
+            if (group == null) return null;
 
             // 检查是否已有待处理申请
             LambdaQueryWrapper<GroupRequestEntity> qw = new LambdaQueryWrapper<>();
             qw.eq(GroupRequestEntity::getGroupId, groupId)
                     .eq(GroupRequestEntity::getUserId, userId)
                     .eq(GroupRequestEntity::getHandleResult, 0);
-            if (mapper.selectCount(qw) > 0) return;
+            if (mapper.selectCount(qw) > 0) return null;
 
             // 根据群验证策略
             if (group.getNeedVerification() == 0) {
                 // 无需验证，直接加入
                 addMember(groupId, userId);
-                return;
+                return null;
             }
 
             GroupRequestEntity req = new GroupRequestEntity();
@@ -277,12 +315,15 @@ public class DbGroupManager implements IGroupManager {
             session.commit();
             log.info("Join request: groupId={}, userId={}", groupId, userId);
         }
+                    return null;
+        });
     }
 
     @Override
     public void respondJoinRequest(String groupId, String userId, String operatorId,
                                     String handleMsg, boolean agreed) {
         long now = System.currentTimeMillis();
+        retryExecutor.execute(CFG, () -> {
         try (SqlSession session = MyBatisPlusFactory.openSession()) {
             GroupRequestMapper mapper = session.getMapper(GroupRequestMapper.class);
             LambdaQueryWrapper<GroupRequestEntity> qw = new LambdaQueryWrapper<>();
@@ -290,7 +331,7 @@ public class DbGroupManager implements IGroupManager {
                     .eq(GroupRequestEntity::getUserId, userId)
                     .eq(GroupRequestEntity::getHandleResult, 0);
             GroupRequestEntity req = mapper.selectOne(qw);
-            if (req == null) return;
+            if (req == null) return null;
 
             req.setHandleResult(agreed ? 1 : 2);
             req.setHandledMsg(handleMsg);
@@ -303,6 +344,8 @@ public class DbGroupManager implements IGroupManager {
             }
             session.commit();
         }
+                    return null;
+        });
     }
 
     @Override

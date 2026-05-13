@@ -7,6 +7,9 @@ import com.im.api.IMessageStore;
 import com.im.core.db.MyBatisPlusFactory;
 import com.im.core.db.entity.MessageEntity;
 import com.im.core.db.mapper.MessageMapper;
+import com.im.core.retry.RetryConfig;
+import com.im.core.retry.RetryExecutor;
+import com.im.core.retry.RetryStrategies;
 import org.apache.ibatis.session.SqlSession;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,6 +32,13 @@ import java.util.List;
 public class DbMessageStore implements IMessageStore {
 
     private static final Logger log = LoggerFactory.getLogger(DbMessageStore.class);
+    private static final RetryConfig CFG = RetryStrategies.MESSAGE_STORE;
+
+    private final RetryExecutor retryExecutor;
+
+    public DbMessageStore(RetryExecutor retryExecutor) {
+        this.retryExecutor = retryExecutor;
+    }
 
     private static final int MAX_OFFLINE_PULL = 200;
 
@@ -39,11 +49,14 @@ public class DbMessageStore implements IMessageStore {
             log.warn("Cannot save message without conversationId: mid={}", msg.getMessageId());
             return;
         }
+        retryExecutor.execute(CFG, () -> {
         try (SqlSession session = MyBatisPlusFactory.openSession()) {
             MessageMapper mapper = session.getMapper(MessageMapper.class);
             mapper.insert(entity);
             session.commit();
         }
+                    return null;
+        });
     }
 
     @Override
@@ -103,6 +116,7 @@ public class DbMessageStore implements IMessageStore {
     public void markDelivered(String userId, List<String> msgIds) {
         if (userId == null || msgIds == null || msgIds.isEmpty()) return;
 
+        retryExecutor.execute(CFG, () -> {
         try (SqlSession session = MyBatisPlusFactory.openSession()) {
             MessageMapper mapper = session.getMapper(MessageMapper.class);
 
@@ -118,10 +132,13 @@ public class DbMessageStore implements IMessageStore {
             session.commit();
             log.debug("Marked {} messages delivered for user {}", msgIds.size(), userId);
         }
+                    return null;
+        });
     }
 
     @Override
     public void deleteBefore(String userId, long seqId) {
+        retryExecutor.execute(CFG, () -> {
         try (SqlSession session = MyBatisPlusFactory.openSession()) {
             MessageMapper mapper = session.getMapper(MessageMapper.class);
 
@@ -133,6 +150,8 @@ public class DbMessageStore implements IMessageStore {
             session.commit();
             log.debug("Deleted messages before seq {} for user {}", seqId, userId);
         }
+                    return null;
+        });
     }
 
     // ========== Entity / IMCommand 互转 ==========

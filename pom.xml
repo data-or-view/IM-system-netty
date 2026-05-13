@@ -33,6 +33,7 @@
         <hikaricp.version>6.2.1</hikaricp.version>
         <mysql.version>8.4.0</mysql.version>
         <minio.version>8.5.17</minio.version>
+        <failsafe.version>3.3.2</failsafe.version>
     </properties>
 
     <dependencyManagement>
@@ -157,6 +158,13 @@
                 <groupId>io.minio</groupId>
                 <artifactId>minio</artifactId>
                 <version>${minio.version}</version>
+            </dependency>
+
+            <!-- Failsafe: 重试 + 熔断 -->
+            <dependency>
+                <groupId>dev.failsafe</groupId>
+                <artifactId>failsafe</artifactId>
+                <version>${failsafe.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

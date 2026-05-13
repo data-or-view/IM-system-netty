@@ -47,12 +47,19 @@ public class PersistenceConsumer implements ILifecycle {
                 try {
                     messageStore.save(msg);
                 } catch (Exception e) {
-                    String err = e.getMessage();
-                    // Duplicate key: 写前日志已保存，正常
-                    if (err != null && err.contains("Duplicate entry")) {
+                    // 遍历异常链查找是否是重复键
+                    boolean isDup = false;
+                    for (Throwable t = e; t != null; t = t.getCause()) {
+                        String m = t.getMessage();
+                        if (m != null && m.contains("Duplicate entry")) {
+                            isDup = true;
+                            break;
+                        }
+                    }
+                    if (isDup) {
                         log.debug("Msg already saved (dup), seqId={}, mid={}", msg.getSeqId(), messageId);
                     } else {
-                        log.warn("Persistence save failed: seqId={}, err={}", msg.getSeqId(), err);
+                        log.warn("Persistence save failed: seqId={}, err={}", msg.getSeqId(), e.getMessage());
                     }
                 }
             }

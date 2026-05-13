@@ -7,6 +7,9 @@ import com.im.api.UserInformation;
 import com.im.core.db.MyBatisPlusFactory;
 import com.im.core.db.entity.UserEntity;
 import com.im.core.db.mapper.UserMapper;
+import com.im.core.retry.RetryConfig;
+import com.im.core.retry.RetryExecutor;
+import com.im.core.retry.RetryStrategies;
 import org.apache.ibatis.session.SqlSession;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -23,27 +26,37 @@ import java.util.stream.Collectors;
 public class DbUserManager implements IUserManager {
 
     private static final Logger log = LoggerFactory.getLogger(DbUserManager.class);
+    private static final RetryConfig CFG = RetryStrategies.DB_WRITE;
+
+    private final RetryExecutor retryExecutor;
+
+    public DbUserManager(RetryExecutor retryExecutor) {
+        this.retryExecutor = retryExecutor;
+    }
 
     @Override
     public void register(String userId, String nickname, String faceUrl, String ex) {
-        try (SqlSession session = MyBatisPlusFactory.openSession()) {
-            UserMapper mapper = session.getMapper(UserMapper.class);
-            UserEntity existing = mapper.selectById(userId);
-            if (existing != null) {
-                throw new ImException(ImErrorCode.CONFLICT, "User already exists: " + userId);
+        retryExecutor.execute(CFG, () -> {
+            try (SqlSession session = MyBatisPlusFactory.openSession()) {
+                UserMapper mapper = session.getMapper(UserMapper.class);
+                UserEntity existing = mapper.selectById(userId);
+                if (existing != null) {
+                    throw new ImException(ImErrorCode.CONFLICT, "User already exists: " + userId);
+                }
+                UserEntity entity = new UserEntity();
+                entity.setUserId(userId);
+                entity.setNickname(nickname != null ? nickname : userId);
+                entity.setFaceUrl(faceUrl);
+                entity.setEx(ex);
+                entity.setStatus(1);
+                entity.setCreatedAt(System.currentTimeMillis());
+                entity.setUpdatedAt(entity.getCreatedAt());
+                mapper.insert(entity);
+                session.commit();
+                log.info("User registered: userId={}, nickname={}", userId, entity.getNickname());
             }
-            UserEntity entity = new UserEntity();
-            entity.setUserId(userId);
-            entity.setNickname(nickname != null ? nickname : userId);
-            entity.setFaceUrl(faceUrl);
-            entity.setEx(ex);
-            entity.setStatus(1);
-            entity.setCreatedAt(System.currentTimeMillis());
-            entity.setUpdatedAt(entity.getCreatedAt());
-            mapper.insert(entity);
-            session.commit();
-            log.info("User registered: userId={}, nickname={}", userId, entity.getNickname());
-        }
+            return null;
+        });
     }
 
     @Override
@@ -80,21 +93,24 @@ public class DbUserManager implements IUserManager {
     @Override
     public void updateUserInformation(String userId, String nickname, String faceUrl,
                                       String ex, int globalRecvMsgOpt) {
-        try (SqlSession session = MyBatisPlusFactory.openSession()) {
-            UserMapper mapper = session.getMapper(UserMapper.class);
-            UserEntity entity = mapper.selectById(userId);
-            if (entity == null) {
-                throw new ImException(ImErrorCode.NOT_FOUND, "User not found: " + userId);
+        retryExecutor.execute(CFG, () -> {
+            try (SqlSession session = MyBatisPlusFactory.openSession()) {
+                UserMapper mapper = session.getMapper(UserMapper.class);
+                UserEntity entity = mapper.selectById(userId);
+                if (entity == null) {
+                    throw new ImException(ImErrorCode.NOT_FOUND, "User not found: " + userId);
+                }
+                if (nickname != null) entity.setNickname(nickname);
+                if (faceUrl != null) entity.setFaceUrl(faceUrl);
+                if (ex != null) entity.setEx(ex);
+                if (globalRecvMsgOpt >= 0) entity.setGlobalRecvMsgOpt(globalRecvMsgOpt);
+                entity.setUpdatedAt(System.currentTimeMillis());
+                mapper.updateById(entity);
+                session.commit();
+                log.info("User updated: userId={}", userId);
             }
-            if (nickname != null) entity.setNickname(nickname);
-            if (faceUrl != null) entity.setFaceUrl(faceUrl);
-            if (ex != null) entity.setEx(ex);
-            if (globalRecvMsgOpt >= 0) entity.setGlobalRecvMsgOpt(globalRecvMsgOpt);
-            entity.setUpdatedAt(System.currentTimeMillis());
-            mapper.updateById(entity);
-            session.commit();
-            log.info("User updated: userId={}", userId);
-        }
+            return null;
+        });
     }
 
     @Override
