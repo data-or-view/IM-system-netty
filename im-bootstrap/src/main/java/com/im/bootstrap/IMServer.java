@@ -62,6 +62,8 @@ import com.im.core.handler.*;
 import com.im.core.mq.MemoryMessageQueue;
 import com.im.core.seq.LocalSequenceManager;
 import com.im.core.session.SessionManager;
+import com.im.core.seq.RedisSequenceManager;
+import com.im.core.store.DbMessageStore;
 import com.im.core.store.LocalMessageStore;
 import com.im.core.util.IMExecutors;
 import io.netty.bootstrap.ServerBootstrap;
@@ -126,7 +128,7 @@ public class IMServer implements ILifecycle {
     private final IClusterMessageBus clusterMessageBus;
 
     // 消息序号
-    private final LocalSequenceManager sequenceManager;
+    private final ISequenceManager sequenceManager;
 
     // 认证
     private final HmacTokenAuthenticator authenticator;
@@ -158,6 +160,9 @@ public class IMServer implements ILifecycle {
     private Channel serverChannel;
     private Channel wsChannel;
     private ScheduledExecutorService scanScheduler;
+
+    /** 数据库初始化是否失败（如果失败则降级为内存实现） */
+    private static boolean databaseFailed = false;
 
     public IMServer(ServerConfiguration config) {
         this.config = config;
@@ -203,8 +208,11 @@ public class IMServer implements ILifecycle {
         this.redisConfig = routeTable instanceof RedisRouteTable ? ((RedisRouteTable) routeTable).getRedisConfig() : null;
         this.clusterMessageBus = new LocalClusterMessageBus();
 
-        // ── 消息序号 ──
-        this.sequenceManager = new LocalSequenceManager();
+        // ── 消息序号（Redis 可用时用持久化 INCR 序号） ──
+        this.sequenceManager = this.redisConfig != null
+                ? new RedisSequenceManager(this.redisConfig)
+                : new LocalSequenceManager();
+        log.info("SequenceManager: {}", this.redisConfig != null ? "RedisSequenceManager" : "LocalSequenceManager");
 
         // ── 认证 ──
         this.authenticator = new HmacTokenAuthenticator(config.getTokenSecret());
@@ -237,8 +245,11 @@ public class IMServer implements ILifecycle {
         log.info("FileStorage: MinIO (bucket=im-system, endpoint={})",
                 System.getenv().getOrDefault("MINIO_ENDPOINT", "http://127.0.0.1:9000"));
 
-        // ── 消息基础设施 ──
-        this.messageStore = new LocalMessageStore();
+        // ── 消息基础设施（数据库模式下用 DbMessageStore 持久化） ──
+        this.messageStore = dbEnabled(config)
+                ? new DbMessageStore()
+                : new LocalMessageStore();
+        log.info("MessageStore: {}", dbEnabled(config) ? "DbMessageStore" : "LocalMessageStore");
         this.messageQueue = new MemoryMessageQueue();
 
         // ── 消息消费者 ──
@@ -423,6 +434,7 @@ public class IMServer implements ILifecycle {
     // ========== main ==========
 
     private static boolean dbEnabled(ServerConfiguration config) {
+        if (databaseFailed) return false;
         String dbProp = System.getProperty("db.enabled");
         if ("true".equalsIgnoreCase(dbProp)) return true;
         String jdbcUrl = System.getProperty("db.jdbcUrl");
@@ -454,6 +466,7 @@ public class IMServer implements ILifecycle {
                 log.info("Database initialized: {}", dbConfig.getJdbcUrl());
             } catch (Exception e) {
                 log.error("Failed to initialize database, falling back to in-memory storage", e);
+                databaseFailed = true;
             }
         } else {
             log.info("Database disabled (use -Ddb.enabled=true or -Ddb.jdbcUrl to enable)");
