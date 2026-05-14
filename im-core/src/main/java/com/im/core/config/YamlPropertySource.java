@@ -26,16 +26,22 @@ public class YamlPropertySource extends MapBackedPropertySource {
     private static final Logger log = LoggerFactory.getLogger(YamlPropertySource.class);
 
     private final String path;
+    private final int order;
     private final boolean available;
 
     public YamlPropertySource(String path) {
+        this(path, 200);
+    }
+
+    public YamlPropertySource(String path, int order) {
         super(flatten(load(path)));
         this.path = path;
+        this.order = order;
         this.available = !entries.isEmpty();
     }
 
     @Override
-    public int order() { return 200; }
+    public int order() { return order; }
 
     @Override
     public boolean isAvailable() { return available; }

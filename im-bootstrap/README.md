@@ -1,6 +1,6 @@
 # im-bootstrap — 启动引导层
 
-Netty 双端口启动器，装配所有组件。
+Netty WebSocket + HTTP 启动器，装配所有组件。
 
 ## 配置
 
@@ -9,7 +9,6 @@ Netty 双端口启动器，装配所有组件。
 | 字段 | 默认值 | 说明 |
 |------|--------|------|
 | host | 0.0.0.0 | 监听地址 |
-| tcpPort | 8080 | TCP 端口 |
 | wsPort | 8081 | WebSocket 端口 |
 | wsEnabled | true | 是否启用 WebSocket |
 | idleTimeSeconds | 30 | 空闲连接检测超时 |

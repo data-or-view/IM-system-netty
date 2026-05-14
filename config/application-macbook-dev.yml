@@ -1,0 +1,37 @@
+# =============================================
+# IM System — MacBook 本地开发配置
+# =============================================
+# 激活方式: -Dim.env=macbook-dev 或 IM_ENV=macbook-dev
+# 此文件覆盖 config/application.yml 中的值
+# =============================================
+
+im:
+  # ── 服务器 ──
+  node:
+    id: "macbook-dev"
+
+  # ── WebSocket / HTTP (避免与 Docker 容器端口冲突) ──
+  ws:
+    port: 8083
+  http:
+    port: 8084
+
+  # ── 数据库 (MySQL 容器 root/123456) ──
+  db:
+    jdbc-url: "jdbc:mysql://127.0.0.1:3306/im_system?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true"
+    username: "root"
+    password: "123456"
+
+  # ── Redis (启用本地 Docker Redis) ──
+  redis:
+    host: "127.0.0.1"
+    port: 6379
+    password: ""
+    database: 0
+
+  # ── MinIO ──
+  minio:
+    endpoint: "http://127.0.0.1:9000"
+    access-key: "myuser"
+    secret-key: "mysecret123"
+    bucket: "im-system"

@@ -1,94 +1,48 @@
 package com.im.bootstrap;
 
-/**
- * IM 系统主启动入口。
- *
- * <p>装配并启动 Netty TCP (8080) 和 WebSocket (8081) 双端口服务器。
- * 在一个单体内完成所有组件的依赖注入和生命周期管理。</p>
- *
- * <h3>启动流程</h3>
- * <ol>
- *   <li>初始化组件：会话管理、路由表、节点发现、认证、业务 Manager、MQ 和存储</li>
- *   <li>启动 Netty 双端口（TCP + WebSocket），共享 EventLoopGroup 和业务 Handler</li>
- *   <li>MQ Consumer 开始消费消息（持久化 + 投递）</li>
- * </ol>
- *
- * <h3>关闭流程（优雅）</h3>
- * <ol>
- *   <li>停止 MQ Consumer</li>
- *   <li>关闭 EventLoopGroup</li>
- *   <li>等待虚拟线程池完成运行中任务</li>
- * </ol>
- *
- * <h3>配置</h3>
- * 使用多层配置源: {@code -D} 参数 > 环境变量 > {@code config/application.yml} > 代码默认值。
- * 所有键使用 {@code im.} 前缀。向后兼容无前缀的旧键（{@code db.enabled}、{@code redis.host} 等）。
- *
- * @see ServerConfiguration
- * @see com.im.core.config.PropertySources
- * @see ChatHandler
- * @see MessageRouterHandler
- */
-
 import com.im.api.*;
 import com.im.api.cache.ICache;
-import com.im.bootstrap.ws.ByteBufToWebSocketHandler;
-import com.im.bootstrap.ws.WebSocketIMDecoder;
-import com.im.codec.IMDecoder;
-import com.im.codec.IMEncoder;
-import com.im.core.PendingAcknowledgementManager;
+import com.im.api.retry.RetryExecutor;
+import com.im.bootstrap.http.*;
 import com.im.core.auth.HmacTokenAuthenticator;
 import com.im.core.cache.ConcurrentHashCache;
 import com.im.core.config.*;
 import com.im.core.conversation.DbConversationManager;
 import com.im.core.conversation.LocalConversationManager;
-import com.im.core.discovery.RedisNodeDiscovery;
-import com.im.core.group.DbGroupManager;
-import com.im.core.group.LocalGroupManager;
-import com.im.core.handler.AuthenticationInterceptor;
-import com.im.core.webhook.LocalWebhookManager;
-import com.im.core.redis.RedisConfiguration;
-import com.im.core.redis.RedisRouteTable;
-import com.im.core.db.MyBatisPlusFactory;
 import com.im.core.db.DatabaseConfiguration;
+import com.im.core.db.MyBatisPlusFactory;
+import com.im.core.db.SchemaInitializer;
+import com.im.core.delivery.*;
+import com.im.core.discovery.*;
+import com.im.core.dispatcher.MessageRouterHandler;
+import com.im.core.dispatcher.PendingAcknowledgementManager;
+import com.im.core.file.MinioFileStorageService;
 import com.im.core.friend.DbFriendManager;
 import com.im.core.friend.LocalFriendManager;
-import com.im.core.user.DbUserManager;
-import com.im.core.user.LocalUserManager;
-import com.im.core.file.MinioFileStorageService;
-import com.im.core.handler.FileUploadHandler;
-import com.im.core.delivery.DeliveryConsumer;
-import com.im.core.delivery.LocalClusterMessageBus;
-import com.im.core.delivery.PersistenceConsumer;
-import com.im.core.discovery.LocalNodeDiscovery;
-import com.im.core.discovery.LocalRouteTable;
-import com.im.core.dispatcher.MessageRouterHandler;
+import com.im.core.group.DbGroupManager;
+import com.im.core.group.LocalGroupManager;
 import com.im.core.handler.*;
 import com.im.core.mq.MemoryMessageQueue;
-import com.im.core.seq.LocalSequenceManager;
-import com.im.core.session.SessionManager;
+import com.im.core.redis.RedisConfiguration;
+import com.im.core.redis.RedisRouteTable;
 import com.im.core.redis.RedisStateStore;
-import com.im.core.retry.RetryExecutor;
 import com.im.core.retry.FailsafeRetryExecutor;
+import com.im.core.seq.LocalSequenceManager;
 import com.im.core.seq.RedisSequenceManager;
-import com.im.core.store.LocalStateStore;
+import com.im.core.session.SessionManager;
 import com.im.core.store.DbMessageStore;
 import com.im.core.store.LocalMessageStore;
+import com.im.core.store.LocalStateStore;
+import com.im.core.usecase.*;
+import com.im.core.user.DbUserManager;
+import com.im.core.user.LocalUserManager;
 import com.im.core.util.IMExecutors;
-import io.netty.bootstrap.ServerBootstrap;
-import io.netty.channel.*;
+import com.im.core.webhook.LocalWebhookManager;
+import io.netty.channel.Channel;
+import io.netty.channel.EventLoopGroup;
 import io.netty.channel.epoll.Epoll;
 import io.netty.channel.epoll.EpollEventLoopGroup;
-import io.netty.channel.epoll.EpollServerSocketChannel;
 import io.netty.channel.nio.NioEventLoopGroup;
-import io.netty.channel.socket.SocketChannel;
-import io.netty.channel.socket.nio.NioServerSocketChannel;
-import io.netty.handler.codec.http.HttpObjectAggregator;
-import io.netty.handler.codec.http.HttpServerCodec;
-import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
-import io.netty.handler.logging.LogLevel;
-import io.netty.handler.logging.LoggingHandler;
-import io.netty.handler.timeout.IdleStateHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -99,28 +53,6 @@ import java.util.Properties;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
-/**
- * IM 服务端启动器。
- *
- * Pipeline：
- *   LoggingHandler → IMDecoder → IMEncoder → IdleStateHandler → ConnectionEventHandler → MessageRouterHandler
- *
- * 集群架构（单机模式）：
- *   LocalNodeDiscovery（自身节点发现）
- *   LocalRouteTable（本地路由表→SessionManager）
- *
- * 消息管道：
- *   ChatHandler (Receiver) ──MQ──► DeliveryConsumer ──► writeAndFlush / store
- *
- * 登录/断开流程（路由表同步）：
- *   LoginHandler.handle → routeTable.online(userId)
- *   ConnectionEventHandler.channelInactive → routeTable.offline(userId)
- *
- * TODO: 生产环境替换为：
- *   · LocalNodeDiscovery → RedisNodeDiscovery / EtcdNodeDiscovery
- *   · LocalRouteTable → RedisRouteTable（在线状态 + 集群路由）
- *   · MemoryMessageQueue → KafkaQueue / RocketMQQueue
- */
 public class IMServer implements ILifecycle {
 
     private static final Logger log = LoggerFactory.getLogger(IMServer.class);
@@ -130,209 +62,170 @@ public class IMServer implements ILifecycle {
     private final PendingAcknowledgementManager pendingAcknowledgementManager;
     private final MessageRouterHandler routerHandler;
     private final ConnectionEventHandler connectionEventHandler;
-
-    // 集群基础设施
     private final INodeDiscovery nodeDiscovery;
     private final IRouteTable routeTable;
     private final RedisConfiguration redisConfig;
     private final IClusterMessageBus clusterMessageBus;
-    private final IClusterStateStore stateStore;
-
-    // 消息序号
+    private final HttpRestHandler httpRestHandler;
     private final ISequenceManager sequenceManager;
-
-    // 重试模板
     private final RetryExecutor retryExecutor;
-
-    // 认证
-    private final HmacTokenAuthenticator authenticator;
-
-    // 群聊
     private final IGroupManager groupManager;
-
-    // 会话管理
     private final IConversationManager conversationManager;
-
-    // 好友管理
     private final IFriendManager friendManager;
-
-    // 用户管理
     private final IUserManager userManager;
-
-    // 消息管道
     private final IMessageQueue messageQueue;
     private final PersistenceConsumer persistenceConsumer;
     private final DeliveryConsumer deliveryConsumer;
     private final IMessageStore messageStore;
-
-    // Webhook
-    private final IWebhookManager webhookManager;
     private final IFileStorageService fileStorage;
+    private static boolean databaseFailed = false;
 
     private EventLoopGroup bossGroup;
     private EventLoopGroup workerGroup;
-    private Channel serverChannel;
     private Channel wsChannel;
+    private Channel httpChannel;
     private ScheduledExecutorService scanScheduler;
-
-    /** 数据库初始化是否失败（如果失败则降级为内存实现） */
-    private static boolean databaseFailed = false;
 
     public IMServer(ServerConfiguration config, PropertySources props) {
         this.config = config;
         this.sessionManager = new SessionManager();
         this.pendingAcknowledgementManager = new PendingAcknowledgementManager();
-
-        // ── 本节点标识 ──
         String nodeId = config.getNodeId();
 
-        // ── Redis 配置（支持新旧键名） ──
-        String redisClusterNodes = nonNull(
-                props.get("im.redis.cluster.nodes"),
-                props.get("redis.cluster.nodes"));
-        String redisHost = nonNull(
-                props.get("im.redis.host"),
-                props.get("redis.host"), config.getRedisHost());
+        // 集群基础设施（Redis / Local）
+        ClusterInfra infra = initClusterInfrastructure(props, nodeId);
+        this.routeTable = infra.routeTable;
+        this.redisConfig = infra.redisConfig;
+        this.clusterMessageBus = infra.clusterMessageBus;
+        this.nodeDiscovery = infra.nodeDiscovery;
 
-        if (redisClusterNodes != null && !redisClusterNodes.isEmpty()) {
-            // 集群模式（优先级高于单机 host:port）
-            config.setRedisHost("cluster");
-        } else if (redisHost != null && !redisHost.isEmpty()) {
-            config.setRedisHost(redisHost);
-            String redisPort = nonNull(
-                    props.get("im.redis.port"),
-                    props.get("redis.port"), String.valueOf(config.getRedisPort()));
-            if (redisPort != null) config.setRedisPort(Integer.parseInt(redisPort));
-        }
-
-        if (config.isRedisEnabled()) {
-            RedisConfiguration.Builder rcb = RedisConfiguration.builder()
-                    .password(config.getRedisPassword());
-            if (redisClusterNodes != null && !redisClusterNodes.isEmpty()) {
-                String[] nodes = redisClusterNodes.split(",");
-                rcb.clusterNodes(nodes);
-                log.info("Using RedisClusterNodes: {}", redisClusterNodes);
-            } else {
-                rcb.host(config.getRedisHost()).port(config.getRedisPort()).database(config.getRedisDatabase());
-            }
-            this.routeTable = new RedisRouteTable(rcb.build(), sessionManager, nodeId);
-            log.info("Using RedisRouteTable: {}", config.getRedisHost());
-        } else {
-            this.routeTable = new LocalRouteTable(sessionManager, nodeId);
-            log.info("Using LocalRouteTable (no Redis configured)");
-        }
-        this.redisConfig = routeTable instanceof RedisRouteTable ? ((RedisRouteTable) routeTable).getRedisConfig() : null;
-        this.clusterMessageBus = new LocalClusterMessageBus();
-
-        // ── 集群基础设施 ──
-        this.nodeDiscovery = this.redisConfig != null
-                ? new RedisNodeDiscovery(this.redisConfig)
-                : new LocalNodeDiscovery();
-        log.info("NodeDiscovery: {}", this.redisConfig != null ? "RedisNodeDiscovery" : "LocalNodeDiscovery");
-
-        // ── 集群状态存储（Redis 可用时使用 RedisStateStore） ──
-        this.stateStore = this.redisConfig != null
-                ? new RedisStateStore(this.redisConfig)
-                : new LocalStateStore();
-        log.info("StateStore: {}", this.redisConfig != null ? "RedisStateStore" : "LocalStateStore");
-
-        // ── 消息序号（Redis 可用时用持久化 INCR 序号） ──
-        this.sequenceManager = this.redisConfig != null
-                ? new RedisSequenceManager(this.redisConfig)
+        // 消息序号
+        this.sequenceManager = redisConfig != null
+                ? new RedisSequenceManager(redisConfig)
                 : new LocalSequenceManager();
-        log.info("SequenceManager: {}", this.redisConfig != null ? "RedisSequenceManager" : "LocalSequenceManager");
 
-        // ── 认证 ──
-        this.authenticator = new HmacTokenAuthenticator(config.getTokenSecret());
-
-        // ── 重试模板（DB 操作指数退避重试） ──
+        // 认证 + 重试
+        var authenticator = new HmacTokenAuthenticator(config.getTokenSecret());
         this.retryExecutor = new FailsafeRetryExecutor();
 
-        // ── 群聊（带缓存） ──
-        ICache<String, com.im.api.GroupInformation> groupInfoCache = new ConcurrentHashCache<>();
-        ICache<String, List<String>> groupMemberCache = new ConcurrentHashCache<>();
-        // 数据库模式下 DbGroupManager 自己管理数据，不使用缓存层
+        // 业务 Manager（DB / 内存）
         this.groupManager = dbEnabled(config)
                 ? new DbGroupManager(retryExecutor)
-                : new LocalGroupManager(groupInfoCache, groupMemberCache);
-
-        // ── 会话管理（数据库模式下用 DbConversationManager 持久化） ──
-        ICache<String, List<Conversation>> conversationCache = new ConcurrentHashCache<>();
+                : new LocalGroupManager(new ConcurrentHashCache<>(), new ConcurrentHashCache<>());
         this.conversationManager = dbEnabled(config)
                 ? new DbConversationManager(retryExecutor)
-                : new LocalConversationManager(conversationCache);
-        log.info("ConversationManager: {}", dbEnabled(config)
-                ? "DbConversationManager" : "LocalConversationManager");
-
-        // ── 数据库管理器（优先数据库实现，降级到内存） ──
+                : new LocalConversationManager(new ConcurrentHashCache<>());
         this.friendManager = dbEnabled(config) ? new DbFriendManager(retryExecutor) : new LocalFriendManager();
         this.userManager = dbEnabled(config) ? new DbUserManager(retryExecutor) : new LocalUserManager();
-        log.info("FriendManager: {} / UserManager: {}",
-                dbEnabled(config) ? "DbFriendManager" : "LocalFriendManager",
-                dbEnabled(config) ? "DbUserManager" : "LocalUserManager");
 
-        // ── Webhook ──
-        this.webhookManager = new LocalWebhookManager(config.getWebhookUrl());
+        // 文件存储
+        this.fileStorage = new MinioFileStorageService(
+                nonNull(props.get("im.minio.endpoint"), "http://127.0.0.1:9000"),
+                nonNull(props.get("im.minio.access-key"), props.get("MINIO_ACCESS_KEY"), "minioadmin"),
+                nonNull(props.get("im.minio.secret-key"), props.get("MINIO_SECRET_KEY"), "minioadmin"));
 
-        // ── 文件存储 ──
-        this.fileStorage = new MinioFileStorageService();
-        log.info("FileStorage: MinIO (bucket=im-system, endpoint={})",
-                System.getenv().getOrDefault("MINIO_ENDPOINT", "http://127.0.0.1:9000"));
-
-        // ── 消息基础设施（数据库模式下用 DbMessageStore 持久化） ──
-        this.messageStore = dbEnabled(config)
-                ? new DbMessageStore(retryExecutor)
-                : new LocalMessageStore();
-        log.info("MessageStore: {}", dbEnabled(config) ? "DbMessageStore" : "LocalMessageStore");
+        // 消息存储 + 队列
+        this.messageStore = dbEnabled(config) ? new DbMessageStore(retryExecutor) : new LocalMessageStore();
         this.messageQueue = new MemoryMessageQueue();
 
-        // ── 消息消费者 ──
+        // HTTP REST handler
+        HttpRestHandler hrh = new HttpRestHandler();
+        new UserRestHandler(userManager).register(hrh);
+        new FriendRestHandler(friendManager).register(hrh);
+        new GroupRestHandler(groupManager).register(hrh);
+        new ConversationRestHandler(conversationManager).register(hrh);
+        new MessageRestHandler(messageStore, sequenceManager).register(hrh);
+        new FileRestHandler(fileStorage).register(hrh);
+        hrh.addInterceptor(new HttpRequestLogInterceptor());
+        this.httpRestHandler = hrh;
+
+        // 消费者
         this.persistenceConsumer = new PersistenceConsumer(messageQueue, messageStore, conversationManager);
         this.deliveryConsumer = new DeliveryConsumer(
-                messageQueue, sessionManager, routeTable,
-                clusterMessageBus, nodeId, groupManager);
+                messageQueue, sessionManager, routeTable, clusterMessageBus, nodeId, groupManager);
 
-        // ── 连接事件处理器 ──
+        // 连接事件
         this.connectionEventHandler = new ConnectionEventHandler(
                 sessionManager, pendingAcknowledgementManager, routeTable, nodeId);
 
-        // ── 注册 IMessageHandler ──
+        // Use Cases
+        LoginUseCase loginUseCase = new LoginUseCase(authenticator, routeTable, messageStore, nodeId);
+        WebhookService webhookService = new WebhookService(new LocalWebhookManager(config.getWebhookUrl()));
+        SendMessageUseCase sendMessageUseCase = new SendMessageUseCase(
+                messageQueue, messageStore, sequenceManager, groupManager, webhookService);
+
+        // Handler 注册
         List<IMessageHandler> handlers = List.of(
-                new HeartbeatHandler(sessionManager, routeTable),
-                new LoginHandler(sessionManager, messageStore, routeTable, nodeId, authenticator, userManager),
-                new RegisterHandler(userManager),
-                ChatHandler.builder(messageQueue, messageStore, sequenceManager)
-                        .groupManager(groupManager)
-                        .webhookManager(webhookManager)
-                        .build(),
-                new PullMessageHandler(messageStore, sequenceManager),
-                new ConversationGetHandler(conversationManager),
-                new ConversationSetHandler(conversationManager),
-                new GroupHandler(groupManager),
-                new GroupSearchHandler(groupManager),
-                new FriendHandler(friendManager),
-                new UserSearchHandler(userManager),
-                new FileUploadHandler(fileStorage)
+                new HeartbeatHandler(new HeartbeatUseCase(routeTable), sessionManager),
+                new LoginHandler(loginUseCase, sessionManager),
+                new RegisterHandler(new RegisterUseCase(userManager)),
+                new ChatHandler(sendMessageUseCase),
+                new PullMessageHandler(new PullMessageUseCase(messageStore, sequenceManager)),
+                new ConversationGetHandler(new ConversationGetUseCase(conversationManager)),
+                new ConversationSetHandler(new ConversationSetUseCase(conversationManager)),
+                new GroupHandler(new GroupUseCase(groupManager)),
+                new GroupSearchHandler(new GroupSearchUseCase(groupManager)),
+                new FriendHandler(new FriendUseCase(friendManager)),
+                new UserSearchHandler(new UserSearchUseCase(userManager)),
+                new FileUploadHandler(new FileUploadUseCase(fileStorage))
         );
 
         this.routerHandler = new MessageRouterHandler(handlers, config.getBusinessThreads());
-        // ── 注册认证拦截器（第一个执行，优先验证 token） ──
         this.routerHandler.addInterceptor(new AuthenticationInterceptor(authenticator));
         this.routerHandler.addInterceptor(new AuthorizationInterceptor(authenticator));
     }
 
+    // ── Cluster infrastructure setup ──
+
+    private record ClusterInfra(IRouteTable routeTable, RedisConfiguration redisConfig,
+                                 IClusterMessageBus clusterMessageBus, INodeDiscovery nodeDiscovery,
+                                 IClusterStateStore stateStore) {}
+
+    private ClusterInfra initClusterInfrastructure(PropertySources props, String nodeId) {
+        String redisClusterNodes = nonNull(props.get("im.redis.cluster.nodes"), props.get("redis.cluster.nodes"));
+        String redisHost = nonNull(props.get("im.redis.host"), props.get("redis.host"), config.getRedisHost());
+
+        if (redisClusterNodes != null && !redisClusterNodes.isEmpty()) {
+            config.setRedisHost("cluster");
+        } else if (redisHost != null && !redisHost.isEmpty()) {
+            config.setRedisHost(redisHost);
+            String redisPort = nonNull(props.get("im.redis.port"), props.get("redis.port"), String.valueOf(config.getRedisPort()));
+            if (redisPort != null) config.setRedisPort(Integer.parseInt(redisPort));
+        }
+
+        IRouteTable rt;
+        RedisConfiguration rc = null;
+        if (config.isRedisEnabled()) {
+            RedisConfiguration.Builder rcb = RedisConfiguration.builder().password(config.getRedisPassword());
+            if (redisClusterNodes != null && !redisClusterNodes.isEmpty()) {
+                rcb.clusterNodes(redisClusterNodes.split(","));
+            } else {
+                rcb.host(config.getRedisHost()).port(config.getRedisPort()).database(config.getRedisDatabase());
+            }
+            rc = rcb.build();
+            rt = new RedisRouteTable(rc, sessionManager, nodeId);
+        } else {
+            rt = new LocalRouteTable(sessionManager, nodeId);
+        }
+
+        return new ClusterInfra(
+                rt, rc,
+                rc != null ? new RedisClusterMessageBus(rc, nodeId) : new LocalClusterMessageBus(),
+                rc != null ? new RedisNodeDiscovery(rc) : new LocalNodeDiscovery(),
+                rc != null ? new RedisStateStore(rc) : new LocalStateStore());
+    }
+
+    // ── Lifecycle ──
+
     @Override
     public void start() throws Exception {
-        // 1. 节点注册
         nodeDiscovery.start();
         nodeDiscovery.register(buildNodeInformation());
-
-        // 2. 启动 MQ + 消费者
+        clusterMessageBus.start();
         messageQueue.start();
         persistenceConsumer.start();
         deliveryConsumer.start();
 
-        // 3. EventLoopGroup
         boolean useEpoll = config.isUseEpoll() && Epoll.isAvailable();
         bossGroup = useEpoll
                 ? new EpollEventLoopGroup(config.getBossThreads())
@@ -341,76 +234,24 @@ public class IMServer implements ILifecycle {
                 ? new EpollEventLoopGroup(config.getWorkerThreads())
                 : new NioEventLoopGroup(config.getWorkerThreads());
 
-        // 4. 空闲 session 定时扫描
         scanScheduler = IMExecutors.newScheduledExecutor("im-scanner", 1);
         scanScheduler.scheduleAtFixedRate(
                 () -> sessionManager.scanIdleSessions(config.getHeartbeatTimeoutSeconds()),
                 30, 30, TimeUnit.SECONDS);
 
-        // 5. TCP ServerBootstrap
-        ServerBootstrap bootstrap = new ServerBootstrap()
-                .group(bossGroup, workerGroup)
-                .channel(useEpoll ? EpollServerSocketChannel.class : NioServerSocketChannel.class)
-                .option(ChannelOption.SO_BACKLOG, 1024)
-                .option(ChannelOption.SO_REUSEADDR, true)
-                .childOption(ChannelOption.TCP_NODELAY, true)
-                .childOption(ChannelOption.SO_KEEPALIVE, false)
-                .childOption(ChannelOption.SO_RCVBUF, config.getSocketRcvBufSize())
-                .childOption(ChannelOption.SO_SNDBUF, config.getSocketSndBufSize())
-                .childHandler(new ChannelInitializer<SocketChannel>() {
-                    @Override
-                    protected void initChannel(SocketChannel ch) {
-                        ChannelPipeline p = ch.pipeline();
-                        p.addLast(new LoggingHandler(LogLevel.INFO));
-                        p.addLast(new IMDecoder());
-                        p.addLast(new IMEncoder());
-                        p.addLast(new IdleStateHandler(0, 0, config.getIdleTimeSeconds()));
-                        p.addLast(connectionEventHandler);
-                        p.addLast(routerHandler);
-                    }
-                });
-
-        // 6. 绑定 TCP
-        ChannelFuture future = bootstrap.bind(config.getPort()).sync();
-        serverChannel = future.channel();
-
-        log.info("TCP server started: nodeId={}, port={}, workers={}, useEpoll={}",
-                config.getNodeId(), config.getPort(), config.getWorkerThreads(), useEpoll);
-
-        // 7. WebSocket ServerBootstrap（同一 EventLoopGroup 共享）
         if (config.isWsEnabled()) {
-            ByteBufToWebSocketHandler byteBufToWebSocketHandler = new ByteBufToWebSocketHandler();
-            ServerBootstrap wsBootstrap = new ServerBootstrap()
-                    .group(bossGroup, workerGroup)
-                    .channel(useEpoll ? EpollServerSocketChannel.class : NioServerSocketChannel.class)
-                    .option(ChannelOption.SO_BACKLOG, 1024)
-                    .option(ChannelOption.SO_REUSEADDR, true)
-                    .childOption(ChannelOption.TCP_NODELAY, true)
-                    .childOption(ChannelOption.SO_KEEPALIVE, false)
-                    .childHandler(new ChannelInitializer<SocketChannel>() {
-                        @Override
-                        protected void initChannel(SocketChannel ch) {
-                            ChannelPipeline p = ch.pipeline();
-                            // HTTP 解码（WebSocket 握手需要 HTTP Upgrade）
-                            p.addLast(new HttpServerCodec());
-                            p.addLast(new HttpObjectAggregator(65536));
-                            p.addLast(new WebSocketServerProtocolHandler(
-                                    "/ws", null, true, 65536));
-                            // 0xACAC 二进制帧解析（从 BinaryWebSocketFrame.content() 读取）
-                            p.addLast(new WebSocketIMDecoder());
-                            // 出站：IMCommand → ByteBuf(0xACAC) → BinaryWebSocketFrame
-                            p.addLast(byteBufToWebSocketHandler);
-                            p.addLast(new IMEncoder());
-                            // 无 IdleStateHandler —— WebSocket 原生 Ping/Pong 保活
-                            p.addLast(connectionEventHandler);
-                            p.addLast(routerHandler);
-                        }
-                    });
-
-            ChannelFuture wsFuture = wsBootstrap.bind(config.getWsPort()).sync();
-            wsChannel = wsFuture.channel();
-            log.info("WebSocket server started: port={}, path=/ws", config.getWsPort());
+            wsChannel = WsServerBootstrap.start(bossGroup, workerGroup, config.getWsPort(), useEpoll,
+                    connectionEventHandler, routerHandler);
         }
+        if (config.isHttpEnabled()) {
+            httpChannel = HttpServerBootstrap.start(bossGroup, workerGroup, config.getHttpPort(), useEpoll,
+                    httpRestHandler);
+        }
+
+        log.info("Server started: nodeId={}, WS={}, HTTP={}",
+                config.getNodeId(),
+                config.isWsEnabled() ? config.getWsPort() : "disabled",
+                config.isHttpEnabled() ? config.getHttpPort() : "disabled");
     }
 
     @Override
@@ -419,6 +260,7 @@ public class IMServer implements ILifecycle {
         deliveryConsumer.shutdown();
         persistenceConsumer.shutdown();
         messageQueue.shutdown();
+        clusterMessageBus.shutdown();
         nodeDiscovery.unregister();
         nodeDiscovery.shutdown();
         if (scanScheduler != null) scanScheduler.shutdown();
@@ -427,40 +269,31 @@ public class IMServer implements ILifecycle {
         pendingAcknowledgementManager.shutdown();
         sessionManager.clear();
         if (redisConfig != null) redisConfig.close();
-        if (serverChannel != null) serverChannel.close().sync();
         if (wsChannel != null) wsChannel.close().sync();
+        if (httpChannel != null) httpChannel.close().sync();
         if (workerGroup != null) workerGroup.shutdownGracefully();
         if (bossGroup != null) bossGroup.shutdownGracefully();
         log.info("Shutdown complete");
     }
 
-    private NodeInformation buildNodeInformation() {
-        String host = "127.0.0.1";
-        try {
-            host = InetAddress.getLocalHost().getHostAddress();
-        } catch (Exception ignored) {
-        }
-        Map<String, String> attrs = new java.util.HashMap<>();
-        if (config.isWsEnabled()) {
-            attrs.put("webSocketPort", String.valueOf(config.getWsPort()));
-        }
-        return new NodeInformation(config.getNodeId(), host, config.getPort(), attrs);
-    }
-
     // ── 工具 ──
 
+    private NodeInformation buildNodeInformation() {
+        String host = "127.0.0.1";
+        try { host = InetAddress.getLocalHost().getHostAddress(); } catch (Exception ignored) {}
+        Map<String, String> attrs = new java.util.HashMap<>();
+        int servicePort = config.isWsEnabled() ? config.getWsPort() : 0;
+        attrs.put("webSocketPort", String.valueOf(servicePort));
+        return new NodeInformation(config.getNodeId(), host, servicePort, attrs);
+    }
+
     private static String nonNull(String... vals) {
-        for (String v : vals) {
-            if (v != null && !v.isEmpty()) return v;
-        }
+        for (String v : vals) { if (v != null && !v.isEmpty()) return v; }
         return null;
     }
 
-    // ========== main ==========
-
     private static boolean dbEnabled(ServerConfiguration config) {
         if (databaseFailed) return false;
-        // 通过 -D 或 YAML 的 im.db.enabled / db.enabled
         String dbProp = System.getProperty("im.db.enabled");
         if (dbProp == null) dbProp = System.getProperty("db.enabled");
         if ("true".equalsIgnoreCase(dbProp)) return true;
@@ -469,54 +302,39 @@ public class IMServer implements ILifecycle {
         return jdbcUrl != null && !jdbcUrl.isEmpty();
     }
 
-    /**
-     * 构建多层配置源。
-     *
-     * <p>优先级: {@code -D} 参数 > 环境变量 > config/application.yml > 代码默认值。</p>
-     */
+    // ── 配置加载 ──
+
     static PropertySources loadPropertySources() {
-        return PropertySources.builder()
-                .add(new SystemPropertySource())
-                .add(new EnvPropertySource())
-                .add(new YamlPropertySource("config/application.yml"))
-                .build();
+        String activeEnv = System.getProperty("im.env");
+        if (activeEnv == null || activeEnv.isBlank()) activeEnv = System.getenv("IM_ENV");
+        PropertySources.Builder builder = PropertySources.builder()
+                .add(new SystemPropertySource()).add(new EnvPropertySource());
+        if (activeEnv != null && !activeEnv.isBlank())
+            builder.add(new YamlPropertySource("config/application-" + activeEnv.trim() + ".yml", 150));
+        return builder.add(new YamlPropertySource("config/application.yml")).build();
     }
 
+    // ========== main ==========
+
     public static void main(String[] args) throws Exception {
-        // ── 配置源初始化 ──
         PropertySources props = loadPropertySources();
         props.logSources();
 
-        // ── 数据库初始化（如果启用了 DB） ──
-        String dbEnabled = nonNull(
-                props.get("im.db.enabled"),
-                props.get("db.enabled"));
-        String jdbcUrl = nonNull(
-                props.get("im.db.jdbc-url"),
-                props.get("im.db.jdbcUrl"),
-                props.get("db.jdbcUrl"));
-
+        // 数据库初始化
+        String dbEnabled = nonNull(props.get("im.db.enabled"), props.get("db.enabled"));
+        String jdbcUrl = nonNull(props.get("im.db.jdbc-url"), props.get("im.db.jdbcUrl"), props.get("db.jdbcUrl"));
         if ("true".equalsIgnoreCase(dbEnabled) || (jdbcUrl != null && !jdbcUrl.isEmpty())) {
-            String dbUser = nonNull(
-                    props.get("im.db.username"),
-                    props.get("db.username"), "root");
-            String dbPass = nonNull(
-                    props.get("im.db.password"),
-                    props.get("db.password"), "password");
-
-            DatabaseConfiguration dbConfig;
-            if (jdbcUrl != null && !jdbcUrl.isEmpty()) {
-                dbConfig = new DatabaseConfiguration.Builder()
+            DatabaseConfiguration dbConfig = jdbcUrl != null && !jdbcUrl.isEmpty()
+                    ? new DatabaseConfiguration.Builder()
                         .jdbcUrl(jdbcUrl)
-                        .username(dbUser)
-                        .password(dbPass)
-                        .build();
-            } else {
-                dbConfig = DatabaseConfiguration.develop();
-            }
+                        .username(nonNull(props.get("im.db.username"), props.get("db.username"), "root"))
+                        .password(nonNull(props.get("im.db.password"), props.get("db.password"), "password"))
+                        .build()
+                    : DatabaseConfiguration.develop();
             try {
                 MyBatisPlusFactory.init(dbConfig);
-                log.info("Database initialized: {}", dbConfig.getJdbcUrl());
+                SchemaInitializer.initialize(MyBatisPlusFactory.getDataSource(),
+                        nonNull(props.get("im.db.schema"), props.get("db.schema"), "auto"));
             } catch (Exception e) {
                 log.error("Failed to initialize database, falling back to in-memory storage", e);
                 databaseFailed = true;
@@ -525,34 +343,25 @@ public class IMServer implements ILifecycle {
             log.info("Database disabled (set im.db.enabled=true or db.enabled=true to enable)");
         }
 
-        // ── 构建配置对象 ──
+        // 构建配置
         Properties serverProps = new Properties();
-        // 读取所有 im.* 键，构建 Properties 供 ServerConfiguration.from() 使用
-        String[] knownKeys = {
-                "im.server.port", "im.server.boss-threads", "im.server.worker-threads",
-                "im.server.business-threads", "im.server.idle-timeout", "im.server.heartbeat-timeout",
-                "im.server.max-frame-length", "im.server.socket-rcv-buf", "im.server.socket-snd-buf",
-                "im.server.use-epoll", "im.node.id", "im.token.secret",
-                "im.ws.port", "im.ws.enabled", "im.webhook.url",
+        for (String key : new String[]{
+                "im.server.boss-threads", "im.server.worker-threads", "im.server.business-threads",
+                "im.server.idle-timeout", "im.server.heartbeat-timeout", "im.server.max-frame-length",
+                "im.server.socket-rcv-buf", "im.server.socket-snd-buf", "im.server.use-epoll",
+                "im.node.id", "im.token.secret", "im.ws.port", "im.ws.enabled", "im.webhook.url",
+                "im.http.port", "im.http.enabled",
                 "im.redis.host", "im.redis.port", "im.redis.password", "im.redis.database"
-        };
-        for (String key : knownKeys) {
+        }) {
             String val = props.get(key);
             if (val != null) serverProps.setProperty(key, val);
         }
+        if (args.length > 0) serverProps.setProperty("im.node.id", args[0]);
 
-        // 命令行参数覆盖（向后兼容）
-        if (args.length > 0) serverProps.setProperty("im.server.port", args[0]);
-        if (args.length > 1) serverProps.setProperty("im.node.id", args[1]);
-
-        ServerConfiguration config = ServerConfiguration.from(serverProps);
-
-        IMServer server = new IMServer(config, props);
-
+        IMServer server = new IMServer(ServerConfiguration.from(serverProps), props);
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             try { server.shutdown(); } catch (Exception e) { log.error("Shutdown error", e); }
         }));
-
         server.start();
         log.info("Server ready. Press Ctrl+C to stop.");
         Thread.currentThread().join();

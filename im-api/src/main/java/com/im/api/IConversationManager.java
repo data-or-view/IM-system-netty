@@ -93,4 +93,54 @@ public interface IConversationManager {
     default void createGroupConversations(List<String> memberIds, String groupId, String conversationId) {
         // 默认不实现
     }
+
+    // ========================================
+    //  已读回执 + 未读计数
+    // ========================================
+
+    /**
+     * 获取用户在指定会话的已读 seq。
+     *
+     * <p>小于等于该 seq 的消息均已读，大于的为未读。
+     * 配合 {@link IMessageStore#getLastSeq} 可算出未读数。</p>
+     *
+     * @param ownerUserId    用户 ID
+     * @param conversationId 会话 ID
+     * @return 已读到的最大 seq，0=一条未读
+     */
+    default long getReadSeq(String ownerUserId, String conversationId) {
+        throw new UnsupportedOperationException("getReadSeq not implemented");
+    }
+
+    /**
+     * 获取用户所有会话的未读消息总数（应用首页角标）。
+     */
+    default int getTotalUnreadCount(String userId) {
+        throw new UnsupportedOperationException("getTotalUnreadCount not implemented");
+    }
+
+    /**
+     * 获取指定会话的未读消息数。
+     */
+    default int getUnreadCount(String ownerUserId, String conversationId) {
+        throw new UnsupportedOperationException("getUnreadCount not implemented");
+    }
+
+    // ========================================
+    //  会话增量同步
+    // ========================================
+
+    /**
+     * 增量同步会话列表。
+     *
+     * <p>客户端传入上次同步的 version，服务端返回
+     * 该 version 之后发生过变更（新建/置顶/免打扰/最后消息更新）的会话。</p>
+     *
+     * @param ownerUserId 用户 ID
+     * @param version     客户端已知的最新 version
+     * @return 增量同步结果
+     */
+    default IncrementalSyncResult<Conversation> getIncrementalConversations(String ownerUserId, long version) {
+        throw new UnsupportedOperationException("getIncrementalConversations not implemented");
+    }
 }

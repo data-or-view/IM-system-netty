@@ -11,12 +11,16 @@
 
     <artifactId>im-bootstrap</artifactId>
     <name>IM System - Bootstrap</name>
-    <description>Server startup entry point</description>
+    <description>Server startup entry point with dependency injection</description>
 
     <dependencies>
         <dependency>
             <groupId>com.im</groupId>
-            <artifactId>im-core</artifactId>
+            <artifactId>im-adapter</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.im</groupId>
+            <artifactId>im-infrastructure</artifactId>
         </dependency>
         <dependency>
             <groupId>io.netty</groupId>
@@ -33,6 +37,11 @@
         <dependency>
             <groupId>ch.qos.logback</groupId>
             <artifactId>logback-classic</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 

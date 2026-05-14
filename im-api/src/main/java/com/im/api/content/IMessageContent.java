@@ -7,7 +7,7 @@ package com.im.api.content;
  * 职责：
  *   1. 声明自身的 ContentType
  *   2. 提供 validate() 校验方法
- *   3. 作为 Jackson 可序列化的 POJO（序列化由 ContentSerializer 在 im-codec 层完成）
+ *   3. 作为 Jackson 可序列化的 POJO（序列化由 ContentSerializer 在 im-core 层完成）
  */
 public interface IMessageContent {
 

@@ -39,40 +39,19 @@ im-bootstrap (装配层 — 注入实现)
 | **缓存** | `ICache<K, V>` | 通用缓存抽象 |
 | **内容** | `IMessageContent` | 消息内容类型（文本/图片/文件/信令） |
 
-### im-codec — 编解码层（4 个文件）
-
-自定义二进制协议：
-
-```
-  Bytes                    Java Object
-    │                          ▲
-    ▼                          │
-┌──────────┐     decode()  ┌──────────┐
-│ IMDecoder│ ────────────→ │ IMCommand│
-└──────────┘               └──────────┘
-    ▲                          │
-    │          encode()        │
-┌──────────┐               ┌──────────┐
-│ IMEncoder│ ←──────────── │ IMCommand│
-└──────────┘               └──────────┘
-```
-
-协议格式：`Magic(0xCC) + Version(0x01) + BodyLength(uint16) + Body(JSON bytes)`
-
 ### im-core — 实现层（35+ 个文件）
 
 #### 消息处理管线
 
 ```
-TCP ByteBuf                        WebSocket Frame
-       │                                │
-       ▼                                ▼
-┌──────────────┐            ┌──────────────────────┐
-│  IMDecoder   │            │  WsIMDecoder          │
-│  (byte→cmd)  │            │  (ws frame → cmd)    │
-└──────┬───────┘            └──────────┬───────────┘
-       │                               │
-       └───────────┬───────────────────┘
+WebSocket JSON Text Frame
+       │
+       ▼
+┌──────────────────────┐
+│  JsonWsCodec         │
+│  (JSON ↔ IMCommand)  │
+└──────────┬───────────┘
+           │
                    ▼
 ┌───────────────────────────────────────┐
 │     ConnectionEventHandler           │
@@ -155,39 +134,25 @@ ChatHandler (Receiver)                  DeliveryConsumer (Pusher)
 
 ### im-bootstrap — 启动层（3 个文件 + pipeline 配置）
 
-双端口启动：
+WebSocket 端口启动：
 
 ```java
-// TCP 8080
-new ServerBootstrap()
-  .childHandler(new ChannelInitializer<>() {{
-    addLast(IMDecoder, IMEncoder, idleHandler, eventHandler, router);
-  }});
-
 // WebSocket 8081
 new ServerBootstrap()
   .childHandler(new ChannelInitializer<>() {{
     addLast(HttpServerCodec, HttpObjectAggregator,
             WebSocketServerProtocolHandler,
-            WsIMDecoder, ByteBufToWsHandler,
+            JsonWsCodec,
             idleHandler, eventHandler, router);
   }});
 ```
 
-两个端口共享 EventLoopGroup 和所有业务 Handler 实例。
+HTTP REST 与 WebSocket 共享 EventLoopGroup 和所有业务 Handler 实例。
 
-### im-client — 客户端层（6 个文件）
+### im-client — 客户端层（已移除）
 
-轻量 SDK + QuickStart 交互式演示客户端：
-
-```
-QuickStart <userId> <targetUser> [host] [port]
-
-交互命令:
-  直接输入 → 发送文字消息
-  /pull    → 拉取消息历史
-  /quit    → 退出
-```
+Java 原生 TCP 客户端已随 TCP 协议一起移除。
+Web 客户端将通过 WebSocket + HTTP REST 接入。
 
 ## 错误处理
 
@@ -266,7 +231,7 @@ webhook:
 | 模块 | 测试数 | 覆盖内容 |
 |------|--------|---------|
 | im-api | 33 | IMCommand 序列化、Content 校验 |
-| im-codec | 19 | 编码/解码、内容序列化 |
 | im-core | 23 | Session 管理、ACK、拦截器链 |
+| im-bootstrap | 12 | HTTP REST handler、拦截器链 |
 
-总计 75 个测试用例，全部通过。
+总计 68 个测试用例，全部通过。

@@ -24,6 +24,9 @@ public class FriendInformation {
     private boolean isPinned;
     private long createTime;
 
+    /** 是否已删除（增量同步中用，标记删除的好友关系）。 */
+    private boolean deleted;
+
     public FriendInformation() {}
 
     public String getOwnerUserId() { return ownerUserId; }
@@ -49,4 +52,7 @@ public class FriendInformation {
 
     public long getCreateTime() { return createTime; }
     public void setCreateTime(long createTime) { this.createTime = createTime; }
+
+    public boolean isDeleted() { return deleted; }
+    public void setDeleted(boolean deleted) { this.deleted = deleted; }
 }

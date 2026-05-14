@@ -70,4 +70,79 @@ public interface IMessageStore {
     default void deleteBefore(String userId, long seqId) {
         // 默认不实现
     }
+
+    // ========================================
+    //  消息删除 / 清空
+    // ========================================
+
+    /**
+     * 软删除消息（标记已删除，对用户不可见）。
+     *
+     * <p>消息内容仍保存在服务端，用于审计/合规/数据恢复。
+     * 接收方拉取消息时，已删除的消息不在结果中返回。</p>
+     *
+     * @param conversationId 会话 ID
+     * @param msgIds         要删除的消息 ID 列表
+     * @param userId         操作人（仅可删除自己发送的消息）
+     */
+    default void deleteMessages(String conversationId, List<String> msgIds, String userId) {
+        throw new UnsupportedOperationException("deleteMessages not implemented");
+    }
+
+    /**
+     * 物理删除指定 seq 范围内的消息。
+     *
+     * <p>消息将从存储中彻底移除，不可恢复。
+     * 谨慎使用，通常仅用于合规删除或测试环境清理。</p>
+     *
+     * @param conversationId 会话 ID
+     * @param startSeq       起始 seq（含），0=最早
+     * @param endSeq         结束 seq（含），0=最新
+     */
+    default void deleteMessagesPhysical(String conversationId, long startSeq, long endSeq) {
+        throw new UnsupportedOperationException("deleteMessagesPhysical not implemented");
+    }
+
+    /**
+     * 清空会话的所有消息。
+     *
+     * <p>仅清除消息本身，不删除会话。
+     * 清空后该会话的未读数归零。</p>
+     *
+     * @param conversationId 会话 ID
+     */
+    default void clearConversationMessages(String conversationId) {
+        throw new UnsupportedOperationException("clearConversationMessages not implemented");
+    }
+
+    // ========================================
+    //  消息搜索
+    // ========================================
+
+    /**
+     * 搜索消息。
+     *
+     * <p>支持按关键词、时间范围、会话范围、发送者等条件组合过滤，
+     * 仅返回搜索发起者参与过的消息（权限隔离）。</p>
+     *
+     * @param param 搜索条件，所有字段可选
+     * @return 搜索结果（含消息列表 + 匹配总数）
+     */
+    default SearchMessagesResult searchMessages(SearchMessagesParam param) {
+        throw new UnsupportedOperationException("searchMessages not implemented");
+    }
+
+    // ========================================
+    //  已读回执（seq 追踪）
+    // ========================================
+
+    /**
+     * 获取用户在指定会话的最新消息 seq（最新一条消息的序列号）。
+     *
+     * @param conversationId 会话 ID
+     * @return 最新消息 seq，无消息返回 0
+     */
+    default long getLastSeq(String conversationId) {
+        throw new UnsupportedOperationException("getLastSeq not implemented");
+    }
 }

@@ -61,4 +61,71 @@ public interface IUserManager {
      * @param limit   最大返回条数（默认 20）
      */
     List<UserInformation> searchUsers(String keyword, int limit);
+
+    // ========================================
+    //  在线状态订阅
+    // ========================================
+
+    /**
+     * 订阅指定用户的在线状态变更。
+     *
+     * <p>订阅后，当被订阅用户的在线状态发生变化时，
+     * 系统会向订阅者推送状态变更通知。
+     * 典型场景：聊天列表中好友的头像"在线"状态实时更新。</p>
+     *
+     * @param subscriberUserId 订阅者
+     * @param targetUserIds    要订阅状态的用户列表
+     */
+    default void subscribeOnlineStatus(String subscriberUserId, List<String> targetUserIds) {
+        throw new UnsupportedOperationException("subscribeOnlineStatus not implemented");
+    }
+
+    /**
+     * 取消订阅用户的在线状态。
+     *
+     * @param subscriberUserId 订阅者
+     * @param targetUserIds    要取消订阅的用户列表
+     */
+    default void unsubscribeOnlineStatus(String subscriberUserId, List<String> targetUserIds) {
+        throw new UnsupportedOperationException("unsubscribeOnlineStatus not implemented");
+    }
+
+    /**
+     * 获取订阅用户的在线状态。
+     *
+     * <p>返回当前订阅的所有用户（或指定列表）的在线状态。
+     * 一次性查询，不涉及后续推送。</p>
+     *
+     * @param userId       用户 ID
+     * @param targetUserId 指定要查的用户（null=查所有已订阅的）
+     * @return userId → 在线平台 ID 列表（空列表=不在线）
+     */
+    default Map<String, List<Integer>> getSubscribedStatus(String userId, String targetUserId) {
+        throw new UnsupportedOperationException("getSubscribedStatus not implemented");
+    }
+
+    // ========================================
+    //  用户管理（管理员接口）
+    // ========================================
+
+    /**
+     * 分页查询所有用户（管理后台）。
+     *
+     * @param offset 偏移量
+     * @param limit  每页条数
+     * @return 用户列表
+     */
+    default List<UserInformation> getAllUsers(int offset, int limit) {
+        throw new UnsupportedOperationException("getAllUsers not implemented");
+    }
+
+    /**
+     * 批量检查用户是否存在。
+     *
+     * @param userIds 用户 ID 列表
+     * @return 存在的用户 ID → true, 不存在 → false
+     */
+    default Map<String, Boolean> checkAccounts(List<String> userIds) {
+        throw new UnsupportedOperationException("checkAccounts not implemented");
+    }
 }

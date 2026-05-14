@@ -69,4 +69,73 @@ public interface ISessionManager {
      * 清除所有会话。
      */
     void clear();
+
+    // ========================================
+    //  强制登出
+    // ========================================
+
+    /**
+     * 强制用户登出（全部端）。
+     *
+     * <p>关闭该用户的所有活跃连接，并使 token 失效。
+     * 对应管理员后台的"踢用户下线"功能。</p>
+     *
+     * @param userId     目标用户
+     */
+    default void forceLogout(String userId) {
+        throw new UnsupportedOperationException("forceLogout not implemented");
+    }
+
+    /**
+     * 强制用户在指定平台登出。
+     *
+     * <p>仅关闭该用户在该平台的连接（例如只踢手机端，保留 PC 端）。
+     * 对应 OpenIM 的 force_logout 指定 platformID。</p>
+     *
+     * @param userId     目标用户
+     * @param platformId 要踢的平台（{@link PlatformID}），-1=全部
+     */
+    default void forceLogout(String userId, int platformId) {
+        throw new UnsupportedOperationException("forceLogout(platform) not implemented");
+    }
+
+    // ========================================
+    //  多端登录策略
+    // ========================================
+
+    /**
+     * 获取用户当前生效的多端登录策略。
+     *
+     * @param userId 用户 ID
+     * @return 该用户的多端登录策略（若未配置则返回系统默认策略）
+     */
+    default MultiLoginStrategy getMultiLoginStrategy(String userId) {
+        return MultiLoginStrategy.ALLOW_MULTIPLE;
+    }
+
+    /**
+     * 设置用户的多端登录策略（覆盖系统默认）。
+     *
+     * <p>可为不同用户设置不同的策略：
+     *   普通用户 → ALLOW_MULTIPLE（手机+PC 同时在线）
+     *   高安全用户 → KICK_OLD（只允许一端在线）</p>
+     *
+     * @param userId   用户 ID
+     * @param strategy 多端登录策略
+     */
+    default void setMultiLoginStrategy(String userId, MultiLoginStrategy strategy) {
+        throw new UnsupportedOperationException("setMultiLoginStrategy not implemented");
+    }
+
+    /**
+     * 查询用户当前在线的端列表。
+     *
+     * <p>用于"我的设备"页面展示。</p>
+     *
+     * @param userId 用户 ID
+     * @return 在线会话列表，含每个会话的平台 ID、IP、登录时间
+     */
+    default List<IConnectionSession> getOnlineSessions(String userId) {
+        throw new UnsupportedOperationException("getOnlineSessions not implemented");
+    }
 }

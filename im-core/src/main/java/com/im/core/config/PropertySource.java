@@ -16,7 +16,7 @@ import java.util.List;
  *       .add(new DefaultPropertySource(...))
  *       .build();
  *
- *   int port = props.getInt("im.server.port", 8080);
+ *   int port = props.getInt("im.ws.port", 8081);
  * </pre>
  */
 public interface PropertySource {

@@ -18,7 +18,7 @@ import java.util.stream.Collectors;
  *     .add(new SystemPropertySource())
  *     .add(new EnvPropertySource())
  *     .add(new YamlPropertySource("config/application.yml"))
- *     .add(new DefaultPropertySource("im.server.port", "8080"))
+ *     .add(new DefaultPropertySource("im.ws.port", "8081"))
  *     .build();
  * </pre>
  */

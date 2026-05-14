@@ -8,7 +8,6 @@
 im:
   # ── 服务器 ──
   server:
-    port: 8080                   # TCP 端口
     boss-threads: 1              # Boss 线程数
     worker-threads: 0            # Worker 线程数 (0=Netty 自动选择)
     business-threads: 8          # 业务线程数
@@ -24,6 +23,11 @@ im:
     enabled: true                # 启用 WebSocket
     port: 8081                   # WebSocket 端口
 
+  # ── HTTP REST ──
+  http:
+    enabled: true                # 启用 HTTP REST API
+    port: 8082                   # HTTP REST 端口
+
   # ── 节点 ──
   node:
     id: "node-1"                 # 本节点 ID
@@ -35,6 +39,7 @@ im:
   # ── 数据库 ──
   db:
     enabled: true                # 启用数据库持久化
+    schema: auto                 # 自动建表: none(跳过) / auto(不存在时创建) / rebuild(先删后建)
     jdbc-url: "jdbc:mysql://127.0.0.1:3306/im_system?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true"
     username: "root"
     password: "password"
@@ -51,6 +56,14 @@ im:
   # ── Webhook ──
   webhook:
     url: ""                      # Webhook 回调 URL
+
+  # ── RTC 通话 ──
+  call:
+    enabled: true
+    provider: livekit
+    api-key: "devkey"
+    api-secret: "im-system-livekit-secret-2024"
+    sfu-endpoint: "ws://localhost:7880"
 
   # ── MinIO 文件存储 ──
   minio:

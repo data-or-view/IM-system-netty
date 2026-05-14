@@ -122,6 +122,81 @@ public interface IGroupManager {
      */
     List<GroupApply> getJoinRequests(String groupId, boolean onlyPending);
 
+    /**
+     * 全员禁言。
+     *
+     * <p>全员禁言后，只有群主和管理员可以发言。
+     * 对应 OpenIM 的 mute_group / cancel_mute_group。</p>
+     *
+     * @param groupId    群 ID
+     * @param operatorId 操作人
+     * @param mute       true=禁言, false=解除禁言
+     */
+    default void muteGroupAll(String groupId, String operatorId, boolean mute) {
+        throw new UnsupportedOperationException("muteGroupAll not implemented");
+    }
+
+    /**
+     * 设置群成员自定义信息（如群昵称）。
+     *
+     * @param groupId    群 ID
+     * @param userId     成员 ID
+     * @param ex         扩展字段（JSON 字符串，业务自定义）
+     */
+    default void setMemberInfo(String groupId, String userId, String ex) {
+        throw new UnsupportedOperationException("setMemberInfo not implemented");
+    }
+
+    /**
+     * 邀请用户入群（无需申请，直接加入）。
+     *
+     * <p>与 {@link #joinGroup} 的区别：invite 不需要对方同意，
+     * 由群内成员直接拉人入群。</p>
+     *
+     * @param groupId    群 ID
+     * @param operatorId 邀请人（群成员）
+     * @param userIds    被邀请的用户 ID 列表
+     */
+    default void inviteMembers(String groupId, String operatorId, List<String> userIds) {
+        throw new UnsupportedOperationException("inviteMembers not implemented");
+    }
+
+    /**
+     * 获取群抽象信息（成员数、在线数等汇总）。
+     *
+     * @param groupId 群 ID
+     * @return 群抽象信息
+     */
+    default GroupAbstractInfo getGroupAbstractInfo(String groupId) {
+        throw new UnsupportedOperationException("getGroupAbstractInfo not implemented");
+    }
+
+    // ========================================
+    //  群增量同步
+    // ========================================
+
+    /**
+     * 增量同步用户加入的群列表。
+     *
+     * @param userId  用户 ID
+     * @param version 客户端已知的最新 version
+     * @return 新增/退出的群 ID 列表
+     */
+    default IncrementalSyncResult<String> getIncrementalGroups(String userId, long version) {
+        throw new UnsupportedOperationException("getIncrementalGroups not implemented");
+    }
+
+    /**
+     * 增量同步群成员。
+     *
+     * @param groupId 群 ID
+     * @param version 客户端已知的最新 version
+     * @return 新增/移除的成员列表
+     */
+    default IncrementalSyncResult<GroupMemberInformation> getIncrementalMembers(String groupId, long version) {
+        throw new UnsupportedOperationException("getIncrementalMembers not implemented");
+    }
+
     // ========== 查询 ==========
 
     /**

@@ -13,9 +13,9 @@
 
     <modules>
         <module>im-api</module>
-        <module>im-codec</module>
         <module>im-core</module>
-        <module>im-client</module>
+        <module>im-adapter</module>
+        <module>im-infrastructure</module>
         <module>im-bootstrap</module>
     </modules>
 
@@ -47,17 +47,17 @@
             </dependency>
             <dependency>
                 <groupId>com.im</groupId>
-                <artifactId>im-codec</artifactId>
-                <version>${project.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>com.im</groupId>
                 <artifactId>im-core</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
                 <groupId>com.im</groupId>
-                <artifactId>im-client</artifactId>
+                <artifactId>im-adapter</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.im</groupId>
+                <artifactId>im-infrastructure</artifactId>
                 <version>${project.version}</version>
             </dependency>
 

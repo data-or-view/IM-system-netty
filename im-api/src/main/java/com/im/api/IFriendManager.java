@@ -97,4 +97,82 @@ public interface IFriendManager {
      * @return true 如果 toUserId 拉黑了 fromUserId
      */
     boolean isBlocked(String fromUserId, String toUserId);
+
+    // ========================================
+    //  好友增量同步
+    // ========================================
+
+    /**
+     * 增量同步好友列表。
+     *
+     * <p>客户端传入上次同步的 version，服务端返回新增/删除的好友。
+     * 删除的好友通过 {@link FriendInformation#isDeleted()} 标记。</p>
+     *
+     * @param userId  用户 ID
+     * @param version 客户端已知的最新 version，0=全量同步
+     * @return 增量同步结果
+     */
+    default IncrementalSyncResult<FriendInformation> getIncrementalFriends(String userId, long version) {
+        throw new UnsupportedOperationException("getIncrementalFriends not implemented");
+    }
+
+    /**
+     * 批量导入好友（数据迁移场景）。
+     *
+     * <p>跳过已存在的好友关系（幂等），返回实际新增的数量。</p>
+     *
+     * @param userId         用户 ID
+     * @param friendUserIds  待导入的好友 ID 列表
+     * @return 实际添加的好友数
+     */
+    default int importFriends(String userId, List<String> friendUserIds) {
+        throw new UnsupportedOperationException("importFriends not implemented");
+    }
+
+    // ========================================
+    //  黑名单增量同步
+    // ========================================
+
+    /**
+     * 增量同步黑名单。
+     *
+     * @param userId  用户 ID
+     * @param version 客户端已知的最新 version
+     * @return 增量同步结果
+     */
+    default IncrementalSyncResult<String> getIncrementalBlacks(String userId, long version) {
+        throw new UnsupportedOperationException("getIncrementalBlacks not implemented");
+    }
+
+    // ========================================
+    //  好友申请查询
+    // ========================================
+
+    /**
+     * 获取用户已发出的好友申请列表。
+     *
+     * @param userId 用户 ID
+     * @return 申请列表（含已处理/待处理）
+     */
+    default List<FriendApply> getSentFriendApplyList(String userId) {
+        throw new UnsupportedOperationException("getSentFriendApplyList not implemented");
+    }
+
+    /**
+     * 获取指定好友申请的详情。
+     *
+     * @param fromUserId 申请人
+     * @param toUserId   被申请人
+     * @return 申请详情，不存在返回 null
+     */
+    default FriendApply getFriendApplyDetail(String fromUserId, String toUserId) {
+        throw new UnsupportedOperationException("getFriendApplyDetail not implemented");
+    }
+
+    /**
+     * 获取用户待处理的好友申请数（红点提示）。
+     */
+    default int getUnhandledApplyCount(String userId) {
+        throw new UnsupportedOperationException("getUnhandledApplyCount not implemented");
+    }
 }
