@@ -88,6 +88,11 @@
             </dependency>
             <dependency>
                 <groupId>com.im</groupId>
+                <artifactId>im-infrastructure-config</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.im</groupId>
                 <artifactId>im-infrastructure-spi</artifactId>
                 <version>${project.version}</version>
             </dependency>

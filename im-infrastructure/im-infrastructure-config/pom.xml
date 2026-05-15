@@ -11,15 +11,9 @@
 
     <artifactId>im-infrastructure-config</artifactId>
     <name>IM System - Infrastructure Config</name>
-    <description>Modular configuration framework: multi-source, interface binding</description>
+    <description>Modular configuration: multi-source, composite merge</description>
 
     <dependencies>
-        <dependency>
-            <groupId>com.im</groupId>
-            <artifactId>im-infrastructure-spi</artifactId>
-            <optional>true</optional>
-        </dependency>
-
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>
