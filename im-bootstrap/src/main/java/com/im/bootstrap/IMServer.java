@@ -2,7 +2,7 @@ package com.im.bootstrap;
 
 import com.im.api.*;
 import com.im.api.cache.ICache;
-import com.im.api.retry.RetryExecutor;
+import com.im.common.retry.RetryExecutor;
 import com.im.bootstrap.http.*;
 import com.im.core.auth.HmacTokenAuthenticator;
 import com.im.core.cache.ConcurrentHashCache;

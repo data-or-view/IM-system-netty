@@ -20,7 +20,7 @@
         </dependency>
         <dependency>
             <groupId>com.im</groupId>
-            <artifactId>im-infrastructure</artifactId>
+            <artifactId>im-infrastructure-core</artifactId>
         </dependency>
         <dependency>
             <groupId>io.netty</groupId>

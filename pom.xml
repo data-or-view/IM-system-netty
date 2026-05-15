@@ -35,6 +35,7 @@
         <minio.version>8.5.17</minio.version>
         <failsafe.version>3.3.2</failsafe.version>
         <snakeyaml.version>2.4</snakeyaml.version>
+        <kafka.version>3.9.0</kafka.version>
     </properties>
 
     <dependencyManagement>
@@ -58,6 +59,51 @@
             <dependency>
                 <groupId>com.im</groupId>
                 <artifactId>im-infrastructure</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.im</groupId>
+                <artifactId>im-infrastructure-cache</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.im</groupId>
+                <artifactId>im-infrastructure-cache-redis</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.im</groupId>
+                <artifactId>im-infrastructure-serialization</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.im</groupId>
+                <artifactId>im-infrastructure-serialization-jackson</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.im</groupId>
+                <artifactId>im-infrastructure-common</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.im</groupId>
+                <artifactId>im-infrastructure-spi</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.im</groupId>
+                <artifactId>im-infrastructure-core</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.im</groupId>
+                <artifactId>im-infrastructure-message</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.im</groupId>
+                <artifactId>im-infrastructure-message-kafka</artifactId>
                 <version>${project.version}</version>
             </dependency>
 
@@ -173,6 +219,13 @@
                 <groupId>org.yaml</groupId>
                 <artifactId>snakeyaml</artifactId>
                 <version>${snakeyaml.version}</version>
+            </dependency>
+
+            <!-- Kafka -->
+            <dependency>
+                <groupId>org.apache.kafka</groupId>
+                <artifactId>kafka-clients</artifactId>
+                <version>${kafka.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

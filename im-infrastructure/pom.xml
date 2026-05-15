@@ -10,65 +10,19 @@
     </parent>
 
     <artifactId>im-infrastructure</artifactId>
-    <name>IM System - Infrastructure</name>
-    <description>Outbound adapters: DB, Redis, MinIO, MQ implementations</description>
+    <packaging>pom</packaging>
+    <name>IM System - Infrastructure Parent</name>
+    <description>Parent module for infrastructure sub-modules</description>
 
-    <dependencies>
-        <dependency>
-            <groupId>com.im</groupId>
-            <artifactId>im-api</artifactId>
-        </dependency>
-
-        <!-- Database -->
-        <dependency>
-            <groupId>com.baomidou</groupId>
-            <artifactId>mybatis-plus</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>com.baomidou</groupId>
-            <artifactId>mybatis-plus-jsqlparser</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>com.zaxxer</groupId>
-            <artifactId>HikariCP</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>com.mysql</groupId>
-            <artifactId>mysql-connector-j</artifactId>
-        </dependency>
-
-        <!-- Redis -->
-        <dependency>
-            <groupId>io.lettuce</groupId>
-            <artifactId>lettuce-core</artifactId>
-        </dependency>
-
-        <!-- MinIO -->
-        <dependency>
-            <groupId>io.minio</groupId>
-            <artifactId>minio</artifactId>
-        </dependency>
-
-        <!-- Failsafe -->
-        <dependency>
-            <groupId>dev.failsafe</groupId>
-            <artifactId>failsafe</artifactId>
-        </dependency>
-
-        <dependency>
-            <groupId>com.fasterxml.jackson.core</groupId>
-            <artifactId>jackson-databind</artifactId>
-        </dependency>
-
-        <dependency>
-            <groupId>org.slf4j</groupId>
-            <artifactId>slf4j-api</artifactId>
-        </dependency>
-
-        <dependency>
-            <groupId>org.junit.jupiter</groupId>
-            <artifactId>junit-jupiter</artifactId>
-            <scope>test</scope>
-        </dependency>
-    </dependencies>
+    <modules>
+        <module>im-infrastructure-cache</module>
+        <module>im-infrastructure-cache-redis</module>
+        <module>im-infrastructure-serialization</module>
+        <module>im-infrastructure-serialization-jackson</module>
+        <module>im-infrastructure-common</module>
+        <module>im-infrastructure-spi</module>
+        <module>im-infrastructure-core</module>
+        <module>im-infrastructure-message</module>
+        <module>im-infrastructure-message-kafka</module>
+    </modules>
 </project>
