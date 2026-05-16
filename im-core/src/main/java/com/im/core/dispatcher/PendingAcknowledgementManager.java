@@ -1,7 +1,7 @@
 package com.im.core.dispatcher;
 
 import com.im.api.IMCommand;
-import com.im.core.util.IMExecutors;
+import com.im.common.util.IMExecutors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

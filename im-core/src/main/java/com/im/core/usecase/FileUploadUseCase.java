@@ -1,8 +1,8 @@
 package com.im.core.usecase;
 
 import com.im.api.IFileStorageService;
-import com.im.api.ImErrorCode;
-import com.im.api.ImException;
+import com.im.common.enums.ImErrorCode;
+import com.im.common.exception.ImException;
 
 import java.util.UUID;
 

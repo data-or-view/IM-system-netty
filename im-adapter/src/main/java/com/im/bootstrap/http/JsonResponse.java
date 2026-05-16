@@ -1,6 +1,7 @@
 package com.im.bootstrap.http;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.im.core.serialization.jackson.ObjectMapperProvider;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFutureListener;
@@ -17,7 +18,7 @@ import static io.netty.handler.codec.http.HttpHeaderValues.APPLICATION_JSON;
 
 public class JsonResponse {
 
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final ObjectMapper MAPPER = ObjectMapperProvider.get();
 
     public static void ok(ChannelHandlerContext ctx, Object data) {
         write(ctx, HttpResponseStatus.OK, data);

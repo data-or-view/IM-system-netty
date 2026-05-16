@@ -13,7 +13,7 @@ public class JacksonSerializer<T> implements Serializer<T, String> {
     private final ObjectMapper objectMapper;
 
     public JacksonSerializer() {
-        this(new ObjectMapper());
+        this(ObjectMapperProvider.get());
     }
 
     public JacksonSerializer(ObjectMapper objectMapper) {

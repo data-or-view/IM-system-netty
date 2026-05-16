@@ -1,7 +1,7 @@
 package com.im.core.friend;
 
 import com.im.api.*;
-import com.im.api.cache.ICache;
+import com.im.core.cache.Cache;
 import com.im.core.cache.SafeCache;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -44,13 +44,13 @@ public class LocalFriendManager implements IFriendManager {
     private final ConcurrentMap<String, ConcurrentMap<String, FriendApply>> applies = new ConcurrentHashMap<>();
 
     /** 好友列表缓存（SafeCache 包裹） */
-    private final ICache<String, List<FriendInformation>> friendCache;
+    private final Cache<String, List<FriendInformation>> friendCache;
 
     public LocalFriendManager() {
         this(null);
     }
 
-    public LocalFriendManager(ICache<String, List<FriendInformation>> friendCache) {
+    public LocalFriendManager(Cache<String, List<FriendInformation>> friendCache) {
         this.friendCache = friendCache != null
                 ? new SafeCache<>(friendCache, "LocalFriendManager")
                 : null;
@@ -119,10 +119,11 @@ public class LocalFriendManager implements IFriendManager {
     @Override
     public List<FriendInformation> getFriendList(String userId) {
         if (friendCache != null) {
-            return friendCache.getOrLoad(
-                    friendListKey(userId),
-                    () -> buildFriendList(userId),
-                    FRIEND_CACHE_TTL);
+            return friendCache.get(friendListKey(userId)).orElseGet(() -> {
+                List<FriendInformation> list = buildFriendList(userId);
+                friendCache.put(friendListKey(userId), list);
+                return list;
+            });
         }
         return buildFriendList(userId);
     }
@@ -188,8 +189,8 @@ public class LocalFriendManager implements IFriendManager {
 
     private void invalidateFriendCache(String userId, String friendUserId) {
         if (friendCache != null) {
-            friendCache.delete(friendListKey(userId));
-            friendCache.delete(friendListKey(friendUserId));
+            friendCache.invalidate(friendListKey(userId));
+            friendCache.invalidate(friendListKey(friendUserId));
         }
     }
 

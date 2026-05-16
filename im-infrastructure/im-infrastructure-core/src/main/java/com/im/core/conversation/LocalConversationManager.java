@@ -3,7 +3,7 @@ package com.im.core.conversation;
 import com.im.api.Conversation;
 import com.im.api.IConversationManager;
 import com.im.api.IMCommand;
-import com.im.api.cache.ICache;
+import com.im.core.cache.Cache;
 import com.im.core.cache.ConcurrentHashCache;
 import com.im.core.cache.SafeCache;
 import org.slf4j.Logger;
@@ -39,13 +39,13 @@ public class LocalConversationManager implements IConversationManager {
     private final ConcurrentMap<String, Conversation> index = new ConcurrentHashMap<>();
 
     /** 会话列表缓存（key=ownerUserId） */
-    private final ICache<String, List<Conversation>> conversationListCache;
+    private final Cache<String, List<Conversation>> conversationListCache;
 
     public LocalConversationManager() {
         this(null);
     }
 
-    public LocalConversationManager(ICache<String, List<Conversation>> conversationListCache) {
+    public LocalConversationManager(Cache<String, List<Conversation>> conversationListCache) {
         this.conversationListCache = conversationListCache != null
                 ? new SafeCache<>(conversationListCache, "LocalConversationManager")
                 : null;
@@ -58,11 +58,11 @@ public class LocalConversationManager implements IConversationManager {
     @Override
     public List<Conversation> getConversations(String ownerUserId) {
         if (conversationListCache != null) {
-            List<Conversation> cached = conversationListCache.getOrLoad(
-                    convListKey(ownerUserId),
-                    () -> buildConversationList(ownerUserId),
-                    CONV_CACHE_TTL);
-            return cached;
+            return conversationListCache.get(convListKey(ownerUserId)).orElseGet(() -> {
+                List<Conversation> list = buildConversationList(ownerUserId);
+                conversationListCache.put(convListKey(ownerUserId), list);
+                return list;
+            });
         }
         return buildConversationList(ownerUserId);
     }
@@ -172,7 +172,7 @@ public class LocalConversationManager implements IConversationManager {
 
     private void invalidateUserConversationCache(String ownerUserId) {
         if (conversationListCache != null) {
-            conversationListCache.delete(convListKey(ownerUserId));
+            conversationListCache.invalidate(convListKey(ownerUserId));
         }
     }
 

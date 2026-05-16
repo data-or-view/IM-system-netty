@@ -60,6 +60,7 @@ public final class ConfigLoader {
         sources.add(new EnvSource());
         sources.add(new SystemPropertySource());
         sources.add(new PropertyFileSource());
+        sources.add(new YamlConfigSource("classpath:application.yml"));
         sources.addAll(customSources);
 
         // 按 order 升序排序（高优先级在前）

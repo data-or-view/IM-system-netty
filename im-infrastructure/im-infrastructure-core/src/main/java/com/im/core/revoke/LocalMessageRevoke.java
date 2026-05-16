@@ -1,8 +1,8 @@
 package com.im.core.revoke;
 
 import com.im.api.IMCommand;
-import com.im.api.ImErrorCode;
-import com.im.api.ImException;
+import com.im.common.enums.ImErrorCode;
+import com.im.common.exception.ImException;
 import com.im.api.IMessageRevoke;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

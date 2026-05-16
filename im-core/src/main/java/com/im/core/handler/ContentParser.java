@@ -1,15 +1,15 @@
 package com.im.core.handler;
 
-import com.im.api.IMCommand;
 import com.im.api.content.ContentType;
 import com.im.api.content.IMessageContent;
-import com.im.core.handler.ContentSerializer;
+
+import java.util.Map;
 
 /**
  * 消息内容解析器。
  *
- * <p>从 {@link IMCommand} 中提取 {@code _ct} header 标识的内容类型，
- * 反序列化消息体并校验内容合法性。</p>
+ * <p>从 {@code _ct} 标识的内容类型解析消息体。
+ * 支持从 ApiRequest params 或原始 bytes 中解析。</p>
  *
  * <p>纯函数工具类，无状态，可独立测试。</p>
  */
@@ -20,19 +20,33 @@ public final class ContentParser {
     private ContentParser() {}
 
     /**
-     * 解析消息内容。
+     * 从 ApiRequest params 解析消息内容。
      *
-     * @param msg 原始消息
-     * @return 解析后的消息内容，若 {@code _ct} header 不存在返回 {@code null}
-     * @throws IllegalArgumentException 内容类型不支持或数据格式错误
-     * @throws com.im.api.ImException  内容校验失败
+     * <p>优先从 params 的 "content" 字段（Map）直接反序列化（避免 bytes 中间态），
+     * 回退到 bodyRaw bytes 反序列化（HTTP 场景）。</p>
+     *
+     * @param params  ApiRequest 的业务参数
+     * @param bodyRaw 原始二进制载荷（HTTP 文件上传等场景）
+     * @return 解析后的消息内容，若 {@code _ct} 不存在返回 {@code null}
      */
-    public static IMessageContent parse(IMCommand msg) {
-        String ctRaw = msg.getHeader(CONTENT_TYPE_HEADER);
-        if (ctRaw == null) return null;
+    public static IMessageContent parse(Map<String, Object> params, byte[] bodyRaw) {
+        Object ctObj = params.get(CONTENT_TYPE_HEADER);
+        if (ctObj == null) return null;
 
-        ContentType ct = ContentType.valueOf(ctRaw.toUpperCase());
-        IMessageContent content = ContentSerializer.fromBytes(ct, msg.getBody());
+        ContentType ct = ContentType.valueOf(ctObj.toString().toUpperCase());
+        IMessageContent content;
+
+        // 优先从 params 的 content 字段反序列化（WS 场景：content 已经是 Map）
+        Object contentObj = params.get("content");
+        if (contentObj instanceof Map) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> contentMap = (Map<String, Object>) contentObj;
+            content = ContentSerializer.fromMap(ct, contentMap);
+        } else {
+            // 回退到 bodyRaw bytes（HTTP 场景）
+            content = ContentSerializer.fromBytes(ct, bodyRaw);
+        }
+
         content.validate();
         return content;
     }

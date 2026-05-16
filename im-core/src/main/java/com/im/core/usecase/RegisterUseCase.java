@@ -2,7 +2,7 @@ package com.im.core.usecase;
 
 import com.im.api.IUserManager;
 import com.im.api.UserInformation;
-import com.im.api.ImException;
+import com.im.common.exception.ImException;
 
 public class RegisterUseCase {
 

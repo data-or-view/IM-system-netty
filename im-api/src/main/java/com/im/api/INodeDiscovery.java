@@ -1,5 +1,7 @@
 package com.im.api;
 
+import com.im.common.lifecycle.Lifecycle;
+
 import java.util.List;
 
 /**
@@ -24,7 +26,13 @@ import java.util.List;
  *   │ 生产         │ RedisNodeDiscovery / EtcdImpl   │
  *   └──────────────┴─────────────────────────────────┘
  */
-public interface INodeDiscovery extends ILifecycle {
+public interface INodeDiscovery extends Lifecycle {
+
+    @Override
+    void start() throws Exception;
+
+    @Override
+    void stop();
 
     /**
      * 注册本节点到集群。

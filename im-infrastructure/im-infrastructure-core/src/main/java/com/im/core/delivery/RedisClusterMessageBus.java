@@ -6,6 +6,7 @@ import com.im.api.ClusterMessage;
 import com.im.api.ClusterMessageHandler;
 import com.im.api.IClusterMessageBus;
 import com.im.api.IMCommand;
+import com.im.core.serialization.jackson.ObjectMapperProvider;
 import com.im.core.redis.RedisConfiguration;
 import io.lettuce.core.pubsub.RedisPubSubListener;
 import io.lettuce.core.pubsub.StatefulRedisPubSubConnection;
@@ -41,7 +42,7 @@ public class RedisClusterMessageBus implements IClusterMessageBus {
     private static final String NODE_CHANNEL_PREFIX = "im:node:";
     private static final String NODE_CHANNEL_SUFFIX = ":msgs";
 
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final ObjectMapper MAPPER = ObjectMapperProvider.get();
 
     private final RedisConfiguration redisConfig;
     private final String nodeId;
@@ -87,7 +88,7 @@ public class RedisClusterMessageBus implements IClusterMessageBus {
     }
 
     @Override
-    public void shutdown() {
+    public void stop() {
         if (pubSubConnection != null) {
             pubSubConnection.close();
         }

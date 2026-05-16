@@ -42,7 +42,7 @@ public class RedisStateStore implements IClusterStateStore {
     }
 
     @Override
-    public void shutdown() {
+    public void stop() {
         listeners.clear();
         log.info("RedisStateStore stopped");
     }

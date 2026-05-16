@@ -1,7 +1,7 @@
 package com.im.core.user;
 
-import com.im.api.ImErrorCode;
-import com.im.api.ImException;
+import com.im.common.enums.ImErrorCode;
+import com.im.common.exception.ImException;
 import com.im.api.IUserManager;
 import com.im.api.UserInformation;
 import com.im.core.db.MyBatisPlusFactory;

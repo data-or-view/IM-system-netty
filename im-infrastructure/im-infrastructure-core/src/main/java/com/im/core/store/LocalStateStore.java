@@ -27,7 +27,7 @@ public class LocalStateStore implements IClusterStateStore {
     }
 
     @Override
-    public void shutdown() {
+    public void stop() {
         store.clear();
         watchers.clear();
         log.info("LocalStateStore stopped");

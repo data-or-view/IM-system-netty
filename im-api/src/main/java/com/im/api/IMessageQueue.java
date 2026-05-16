@@ -1,5 +1,7 @@
 package com.im.api;
 
+import com.im.common.lifecycle.Lifecycle;
+
 import java.util.Set;
 
 /**
@@ -18,7 +20,13 @@ import java.util.Set;
  *   │ PulsarQueue  │ 生产集群，多租户               │
  *   └──────────────┴──────────────────────────────┘
  */
-public interface IMessageQueue extends ILifecycle {
+public interface IMessageQueue extends Lifecycle {
+
+    @Override
+    void start() throws Exception;
+
+    @Override
+    void stop();
 
     /**
      * 生产消息到指定 topic。

@@ -1,5 +1,7 @@
 package com.im.api;
 
+import com.im.common.lifecycle.Lifecycle;
+
 /**
  * 集群消息总线（节点间通信）。
  *
@@ -17,7 +19,13 @@ package com.im.api;
  *
  * 消息防环路：ClusterMessage 自带 TTL，每跳自动递减。
  */
-public interface IClusterMessageBus extends ILifecycle {
+public interface IClusterMessageBus extends Lifecycle {
+
+    @Override
+    void start() throws Exception;
+
+    @Override
+    void stop();
 
     /**
      * 发送消息到指定节点。

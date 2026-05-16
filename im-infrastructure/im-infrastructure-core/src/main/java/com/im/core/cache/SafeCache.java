@@ -1,16 +1,17 @@
 package com.im.core.cache;
 
-import com.im.api.cache.ICache;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Optional;
-import java.util.function.Supplier;
+import java.util.Set;
 
 /**
  * 安全缓存装饰器 —— 保证缓存异常绝不传播到业务层。
  *
- * <p>装饰模式包装任意 {@link ICache} 实现，每个方法都包裹 try-catch，
+ * <p>装饰模式包装任意 {@link Cache} 实现，每个方法都包裹 try-catch，
  * 任何异常都降级为「缓存未命中」行为，业务层完全无感知。
  *
  * <p>适用场景：
@@ -23,18 +24,18 @@ import java.util.function.Supplier;
  * @param <K> 键类型
  * @param <V> 值类型
  */
-public class SafeCache<K, V> implements ICache<K, V> {
+public class SafeCache<K, V> implements Cache<K, V> {
 
     private static final Logger log = LoggerFactory.getLogger(SafeCache.class);
 
-    private final ICache<K, V> delegate;
+    private final Cache<K, V> delegate;
     private final String name;
 
-    public SafeCache(ICache<K, V> delegate) {
+    public SafeCache(Cache<K, V> delegate) {
         this(delegate, delegate.getClass().getSimpleName());
     }
 
-    public SafeCache(ICache<K, V> delegate, String name) {
+    public SafeCache(Cache<K, V> delegate, String name) {
         this.delegate = delegate;
         this.name = name;
     }
@@ -50,76 +51,56 @@ public class SafeCache<K, V> implements ICache<K, V> {
     }
 
     @Override
-    public V getOrLoad(K key, Supplier<V> loader) {
+    public Map<K, Optional<V>> getAllPresent(Set<?> keys) {
         try {
-            Optional<V> cached = delegate.get(key);
-            if (cached.isPresent()) {
-                return cached.get();
-            }
+            return delegate.getAllPresent(keys);
         } catch (Exception e) {
-            log.warn("[SafeCache:{}] getOrLoad({}) cache read failed, fall through: {}",
-                    name, key, e.toString());
-        }
-        // 缓存 miss 或异常 → 直接 load
-        V loaded = loader.get();
-        if (loaded != null) {
-            try {
-                delegate.set(key, loaded);
-            } catch (Exception e) {
-                log.warn("[SafeCache:{}] getOrLoad({}) cache write failed, ignore: {}",
-                        name, key, e.toString());
+            log.warn("[SafeCache:{}] getAllPresent() failed, fall through: {}", name, e.toString());
+            Map<K, Optional<V>> result = new LinkedHashMap<>();
+            for (Object key : keys) {
+                @SuppressWarnings("unchecked")
+                K k = (K) key;
+                result.put(k, Optional.empty());
             }
-        }
-        return loaded;
-    }
-
-    @Override
-    public V getOrLoad(K key, Supplier<V> loader, long ttlSeconds) {
-        try {
-            Optional<V> cached = delegate.get(key);
-            if (cached.isPresent()) {
-                return cached.get();
-            }
-        } catch (Exception e) {
-            log.warn("[SafeCache:{}] getOrLoad({}) cache read failed, fall through: {}",
-                    name, key, e.toString());
-        }
-        V loaded = loader.get();
-        if (loaded != null) {
-            try {
-                delegate.set(key, loaded, ttlSeconds);
-            } catch (Exception e) {
-                log.warn("[SafeCache:{}] getOrLoad({}) cache write failed, ignore: {}",
-                        name, key, e.toString());
-            }
-        }
-        return loaded;
-    }
-
-    @Override
-    public void set(K key, V value) {
-        try {
-            delegate.set(key, value);
-        } catch (Exception e) {
-            log.warn("[SafeCache:{}] set({}) failed, ignore: {}", name, key, e.toString());
+            return result;
         }
     }
 
     @Override
-    public void set(K key, V value, long ttlSeconds) {
+    public void put(K key, V value) {
         try {
-            delegate.set(key, value, ttlSeconds);
+            delegate.put(key, value);
         } catch (Exception e) {
-            log.warn("[SafeCache:{}] set({}) failed, ignore: {}", name, key, e.toString());
+            log.warn("[SafeCache:{}] put({}) failed, ignore: {}", name, key, e.toString());
         }
     }
 
     @Override
-    public void delete(K key) {
+    public boolean putIfAbsent(K key, V value) {
         try {
-            delegate.delete(key);
+            return delegate.putIfAbsent(key, value);
         } catch (Exception e) {
-            log.warn("[SafeCache:{}] delete({}) failed, ignore: {}", name, key, e.toString());
+            log.warn("[SafeCache:{}] putIfAbsent({}) failed, fall through: {}", name, key, e.toString());
+            return false;
+        }
+    }
+
+    @Override
+    public boolean invalidate(K key) {
+        try {
+            return delegate.invalidate(key);
+        } catch (Exception e) {
+            log.warn("[SafeCache:{}] invalidate({}) failed, fall through: {}", name, key, e.toString());
+            return false;
+        }
+    }
+
+    @Override
+    public void invalidateAll(Set<?> keys) {
+        try {
+            delegate.invalidateAll(keys);
+        } catch (Exception e) {
+            log.warn("[SafeCache:{}] invalidateAll() failed, ignore: {}", name, e.toString());
         }
     }
 
@@ -133,12 +114,22 @@ public class SafeCache<K, V> implements ICache<K, V> {
     }
 
     @Override
-    public int size() {
+    public long estimatedSize() {
         try {
-            return delegate.size();
+            return delegate.estimatedSize();
         } catch (Exception e) {
-            log.warn("[SafeCache:{}] size() failed, return 0: {}", name, e.toString());
+            log.warn("[SafeCache:{}] estimatedSize() failed, return 0: {}", name, e.toString());
             return 0;
+        }
+    }
+
+    @Override
+    public CacheStats stats() {
+        try {
+            return delegate.stats();
+        } catch (Exception e) {
+            log.warn("[SafeCache:{}] stats() failed, return EMPTY: {}", name, e.toString());
+            return CacheStats.EMPTY;
         }
     }
 }

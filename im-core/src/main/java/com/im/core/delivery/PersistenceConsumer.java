@@ -1,6 +1,7 @@
 package com.im.core.delivery;
 
 import com.im.api.*;
+import com.im.common.lifecycle.Lifecycle;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -15,7 +16,7 @@ import org.slf4j.LoggerFactory;
  *   ① ChatHandler.save()       ← 写前日志，防止消费者丢消息
  *   ② PersistenceConsumer.save()   ← 最终存储 + 会话更新
  */
-public class PersistenceConsumer implements ILifecycle {
+public class PersistenceConsumer implements Lifecycle {
 
     private static final Logger log = LoggerFactory.getLogger(PersistenceConsumer.class);
 
@@ -105,7 +106,7 @@ public class PersistenceConsumer implements ILifecycle {
     }
 
     @Override
-    public void shutdown() {
+    public void stop() {
         if (handler != null) {
             messageQueue.unsubscribe(MessageQueueTopics.PERSIST, handler);
         }

@@ -19,6 +19,10 @@
             <artifactId>im-core</artifactId>
         </dependency>
         <dependency>
+            <groupId>com.im</groupId>
+            <artifactId>im-infrastructure-common</artifactId>
+        </dependency>
+        <dependency>
             <groupId>io.netty</groupId>
             <artifactId>netty-handler</artifactId>
         </dependency>

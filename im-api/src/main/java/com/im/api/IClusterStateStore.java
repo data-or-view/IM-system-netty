@@ -1,5 +1,7 @@
 package com.im.api;
 
+import com.im.common.lifecycle.Lifecycle;
+
 /**
  * 集群状态存储（分布式 KV）。
  *
@@ -16,7 +18,13 @@ package com.im.api;
  *   │ 集群         │ RedisStateStore / EtcdStateStore│
  *   └──────────────┴─────────────────────────────────┘
  */
-public interface IClusterStateStore extends ILifecycle {
+public interface IClusterStateStore extends Lifecycle {
+
+    @Override
+    void start() throws Exception;
+
+    @Override
+    void stop();
 
     /**
      * 写入 KV。

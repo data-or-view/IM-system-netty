@@ -1,7 +1,9 @@
 package com.im.core.group;
 
 import com.im.api.*;
-import com.im.api.cache.ICache;
+import com.im.core.cache.Cache;
+import com.im.common.enums.ImErrorCode;
+import com.im.common.exception.ImException;
 import com.im.core.cache.ConcurrentHashCache;
 import com.im.core.cache.SafeCache;
 import org.slf4j.Logger;
@@ -44,15 +46,15 @@ public class LocalGroupManager implements IGroupManager {
     private final ConcurrentMap<String, CopyOnWriteArrayList<GroupApply>> joinRequests = new ConcurrentHashMap<>();
 
     // ── 缓存层（SafeCache 包裹，异常不传播） ──
-    private final ICache<String, GroupInformation> groupInfoCache;
-    private final ICache<String, List<String>> memberListCache;
+    private final Cache<String, GroupInformation> groupInfoCache;
+    private final Cache<String, List<String>> memberListCache;
 
     public LocalGroupManager() {
         this(null, null);
     }
 
-    public LocalGroupManager(ICache<String, GroupInformation> groupInfoCache,
-                             ICache<String, List<String>> memberListCache) {
+    public LocalGroupManager(Cache<String, GroupInformation> groupInfoCache,
+                             Cache<String, List<String>> memberListCache) {
         this.groupInfoCache = groupInfoCache != null
                 ? new SafeCache<>(groupInfoCache, "LocalGroupManager.Info")
                 : null;
@@ -245,13 +247,13 @@ public class LocalGroupManager implements IGroupManager {
     @Override
     public Set<String> getMemberIds(String groupId) {
         if (memberListCache != null) {
-            List<String> cached = memberListCache.getOrLoad(
-                    memberListKey(groupId),
-                    () -> {
+            List<String> cached = memberListCache.get(memberListKey(groupId))
+                    .orElseGet(() -> {
                         CopyOnWriteArraySet<String> memberSet = groups.get(groupId);
-                        return memberSet != null ? List.copyOf(memberSet) : List.of();
-                    },
-                    120);
+                        List<String> list = memberSet != null ? List.copyOf(memberSet) : List.of();
+                        memberListCache.put(memberListKey(groupId), list);
+                        return list;
+                    });
             return Set.copyOf(cached);
         }
         CopyOnWriteArraySet<String> memberSet = groups.get(groupId);
@@ -261,13 +263,13 @@ public class LocalGroupManager implements IGroupManager {
     @Override
     public boolean isMember(String groupId, String userId) {
         if (memberListCache != null) {
-            List<String> members = memberListCache.getOrLoad(
-                    memberListKey(groupId),
-                    () -> {
+            List<String> members = memberListCache.get(memberListKey(groupId))
+                    .orElseGet(() -> {
                         CopyOnWriteArraySet<String> memberSet = groups.get(groupId);
-                        return memberSet != null ? List.copyOf(memberSet) : List.of();
-                    },
-                    120);
+                        List<String> list = memberSet != null ? List.copyOf(memberSet) : List.of();
+                        memberListCache.put(memberListKey(groupId), list);
+                        return list;
+                    });
             return members.contains(userId);
         }
         CopyOnWriteArraySet<String> memberSet = groups.get(groupId);
@@ -283,13 +285,14 @@ public class LocalGroupManager implements IGroupManager {
     @Override
     public GroupInformation getGroupInformation(String groupId) {
         if (groupInfoCache != null) {
-            return groupInfoCache.getOrLoad(groupId, () -> {
+            return groupInfoCache.get(groupId).orElseGet(() -> {
                 GroupInformation info = groupInfos.get(groupId);
                 if (info == null) {
                     throw new ImException(ImErrorCode.NOT_FOUND, "Group not found: " + groupId);
                 }
+                groupInfoCache.put(groupId, info);
                 return info;
-            }, GROUP_CACHE_TTL);
+            });
         }
         GroupInformation info = groupInfos.get(groupId);
         if (info == null) {
@@ -354,11 +357,11 @@ public class LocalGroupManager implements IGroupManager {
     // ── 缓存失效（SafeCache 保证 delete 不抛异常） ──
 
     private void invalidateGroupCache(String groupId) {
-        if (groupInfoCache != null) groupInfoCache.delete(groupId);
+        if (groupInfoCache != null) groupInfoCache.invalidate(groupId);
     }
 
     private void invalidateMemberCache(String groupId) {
-        if (memberListCache != null) memberListCache.delete(memberListKey(groupId));
+        if (memberListCache != null) memberListCache.invalidate(memberListKey(groupId));
     }
 
     private static String memberListKey(String groupId) {

@@ -1,6 +1,5 @@
 package com.im.core.mq;
 
-import com.im.api.ILifecycle;
 import com.im.api.IMCommand;
 import com.im.api.IMessageQueue;
 import org.slf4j.Logger;
@@ -47,7 +46,7 @@ public class MemoryMessageQueue implements IMessageQueue {
     }
 
     @Override
-    public void shutdown() {
+    public void stop() {
         running = false;
         dispatcher.shutdown();
         subscribers.clear();

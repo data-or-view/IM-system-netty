@@ -1,10 +1,10 @@
 package com.im.core.user;
 
-import com.im.api.ImErrorCode;
-import com.im.api.ImException;
+import com.im.common.enums.ImErrorCode;
+import com.im.common.exception.ImException;
 import com.im.api.IUserManager;
 import com.im.api.UserInformation;
-import com.im.api.cache.ICache;
+import com.im.core.cache.Cache;
 import com.im.core.cache.ConcurrentHashCache;
 import com.im.core.cache.SafeCache;
 import org.slf4j.Logger;
@@ -33,13 +33,13 @@ public class LocalUserManager implements IUserManager {
 
     private final ConcurrentMap<String, UserInformation> users = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, List<Integer>> onlineStatus = new ConcurrentHashMap<>();
-    private final ICache<String, UserInformation> userCache;
+    private final Cache<String, UserInformation> userCache;
 
     public LocalUserManager() {
         this(null);
     }
 
-    public LocalUserManager(ICache<String, UserInformation> userCache) {
+    public LocalUserManager(Cache<String, UserInformation> userCache) {
         this.userCache = userCache != null
                 ? new SafeCache<>(userCache, "LocalUserManager")
                 : null;
@@ -61,13 +61,14 @@ public class LocalUserManager implements IUserManager {
     public UserInformation getUserInformation(String userId) {
         // 缓存优先
         if (userCache != null) {
-            return userCache.getOrLoad(userId, () -> {
+            return userCache.get(userId).orElseGet(() -> {
                 UserInformation info = users.get(userId);
                 if (info == null) {
                     throw new ImException(ImErrorCode.NOT_FOUND, "User not found: " + userId);
                 }
+                userCache.put(userId, info);
                 return info;
-            }, USER_CACHE_TTL);
+            });
         }
         UserInformation info = users.get(userId);
         if (info == null) {
@@ -104,7 +105,7 @@ public class LocalUserManager implements IUserManager {
         if (faceUrl != null) info.setFaceUrl(faceUrl);
         if (ex != null) info.setEx(ex);
         if (globalRecvMsgOpt >= 0) info.setGlobalRecvMsgOpt(globalRecvMsgOpt);
-        if (userCache != null) userCache.delete(userId);
+        if (userCache != null) userCache.invalidate(userId);
     }
 
     /** 设置用户在线平台（供 LoginHandler/ConnectionEventHandler 调用） */

@@ -34,11 +34,6 @@ public interface IWebhookManager {
         /** 群聊消息发送后（异步通知） */
         AFTER_SEND_GROUP_MSG,
 
-        // ── 旧事件（保留向后兼容） ──
-        /** @deprecated 请使用 BEFORE_SEND_SINGLE_MSG / BEFORE_SEND_GROUP_MSG */
-        @Deprecated BEFORE_SEND_MSG,
-        /** @deprecated 请使用 AFTER_SEND_SINGLE_MSG / AFTER_SEND_GROUP_MSG */
-        @Deprecated AFTER_SEND_MSG,
         /** 用户注册前（可阻断） */
         BEFORE_USER_REGISTER,
         /** 用户注册后（通知） */

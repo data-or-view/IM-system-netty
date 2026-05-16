@@ -85,7 +85,7 @@ public class RedisNodeDiscovery implements INodeDiscovery {
     }
 
     @Override
-    public void shutdown() {
+    public void stop() {
         if (!running.compareAndSet(true, false)) return;
 
         if (heartbeatExecutor != null) {

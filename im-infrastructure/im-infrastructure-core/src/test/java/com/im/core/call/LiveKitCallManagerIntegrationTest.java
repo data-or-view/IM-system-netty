@@ -1,7 +1,7 @@
 package com.im.core.call;
 
 import com.im.api.RoomInformation;
-import com.im.api.ImException;
+import com.im.common.exception.ImException;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 

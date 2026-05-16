@@ -1,6 +1,7 @@
 package com.im.bootstrap;
 
-import com.im.bootstrap.ws.JsonWsCodec;
+import com.im.bootstrap.ws.WsRequestAdapter;
+import com.im.core.dispatcher.ApiDispatcher;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.*;
 import io.netty.channel.epoll.Epoll;
@@ -13,13 +14,19 @@ import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.concurrent.ExecutorService;
+
 /**
  * WebSocket 协议的 Netty ServerBootstrap。
  *
  * <p>Pipeline: HttpServerCodec → HttpObjectAggregator → WebSocketServerProtocolHandler
- * → JsonWsCodec → connectionEventHandler → routerHandler</p>
+ * → connectionEventHandler → WsRequestAdapter</p>
  *
- * <p>客户端通过 WebSocket 发送 JSON 文本帧与 IM 服务端通信。</p>
+ * <p>WsRequestAdapter 替代旧的 JsonWsCodec + MessageRouterHandler 组合：</p>
+ * <ul>
+ *   <li>解析 JSON 帧为 {@link com.im.api.ApiRequest}</li>
+ *   <li>提交到虚拟线程池由 {@link ApiDispatcher} 处理</li>
+ * </ul>
  */
 public class WsServerBootstrap {
 
@@ -35,13 +42,15 @@ public class WsServerBootstrap {
      * @param port                   绑定端口
      * @param useEpoll               是否使用 epoll
      * @param connectionEventHandler 连接事件处理器
-     * @param routerHandler          消息路由分发器
+     * @param dispatcher             统一请求调度器
+     * @param virtualExecutor        虚拟线程执行器
      * @return 绑定后的 Channel
      */
     public static Channel start(EventLoopGroup bossGroup, EventLoopGroup workerGroup,
                                 int port, boolean useEpoll,
                                 ChannelHandler connectionEventHandler,
-                                ChannelHandler routerHandler) throws InterruptedException {
+                                ApiDispatcher dispatcher,
+                                ExecutorService virtualExecutor) throws InterruptedException {
         ServerBootstrap wsBootstrap = new ServerBootstrap()
                 .group(bossGroup, workerGroup)
                 .channel(useEpoll ? EpollServerSocketChannel.class : NioServerSocketChannel.class)
@@ -57,9 +66,8 @@ public class WsServerBootstrap {
                         p.addLast(new HttpObjectAggregator(65536));
                         p.addLast(new WebSocketServerProtocolHandler(
                                 "/ws", null, true, 65536));
-                        p.addLast(new JsonWsCodec());
                         p.addLast(connectionEventHandler);
-                        p.addLast(routerHandler);
+                        p.addLast(new WsRequestAdapter(dispatcher, virtualExecutor));
                     }
                 });
 

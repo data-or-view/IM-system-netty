@@ -1,0 +1,9 @@
+test:
+  host: yaml-host
+  port: 9090
+  nested:
+    key: deep-value
+  list:
+    - item1
+    - item2
+    - item3

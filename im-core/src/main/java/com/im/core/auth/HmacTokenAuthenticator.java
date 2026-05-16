@@ -1,8 +1,8 @@
 package com.im.core.auth;
 
 import com.im.api.IAuthenticator;
-import com.im.api.ImErrorCode;
-import com.im.api.ImException;
+import com.im.common.enums.ImErrorCode;
+import com.im.common.exception.ImException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

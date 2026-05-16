@@ -22,7 +22,7 @@ public class LocalClusterMessageBus implements IClusterMessageBus {
     }
 
     @Override
-    public void shutdown() {
+    public void stop() {
         log.info("LocalClusterMessageBus stopped");
     }
 

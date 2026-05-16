@@ -1,5 +1,8 @@
 package com.im.api;
 
+import com.im.common.enums.ImErrorCode;
+import com.im.common.exception.ImException;
+
 /**
  * RTC 信令动作枚举。
  *

@@ -1,6 +1,5 @@
 package com.im.core.discovery;
 
-import com.im.api.ILifecycle;
 import com.im.api.INodeDiscovery;
 import com.im.api.NodeInformation;
 import org.slf4j.Logger;
@@ -35,7 +34,7 @@ public class LocalNodeDiscovery implements INodeDiscovery {
     }
 
     @Override
-    public void shutdown() {
+    public void stop() {
         running = false;
         if (self != null) {
             unregister();

@@ -19,6 +19,14 @@
             <artifactId>im-api</artifactId>
         </dependency>
         <dependency>
+            <groupId>com.im</groupId>
+            <artifactId>im-infrastructure-common</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.im</groupId>
+            <artifactId>im-infrastructure-serialization-jackson</artifactId>
+        </dependency>
+        <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
         </dependency>

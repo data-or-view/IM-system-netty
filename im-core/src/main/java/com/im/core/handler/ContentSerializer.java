@@ -1,8 +1,10 @@
 package com.im.core.handler;
 
-import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.im.api.content.*;
+import com.im.core.serialization.jackson.ObjectMapperProvider;
+
+import java.util.Map;
 
 /**
  * 消息内容序列化/反序列化。
@@ -16,8 +18,7 @@ import com.im.api.content.*;
  */
 public class ContentSerializer {
 
-    private static final ObjectMapper MAPPER = new ObjectMapper()
-            .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+    private static final ObjectMapper MAPPER = ObjectMapperProvider.get();
 
     private ContentSerializer() {}
 
@@ -55,6 +56,26 @@ public class ContentSerializer {
             return MAPPER.readValue(body, clazz);
         } catch (Exception e) {
             throw new RuntimeException("Failed to deserialize content: type=" + contentType, e);
+        }
+    }
+
+    /**
+     * 直接从 Map 反序列化为消息内容（无需 bytes 中间态）。
+     * 用于 WS 场景：JSON 帧中的 content 字段已经是 Map，直接 convertValue。
+     */
+    @SuppressWarnings("unchecked")
+    public static IMessageContent fromMap(ContentType contentType, Map<String, Object> map) {
+        if (contentType == ContentType.SYSTEM) {
+            return new SystemContent(null, null);
+        }
+        if (map == null || map.isEmpty()) {
+            throw new IllegalArgumentException("content map must not be empty for type: " + contentType);
+        }
+        try {
+            Class<? extends IMessageContent> clazz = getImplClass(contentType);
+            return MAPPER.convertValue(map, clazz);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to deserialize content from map: type=" + contentType, e);
         }
     }
 

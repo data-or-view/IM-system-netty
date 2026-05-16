@@ -1,10 +1,12 @@
 package com.im.core.cache;
 
-import com.im.api.cache.ICache;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.Executors;
@@ -27,7 +29,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * @param <K> 键类型
  * @param <V> 值类型
  */
-public class ConcurrentHashCache<K, V> implements ICache<K, V> {
+public class ConcurrentHashCache<K, V> implements Cache<K, V> {
 
     private static final Logger log = LoggerFactory.getLogger(ConcurrentHashCache.class);
 
@@ -55,6 +57,8 @@ public class ConcurrentHashCache<K, V> implements ICache<K, V> {
                 TimeUnit.SECONDS);
     }
 
+    // ========== Cache<K,V> 接口实现 ==========
+
     @Override
     public Optional<V> get(K key) {
         CacheEntry<V> entry = store.get(key);
@@ -69,21 +73,39 @@ public class ConcurrentHashCache<K, V> implements ICache<K, V> {
     }
 
     @Override
-    public void set(K key, V value) {
-        set(key, value, DEFAULT_TTL_SECONDS);
+    public Map<K, Optional<V>> getAllPresent(Set<?> keys) {
+        Map<K, Optional<V>> result = new LinkedHashMap<>();
+        for (Object key : keys) {
+            @SuppressWarnings("unchecked")
+            K k = (K) key;
+            result.put(k, get(k));
+        }
+        return result;
     }
 
     @Override
-    public void set(K key, V value, long ttlSeconds) {
-        long expireAt = ttlSeconds > 0
-                ? System.currentTimeMillis() + ttlSeconds * 1000
-                : Long.MAX_VALUE;
-        store.put(key, new CacheEntry<>(value, expireAt));
+    public void put(K key, V value) {
+        put(key, value, DEFAULT_TTL_SECONDS);
     }
 
     @Override
-    public void delete(K key) {
-        store.remove(key);
+    public boolean putIfAbsent(K key, V value) {
+        long expireAt = System.currentTimeMillis() + DEFAULT_TTL_SECONDS * 1000;
+        CacheEntry<V> newEntry = new CacheEntry<>(value, expireAt);
+        CacheEntry<V> old = store.putIfAbsent(key, newEntry);
+        return old == null;
+    }
+
+    @Override
+    public boolean invalidate(K key) {
+        return store.remove(key) != null;
+    }
+
+    @Override
+    public void invalidateAll(Set<?> keys) {
+        for (Object key : keys) {
+            store.remove(key);
+        }
     }
 
     @Override
@@ -92,8 +114,22 @@ public class ConcurrentHashCache<K, V> implements ICache<K, V> {
     }
 
     @Override
-    public int size() {
+    public long estimatedSize() {
         return store.size();
+    }
+
+    @Override
+    public CacheStats stats() {
+        return CacheStats.EMPTY;
+    }
+
+    // ========== 内部带 TTL 写入 ==========
+
+    private void put(K key, V value, long ttlSeconds) {
+        long expireAt = ttlSeconds > 0
+                ? System.currentTimeMillis() + ttlSeconds * 1000
+                : Long.MAX_VALUE;
+        store.put(key, new CacheEntry<>(value, expireAt));
     }
 
     /** 惰性删除 + 定时清理过期条目 */

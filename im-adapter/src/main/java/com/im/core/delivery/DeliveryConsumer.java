@@ -1,7 +1,8 @@
 package com.im.core.delivery;
 
 import com.im.api.*;
-import com.im.core.util.IMExecutors;
+import com.im.common.lifecycle.Lifecycle;
+import com.im.common.util.IMExecutors;
 import io.netty.channel.Channel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,7 +26,7 @@ import java.util.stream.Collectors;
  * 设计参考 OpenIM 的 DefaultAllNode.GetConnsAndOnlinePush：
  *   通过 IRouteTable.lookupAll 精确路由，替代 OpenIM 的广播模式。
  */
-public class DeliveryConsumer implements ILifecycle {
+public class DeliveryConsumer implements Lifecycle {
 
     private static final Logger log = LoggerFactory.getLogger(DeliveryConsumer.class);
 
@@ -202,7 +203,7 @@ public class DeliveryConsumer implements ILifecycle {
     }
 
     @Override
-    public void shutdown() {
+    public void stop() {
         if (handler != null) {
             messageQueue.unsubscribe(MessageQueueTopics.DELIVER, handler);
         }
