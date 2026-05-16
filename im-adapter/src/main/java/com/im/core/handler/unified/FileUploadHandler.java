@@ -4,7 +4,7 @@ import com.im.api.ApiRequest;
 import com.im.api.RequestHandler;
 import com.im.common.enums.ImErrorCode;
 import com.im.common.exception.ImException;
-import com.im.core.usecase.FileUploadUseCase;
+import com.im.infrastructure.storage.usecase.FileUploadUseCase;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

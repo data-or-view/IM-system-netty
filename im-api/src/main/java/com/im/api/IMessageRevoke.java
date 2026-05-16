@@ -35,7 +35,7 @@ public interface IMessageRevoke {
      * @param groupId  群 ID（可选）
      * @return true=允许撤回
      */
-    boolean canRevoke(String userId, IMCommand msg, String groupId);
+    boolean canRevoke(String userId, Message msg, String groupId);
 
     /**
      * 撤回结果。

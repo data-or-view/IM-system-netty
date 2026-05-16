@@ -1,6 +1,5 @@
 package com.im.core.dispatcher;
 
-import com.im.api.IMCommand;
 import com.im.common.util.IMExecutors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -13,8 +12,8 @@ import java.util.concurrent.atomic.AtomicInteger;
  *
  * 核心逻辑：
  *   register(seqId, future) — 发送请求前注册
- *   onAckReceived(command)  — 收到响应后配对
- *   failFastAll()            — 连接断开时快速失败
+ *   onAckReceived(seqId)   — 收到响应后配对
+ *   failFastAll()           — 连接断开时快速失败
  *
  * 等待超时清理由独立的 ScheduledExecutor 驱动（平台守护线程）。
  */
@@ -23,7 +22,7 @@ public class PendingAcknowledgementManager {
     private static final Logger log = LoggerFactory.getLogger(PendingAcknowledgementManager.class);
 
     /** seqId → CompletableFuture */
-    private final ConcurrentHashMap<Integer, CompletableFuture<IMCommand>> pendingTable = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Integer, CompletableFuture<Integer>> pendingTable = new ConcurrentHashMap<>();
 
     /** 超时调度器：平台守护线程 */
     private final ScheduledExecutorService timeoutExecutor;
@@ -40,10 +39,10 @@ public class PendingAcknowledgementManager {
      * @param future   ACK 到达时完成的 CompletableFuture
      * @param timeoutMs 超时时间（毫秒）
      */
-    public void register(int seqId, CompletableFuture<IMCommand> future, long timeoutMs) {
+    public void register(int seqId, CompletableFuture<Integer> future, long timeoutMs) {
         pendingTable.put(seqId, future);
         timeoutExecutor.schedule(() -> {
-            CompletableFuture<IMCommand> f = pendingTable.remove(seqId);
+            CompletableFuture<Integer> f = pendingTable.remove(seqId);
             if (f != null && !f.isDone()) {
                 f.completeExceptionally(new TimeoutException("ACK timeout for seqId=" + seqId));
                 timeoutCount.incrementAndGet();
@@ -54,12 +53,12 @@ public class PendingAcknowledgementManager {
     /**
      * 收到 ACK 时配对。
      *
-     * @param command ACK 消息
+     * @param seqId ACK 对应的请求序列号
      */
-    public void onAckReceived(IMCommand command) {
-        CompletableFuture<IMCommand> future = pendingTable.remove(command.getSeqId());
+    public void onAckReceived(int seqId) {
+        CompletableFuture<Integer> future = pendingTable.remove(seqId);
         if (future != null) {
-            future.complete(command);
+            future.complete(seqId);
         }
     }
 
@@ -72,7 +71,7 @@ public class PendingAcknowledgementManager {
         }
         int count = 0;
         for (Integer seqId : pendingTable.keySet()) {
-            CompletableFuture<IMCommand> f = pendingTable.remove(seqId);
+            CompletableFuture<Integer> f = pendingTable.remove(seqId);
             if (f != null && !f.isDone()) {
                 f.completeExceptionally(new IllegalStateException("Connection closed, seqId=" + seqId));
                 count++;

@@ -3,7 +3,7 @@ package com.im.core.handler.unified;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.im.api.ApiRequest;
 import com.im.api.IConnectionSession;
-import com.im.api.IMCommand;
+import com.im.api.Message;
 import com.im.api.ISessionManager;
 import com.im.api.RequestHandler;
 import com.im.common.enums.ImErrorCode;
@@ -60,7 +60,7 @@ public class LoginHandler implements RequestHandler {
 
         // 投递离线消息（通过 Channel 直接写 WS 帧）
         if (channel != null && result.offlineMessages() != null && !result.offlineMessages().isEmpty()) {
-            for (IMCommand offlineMsg : result.offlineMessages()) {
+            for (Message offlineMsg : result.offlineMessages()) {
                 try {
                     String json = MAPPER.writeValueAsString(offlineMsg.toJsonMap());
                     channel.writeAndFlush(new TextWebSocketFrame(json));

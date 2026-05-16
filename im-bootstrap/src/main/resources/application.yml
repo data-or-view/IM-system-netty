@@ -1,0 +1,73 @@
+# =============================================
+# IM System 配置
+# =============================================
+# 配置优先级: -D 参数 > 环境变量 > 此文件 > 代码默认值
+# 所有配置键使用 im. 前缀命名空间
+# =============================================
+
+im:
+  # ── 服务器 ──
+  server:
+    boss-threads: 1              # Boss 线程数
+    worker-threads: 0            # Worker 线程数 (0=Netty 自动选择)
+    business-threads: 8          # 业务线程数
+    use-epoll: true              # 是否优先使用 epoll
+    idle-timeout: 180            # 空闲超时秒数
+    heartbeat-timeout: 120       # 心跳超时秒数
+    max-frame-length: 4194304    # 最大帧长度 (4MB)
+    socket-rcv-buf: 65535        # Socket 接收缓冲区
+    socket-snd-buf: 65535        # Socket 发送缓冲区
+
+  # ── WebSocket ──
+  ws:
+    enabled: true                # 启用 WebSocket
+    port: 8081                   # WebSocket 端口
+
+  # ── HTTP REST ──
+  http:
+    enabled: true                # 启用 HTTP REST API
+    port: 8082                   # HTTP REST 端口
+
+  # ── 节点 ──
+  node:
+    id: "node-1"                 # 本节点 ID
+
+  # ── Token ──
+  token:
+    secret: "im-system-dev-secret-change-in-production"
+
+  # ── 数据库（开启需要 Docker MySQL, 见 application-macbook-dev.yml） ──
+  db:
+    enabled: false               # 启用数据库持久化（设为 true 需要 MySQL 容器）
+    schema: auto                 # 自动建表: none(跳过) / auto(不存在时创建) / rebuild(先删后建)
+    jdbc-url: "jdbc:mysql://127.0.0.1:3306/im_system?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true"
+    username: "root"
+    password: "password"
+
+  # ── Redis ──
+  redis:
+    host: ""                     # Redis 主机 (为空时使用本地模式)
+    port: 6379                   # Redis 端口
+    password: ""                 # Redis 密码
+    database: 0                  # Redis 数据库号
+    cluster:
+      nodes: ""                  # 集群节点 (逗号分隔, 如 "127.0.0.1:6379,127.0.0.1:6380")
+
+  # ── Webhook ──
+  webhook:
+    url: ""                      # Webhook 回调 URL
+
+  # ── RTC 通话 ──
+  call:
+    enabled: true
+    provider: livekit
+    api-key: "devkey"
+    api-secret: "im-system-livekit-secret-2024"
+    sfu-endpoint: "ws://localhost:7880"
+
+  # ── MinIO 文件存储 ──
+  minio:
+    endpoint: "http://127.0.0.1:9000"
+    access-key: "minioadmin"
+    secret-key: "minioadmin"
+    bucket: "im-system"

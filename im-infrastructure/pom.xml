@@ -22,7 +22,7 @@
         <module>im-infrastructure-common</module>
         <module>im-infrastructure-config</module>
         <module>im-infrastructure-spi</module>
-        <module>im-infrastructure-core</module>
+        <module>im-infrastructure-storage</module>
         <module>im-infrastructure-message</module>
         <module>im-infrastructure-message-kafka</module>
     </modules>

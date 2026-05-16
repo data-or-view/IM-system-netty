@@ -41,7 +41,7 @@ public class PersistenceConsumer implements Lifecycle {
     public void start() {
         this.handler = msg -> {
             String messageId = msg.getMessageId();
-            String fromUserId = msg.getHeader("fromUserId");
+            String fromUserId = msg.getFromUserId();
 
             // ① 持久化消息（ChatHandler 已做 write-ahead 保存，此处为最终存储，允许重复）
             if (messageStore != null) {
@@ -58,17 +58,17 @@ public class PersistenceConsumer implements Lifecycle {
                         }
                     }
                     if (isDup) {
-                        log.debug("Msg already saved (dup), seqId={}, mid={}", msg.getSeqId(), messageId);
+                        log.debug("Msg already saved (dup), seqId={}, mid={}", msg.getMessageSeq(), messageId);
                     } else {
-                        log.warn("Persistence save failed: seqId={}, err={}", msg.getSeqId(), e.getMessage());
+                        log.warn("Persistence save failed: seqId={}, err={}", msg.getMessageSeq(), e.getMessage());
                     }
                 }
             }
 
             // ② 更新会话
             if (conversationManager != null) {
-                String groupId = msg.getHeader("groupId");
-                String toUserId = msg.getHeader("toUserId");
+                String groupId = msg.getGroupId();
+                String toUserId = msg.getToUserId();
 
                 if (groupId != null) {
                     // 群聊：更新每个成员的会话

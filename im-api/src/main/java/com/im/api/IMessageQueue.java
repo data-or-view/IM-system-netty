@@ -14,10 +14,9 @@ import java.util.Set;
  *   ┌──────────────┬──────────────────────────────┐
  *   │ 方案         │ 场景                         │
  *   ├──────────────┼──────────────────────────────┤
- *   │ MemoryQueue  │ 单机开发测试（基于BQingQueue） │
+ *   │ MemoryQueue  │ 单机开发测试                  │
+ *   │ RedisQueue   │ 生产集群，Redis Streams       │
  *   │ KafkaQueue   │ 生产集群，高吞吐               │
- *   │ RocketMQQueue│ 生产集群，事务消息              │
- *   │ PulsarQueue  │ 生产集群，多租户               │
  *   └──────────────┴──────────────────────────────┘
  */
 public interface IMessageQueue extends Lifecycle {
@@ -30,9 +29,8 @@ public interface IMessageQueue extends Lifecycle {
 
     /**
      * 生产消息到指定 topic。
-     * 实现层负责序列化 + 投递。
      */
-    void publishAsync(String topic, IMCommand msg);
+    void publishAsync(String topic, Message msg);
 
     /**
      * 订阅指定 topic。
@@ -62,6 +60,6 @@ public interface IMessageQueue extends Lifecycle {
      */
     @FunctionalInterface
     interface MessageHandler {
-        void onMessage(IMCommand msg);
+        void onMessage(Message msg);
     }
 }

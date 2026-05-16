@@ -1,9 +1,9 @@
 package com.im.core.usecase;
 
 import com.im.api.IAuthenticator;
-import com.im.api.IMCommand;
 import com.im.api.IMessageStore;
 import com.im.api.IRouteTable;
+import com.im.api.Message;
 
 import java.time.Duration;
 import java.util.List;
@@ -25,7 +25,7 @@ public class LoginUseCase {
         this.localNodeId = localNodeId;
     }
 
-    public record LoginResult(String token, int platformId, List<IMCommand> offlineMessages) {}
+    public record LoginResult(String token, int platformId, List<Message> offlineMessages) {}
 
     public LoginResult execute(String userId, int platformId, int appManagerLevel) {
         String token = null;
@@ -38,7 +38,7 @@ public class LoginUseCase {
             routeTable.setOnline(userId, platformId);
         }
 
-        List<IMCommand> offline = List.of();
+        List<Message> offline = List.of();
         if (messageStore != null) {
             offline = messageStore.pullOffline(userId, 100);
         }

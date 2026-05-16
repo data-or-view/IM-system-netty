@@ -20,7 +20,7 @@
         </dependency>
         <dependency>
             <groupId>com.im</groupId>
-            <artifactId>im-infrastructure-core</artifactId>
+            <artifactId>im-infrastructure-storage</artifactId>
         </dependency>
         <dependency>
             <groupId>com.im</groupId>

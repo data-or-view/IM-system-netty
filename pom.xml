@@ -98,7 +98,7 @@
             </dependency>
             <dependency>
                 <groupId>com.im</groupId>
-                <artifactId>im-infrastructure-core</artifactId>
+                <artifactId>im-infrastructure-storage</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

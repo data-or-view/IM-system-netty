@@ -1,5 +1,7 @@
 package com.im.api;
 
+import com.im.api.Message;
+
 import java.util.List;
 
 /**
@@ -25,12 +27,12 @@ public interface IMessageStore {
     /**
      * 保存消息（按 conversation 存储）。
      */
-    void save(IMCommand msg);
+    void save(Message msg);
 
     /**
      * 批量保存。
      */
-    default void saveAll(List<IMCommand> messages) {
+    default void saveAll(List<Message> messages) {
         messages.forEach(this::save);
     }
 
@@ -42,7 +44,7 @@ public interface IMessageStore {
      * @param limit  最大条数
      * @return 离线消息列表
      */
-    List<IMCommand> pullOffline(String userId, int limit);
+    List<Message> pullOffline(String userId, int limit);
 
     /**
      * 按 conversation + seq 范围拉取消息（历史消息拉取）。
@@ -54,7 +56,7 @@ public interface IMessageStore {
      * @param limit          最大返回条数
      * @return 消息列表，按 seq 升序排列
      */
-    List<IMCommand> pullBySequence(String conversationId, long startSeq, long endSeq, int limit);
+    List<Message> pullBySequence(String conversationId, long startSeq, long endSeq, int limit);
 
     /**
      * 标记消息为已投递（从离线队列移除）。

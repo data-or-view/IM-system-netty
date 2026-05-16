@@ -1,11 +1,9 @@
 package com.im.core.usecase;
 
-import com.im.api.CommandType;
 import com.im.api.IGroupManager;
-import com.im.api.IMCommand;
 import com.im.api.IMessageQueue;
-import com.im.api.IMessageStore;
 import com.im.api.ISequenceManager;
+import com.im.api.Message;
 import com.im.api.MessageQueueTopics;
 import com.im.api.content.IMessageContent;
 import com.im.core.handler.ContentSerializer;
@@ -16,27 +14,23 @@ import java.util.concurrent.atomic.AtomicLong;
 
 public class SendMessageUseCase {
 
-    public static final String MSG_SEQ_HEADER = "_ms";
-
     private static final AtomicLong msgIdCounter = new AtomicLong(System.currentTimeMillis());
 
     private final IMessageQueue messageQueue;
-    private final IMessageStore messageStore;
     private final ISequenceManager sequenceManager;
     private final IGroupManager groupManager;
     private final WebhookService webhookService;
 
-    public SendMessageUseCase(IMessageQueue messageQueue, IMessageStore messageStore,
+    public SendMessageUseCase(IMessageQueue messageQueue,
                               ISequenceManager sequenceManager, IGroupManager groupManager,
                               WebhookService webhookService) {
         this.messageQueue = messageQueue;
-        this.messageStore = messageStore;
         this.sequenceManager = sequenceManager;
         this.groupManager = groupManager;
         this.webhookService = webhookService;
     }
 
-    public record SendMessageResult(String conversationId, long seq, CommandType responseType) {}
+    public record SendMessageResult(String conversationId, long seq, String responseType) {}
 
     // ── 新接口：统一 handler 使用 ──
 
@@ -76,9 +70,8 @@ public class SendMessageUseCase {
             seq = sequenceManager.nextSequence(conversationId);
         }
 
-        // 构建临时 IMCommand 用于持久化（过渡方案）
-        IMCommand msg = buildTempCommand(params, fromUserId, toUserId, null, content, conversationId, seq);
-        if (messageStore != null) messageStore.save(msg);
+        // 构建 Message 用于持久化
+        Message msg = buildMessage(params, fromUserId, toUserId, null, content, conversationId, seq);
         if (messageQueue != null) {
             messageQueue.publishAsync(MessageQueueTopics.PERSIST, msg);
             messageQueue.publishAsync(MessageQueueTopics.DELIVER, msg);
@@ -86,7 +79,7 @@ public class SendMessageUseCase {
 
         webhookService.afterSendSingle(params, fromUserId, toUserId, content);
 
-        return new SendMessageResult(conversationId, seq, CommandType.SINGLE_CHAT_ACK);
+        return new SendMessageResult(conversationId, seq, "SINGLE_CHAT_ACK");
     }
 
     private SendMessageResult handleGroupChat(Map<String, Object> params, String fromUserId,
@@ -101,8 +94,7 @@ public class SendMessageUseCase {
             seq = sequenceManager.nextSequence(conversationId);
         }
 
-        IMCommand msg = buildTempCommand(params, fromUserId, null, groupId, content, conversationId, seq);
-        if (messageStore != null) messageStore.save(msg);
+        Message msg = buildMessage(params, fromUserId, null, groupId, content, conversationId, seq);
         if (messageQueue != null) {
             messageQueue.publishAsync(MessageQueueTopics.PERSIST, msg);
             messageQueue.publishAsync(MessageQueueTopics.DELIVER, msg);
@@ -110,43 +102,32 @@ public class SendMessageUseCase {
 
         webhookService.afterSendGroup(params, fromUserId, groupId, content);
 
-        return new SendMessageResult(conversationId, seq, CommandType.GROUP_CHAT_ACK);
+        return new SendMessageResult(conversationId, seq, "GROUP_CHAT_ACK");
     }
 
     /**
-     * 构建临时 IMCommand 用于持久化层桥接。
-     * 下个版本移除 IMCommand 后，直接调用持久层新接口。
+     * 构建 Message 用于持久化层。
      */
-    private IMCommand buildTempCommand(Map<String, Object> params, String fromUserId,
-                                        String toUserId, String groupId, IMessageContent content,
-                                        String conversationId, long seq) {
-        CommandType type = groupId != null ? CommandType.GROUP_CHAT : CommandType.SINGLE_CHAT;
-        IMCommand cmd = new IMCommand(type);
-
-        // 协议字段
+    private Message buildMessage(Map<String, Object> params, String fromUserId,
+                                  String toUserId, String groupId, IMessageContent content,
+                                  String conversationId, long seq) {
+        Message msg = new Message();
         String serverMid = "srv_" + msgIdCounter.incrementAndGet();
-        cmd.setMessageId(serverMid);
-
-        // headers
-        cmd.putHeader("fromUserId", fromUserId);
-        if (toUserId != null) cmd.putHeader("toUserId", toUserId);
-        if (groupId != null) cmd.putHeader("groupId", groupId);
-        cmd.putHeader("_uid", fromUserId);
-        cmd.putHeader("conversationId", conversationId);
-        cmd.putHeader(MSG_SEQ_HEADER, String.valueOf(seq));
+        msg.setMessageId(serverMid);
+        msg.setFromUserId(fromUserId);
+        msg.setToUserId(toUserId);
+        msg.setGroupId(groupId);
+        msg.setConversationId(conversationId);
+        msg.setMessageSeq(seq);
+        msg.setTimestamp(System.currentTimeMillis());
 
         // 内容类型
-        Object ctObj = params.get("_ct");
-        if (ctObj != null) {
-            cmd.putHeader("_ct", ctObj.toString());
-        }
-
-        // body
         if (content != null) {
-            cmd.setBody(ContentSerializer.toBytes(content));
+            msg.setContentType(content.getContentType().ordinal());
+            msg.setBody(ContentSerializer.toBytes(content));
         }
 
-        return cmd;
+        return msg;
     }
 
     private static String buildConversationId(String fromUserId, String toUserId) {

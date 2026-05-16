@@ -42,7 +42,7 @@ public interface IConversationManager {
      * @param msg            收到的消息
      * @param isSelf         是否为发送方自己（发送方不+1 unread）
      */
-    void updateOnMessage(String ownerUserId, String conversationId, IMCommand msg, boolean isSelf);
+    void updateOnMessage(String ownerUserId, String conversationId, Message msg, boolean isSelf);
 
     /**
      * 用户已读消息，重置未读数。

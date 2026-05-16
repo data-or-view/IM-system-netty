@@ -17,7 +17,8 @@ import com.im.core.delivery.*;
 import com.im.core.discovery.*;
 import com.im.core.dispatcher.ApiDispatcher;
 import com.im.core.dispatcher.PendingAcknowledgementManager;
-import com.im.core.file.MinioFileStorageService;
+import com.im.infrastructure.storage.file.MinioFileStorageService;
+import com.im.infrastructure.storage.usecase.FileUploadUseCase;
 import com.im.core.friend.DbFriendManager;
 import com.im.core.friend.LocalFriendManager;
 import com.im.core.group.DbGroupManager;
@@ -25,6 +26,7 @@ import com.im.core.group.LocalGroupManager;
 import com.im.core.handler.*;
 import com.im.core.handler.unified.*;
 import com.im.core.mq.MemoryMessageQueue;
+import com.im.core.mq.RedisMessageQueue;
 import com.im.core.redis.RedisConfiguration;
 import com.im.core.redis.RedisRouteTable;
 import com.im.core.redis.RedisStateStore;
@@ -120,7 +122,7 @@ public class IMServer implements Lifecycle {
                 ? new DbConversationManager(retryExecutor)
                 : new LocalConversationManager(new ConcurrentHashCache<>());
         this.friendManager = dbEnabled() ? new DbFriendManager(retryExecutor) : new LocalFriendManager();
-        this.userManager = dbEnabled() ? new DbUserManager(retryExecutor) : new LocalUserManager();
+        this.userManager = dbEnabled() ? new DbUserManager(retryExecutor, routeTable) : new LocalUserManager(routeTable);
 
         // 文件存储
         this.fileStorage = new MinioFileStorageService(
@@ -130,7 +132,9 @@ public class IMServer implements Lifecycle {
 
         // 消息存储 + 队列
         this.messageStore = dbEnabled() ? new DbMessageStore(retryExecutor) : new LocalMessageStore();
-        this.messageQueue = new MemoryMessageQueue();
+        this.messageQueue = redisConfig != null
+                ? new RedisMessageQueue(redisConfig, nodeId)
+                : new MemoryMessageQueue();
 
         // 消费者
         this.persistenceConsumer = new PersistenceConsumer(messageQueue, messageStore, conversationManager);
@@ -146,7 +150,7 @@ public class IMServer implements Lifecycle {
         WebhookService webhookService = new WebhookService(new LocalWebhookManager(
                 config.getString("im.webhook.url").orElse("")));
         SendMessageUseCase sendMessageUseCase = new SendMessageUseCase(
-                messageQueue, messageStore, sequenceManager, groupManager, webhookService);
+                messageQueue, sequenceManager, groupManager, webhookService);
 
         // ── 统一 ApiDispatcher ──
         this.dispatcher = new ApiDispatcher();
@@ -303,9 +307,10 @@ public class IMServer implements Lifecycle {
         String activeEnv = System.getProperty("im.env");
         if (activeEnv == null || activeEnv.isBlank()) activeEnv = System.getenv("IM_ENV");
         if (activeEnv != null && !activeEnv.isBlank()) {
-            ConfigLoader.register(new YamlConfigSource("config/application-" + activeEnv.trim() + ".yml"));
+            // order=1 优先级高于内置的 classpath:application.yml (order=2)
+            ConfigLoader.register(new YamlConfigSource("classpath:application-" + activeEnv.trim() + ".yml", 1));
         }
-        ConfigLoader.register(new YamlConfigSource("config/application.yml"));
+        // 内置 classpath:application.yml 由 ConfigLoader.doLoad() 自动加载
         return ConfigLoader.load();
     }
 
@@ -314,10 +319,9 @@ public class IMServer implements Lifecycle {
     public static void main(String[] args) throws Exception {
         Config config = loadConfig();
 
-        // 数据库初始化
-        String dbEnabled = config.getString("im.db.enabled").orElse(null);
-        String jdbcUrl = config.getString("im.db.jdbc-url").orElse(null);
-        if ("true".equalsIgnoreCase(dbEnabled) || (jdbcUrl != null && !jdbcUrl.isEmpty())) {
+        // 数据库初始化（仅在 im.db.enabled=true 时启动）
+        if ("true".equalsIgnoreCase(config.getString("im.db.enabled").orElse("false"))) {
+            String jdbcUrl = config.getString("im.db.jdbc-url").orElse(null);
             DatabaseConfiguration dbConfig = jdbcUrl != null
                     ? new DatabaseConfiguration.Builder()
                         .jdbcUrl(jdbcUrl)

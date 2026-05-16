@@ -10,18 +10,18 @@ import java.util.List;
  */
 public class SearchMessagesResult {
 
-    private final List<IMCommand> messages;
+    private final List<Message> messages;
     private final int totalCount;
     private final boolean hasMore;
 
-    public SearchMessagesResult(List<IMCommand> messages, int totalCount, boolean hasMore) {
+    public SearchMessagesResult(List<Message> messages, int totalCount, boolean hasMore) {
         this.messages = messages != null ? messages : Collections.emptyList();
         this.totalCount = totalCount;
         this.hasMore = hasMore;
     }
 
     /** 当前页匹配的消息列表，按时间倒序排列。 */
-    public List<IMCommand> getMessages() { return messages; }
+    public List<Message> getMessages() { return messages; }
 
     /** 匹配的消息总数（用于分页展示）。 */
     public int getTotalCount() { return totalCount; }
