@@ -44,12 +44,15 @@ public enum Operation {
     // ── 会话 ──
     CONVERSATION_LIST("conversation.list", "GET", "/api/conversation/list", true),
     CONVERSATION_SET("conversation.set", "POST", "/api/conversation/set", true),
+    CONVERSATION_READ("conversation.read", "POST", "/api/conversation/read", true),
 
     // ── 消息 ──
     CHAT_PULL("chat.pull", "POST", "/api/msg/pull", true),
     CHAT_SEQ("chat.seq", "GET", "/api/msg/seq", true),
+    CHAT_SYNC("chat.sync", "POST", "/api/msg/sync", true),
     CHAT_SEND("chat.send", null, null, true),
     CHAT_SEND_GROUP("chat.send.group", null, null, true),
+    CHAT_REVOKE("msg_revoke", "POST", "/api/msg/revoke", true),
 
     // ── 文件 ──
     FILE_UPLOAD("file.upload", "POST", "/api/file/upload", true),

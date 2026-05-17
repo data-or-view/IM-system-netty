@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.im.api.FriendApply;
 import com.im.api.FriendInformation;
 import com.im.api.IFriendManager;
+import com.im.api.IncrementalSyncResult;
 import com.im.core.db.MyBatisPlusFactory;
 import com.im.core.db.entity.BlacklistEntity;
 import com.im.core.db.entity.FriendEntity;
@@ -11,6 +12,7 @@ import com.im.core.db.entity.FriendRequestEntity;
 import com.im.core.db.mapper.BlacklistMapper;
 import com.im.core.db.mapper.FriendMapper;
 import com.im.core.db.mapper.FriendRequestMapper;
+import com.im.core.sync.DbIncrementalSync;
 import com.im.common.retry.RetryConfig;
 import com.im.common.retry.RetryExecutor;
 import com.im.common.retry.RetryStrategies;
@@ -33,9 +35,15 @@ public class DbFriendManager implements IFriendManager {
     private static final RetryConfig CFG = RetryStrategies.DB_WRITE;
 
     private final RetryExecutor retryExecutor;
+    private final DbIncrementalSync sync;
 
     public DbFriendManager(RetryExecutor retryExecutor) {
+        this(retryExecutor, new DbIncrementalSync(retryExecutor));
+    }
+
+    public DbFriendManager(RetryExecutor retryExecutor, DbIncrementalSync sync) {
         this.retryExecutor = retryExecutor;
+        this.sync = sync;
     }
 
     @Override
@@ -108,6 +116,12 @@ public class DbFriendManager implements IFriendManager {
             }
             return null;
         });
+
+        // 记录增量同步（独立 session）
+        if (agreed) {
+            sync.recordChange(userId, "friend", fromUserId, "insert");
+            sync.recordChange(fromUserId, "friend", userId, "insert");
+        }
     }
 
     @Override
@@ -138,6 +152,9 @@ public class DbFriendManager implements IFriendManager {
             }
             return null;
         });
+
+        sync.recordChange(ownerUserId, "friend", friendUserId, "delete");
+        sync.recordChange(friendUserId, "friend", ownerUserId, "delete");
     }
 
     @Override
@@ -176,6 +193,8 @@ public class DbFriendManager implements IFriendManager {
             }
             return null;
         });
+
+        sync.recordChange(ownerUserId, "friend", friendUserId, "update");
     }
 
     @Override
@@ -194,6 +213,8 @@ public class DbFriendManager implements IFriendManager {
             }
             return null;
         });
+
+        sync.recordChange(ownerUserId, "friend", friendUserId, "update");
     }
 
     @Override
@@ -226,6 +247,8 @@ public class DbFriendManager implements IFriendManager {
             }
             return null;
         });
+
+        sync.recordChange(ownerUserId, "black", blockedUserId, "insert");
     }
 
     @Override
@@ -240,6 +263,8 @@ public class DbFriendManager implements IFriendManager {
             }
             return null;
         });
+
+        sync.recordChange(ownerUserId, "black", blockedUserId, "delete");
     }
 
     @Override
@@ -250,6 +275,35 @@ public class DbFriendManager implements IFriendManager {
                     .eq(BlacklistEntity::getOwnerUserId, userId)).stream()
                     .map(BlacklistEntity::getBlockUserId).toList();
         }
+    }
+
+    // ========== 增量同步 ==========
+
+    @Override
+    public IncrementalSyncResult<FriendInformation> getIncrementalFriends(String userId, long version) {
+        return sync.getChanges(userId, "friend", version,
+                fid -> {
+                    // 从数据库查询当前好友状态
+                    try (SqlSession session = MyBatisPlusFactory.openSession()) {
+                        FriendMapper mapper = session.getMapper(FriendMapper.class);
+                        FriendEntity entity = mapper.selectOne(new LambdaQueryWrapper<FriendEntity>()
+                                .eq(FriendEntity::getOwnerUserId, userId)
+                                .eq(FriendEntity::getFriendUserId, fid));
+                        return entity != null ? toFriendInformation(entity) : null;
+                    }
+                },
+                fid -> {
+                    FriendInformation fi = new FriendInformation();
+                    fi.setOwnerUserId(userId);
+                    fi.setFriendUserId(fid);
+                    fi.setDeleted(true);
+                    return fi;
+                });
+    }
+
+    @Override
+    public IncrementalSyncResult<String> getIncrementalBlacks(String userId, long version) {
+        return sync.getChangesAsIds(userId, "black", version);
     }
 
     // ── 转换 ──
@@ -275,6 +329,7 @@ public class DbFriendManager implements IFriendManager {
         fi.setAddSource(entity.getAddSource());
         fi.setEx(entity.getEx());
         fi.setCreateTime(entity.getCreatedAt());
+        fi.setPinned(entity.getIsPinned() == 1);
         return fi;
     }
 }

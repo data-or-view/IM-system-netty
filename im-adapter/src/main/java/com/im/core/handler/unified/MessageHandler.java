@@ -9,6 +9,7 @@ import com.im.common.enums.ImErrorCode;
 import com.im.common.exception.ImException;
 import com.im.core.serialization.jackson.ObjectMapperProvider;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -38,6 +39,7 @@ public class MessageHandler implements RequestHandler {
         return switch (req.operation()) {
             case "chat.pull" -> handlePull(req);
             case "chat.seq" -> handleSeq(req);
+            case "chat.sync" -> handleSync(req);
             default -> throw new ImException(ImErrorCode.NOT_FOUND, "unsupported: " + req.operation());
         };
     }
@@ -70,5 +72,52 @@ public class MessageHandler implements RequestHandler {
         if (conversationId == null) throw new ImException(ImErrorCode.BAD_REQUEST, "conversationId is required");
         long maxSeq = sequenceManager.getMaximumSequence(conversationId);
         return Map.of("conversationId", conversationId, "maxSeq", maxSeq);
+    }
+
+    /**
+     * 增量消息同步。
+     *
+     * <p>客户端传入各会话的已知 seq（{@code seqs: {convId: lastKnownSeq}}），
+     * 服务端返回每个会话中比已知 seq 更新的消息。</p>
+     *
+     * <p>典型使用场景：用户上线后拉取离线期间的消息。</p>
+     */
+    @SuppressWarnings("unchecked")
+    private Object handleSync(ApiRequest req) {
+        Map<String, Object> seqsRaw = (Map<String, Object>) req.params().get("seqs");
+        int limit = req.getInt("limit", 50);
+
+        if (seqsRaw == null || seqsRaw.isEmpty()) {
+            return Map.of("syncs", List.of());
+        }
+
+        List<Map<String, Object>> syncs = new ArrayList<>(seqsRaw.size());
+        for (Map.Entry<String, Object> entry : seqsRaw.entrySet()) {
+            String convId = entry.getKey();
+            long lastSeq = entry.getValue() instanceof Number
+                    ? ((Number) entry.getValue()).longValue() : 0;
+
+            // 拉取 lastSeq 之后的新消息
+            var messages = messageStore.pullBySequence(convId, lastSeq + 1, 0, limit);
+            @SuppressWarnings("rawtypes")
+            List<Map> msgMaps = messages.stream()
+                    .map(msg -> {
+                        try {
+                            return MAPPER.convertValue(msg, Map.class);
+                        } catch (Exception e) {
+                            return Map.of("error", "serialization failed");
+                        }
+                    })
+                    .collect(Collectors.toList());
+
+            long maxSeq = sequenceManager.getMaximumSequence(convId);
+            syncs.add(Map.of(
+                    "conversationId", convId,
+                    "messages", msgMaps,
+                    "maxSeq", maxSeq
+            ));
+        }
+
+        return Map.of("syncs", syncs);
     }
 }

@@ -1,15 +1,20 @@
 package com.im.core.session;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.im.api.IConnectionSession;
 import com.im.api.ISessionManager;
 import com.im.api.MultiLoginStrategy;
+import com.im.core.serialization.jackson.ObjectMapperProvider;
 import io.netty.channel.Channel;
+import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -39,6 +44,8 @@ public class SessionManager implements ISessionManager {
 
     /** userId → session 列表（多端在线） */
     private final ConcurrentMap<String, CopyOnWriteArrayList<ConnectionSession>> userSessions = new ConcurrentHashMap<>();
+
+    private static final ObjectMapper MAPPER = ObjectMapperProvider.get();
 
     private volatile MultiLoginStrategy loginStrategy = MultiLoginStrategy.ALLOW_MULTIPLE;
 
@@ -100,6 +107,7 @@ public class SessionManager implements ISessionManager {
                 if (oldSessions != null) {
                     for (ConnectionSession old : oldSessions) {
                         if (old != session) {
+                            sendKickedNotification(old, "KICK_OLD");
                             old.getChannel().close();
                             channelSessions.remove(old.getChannel(), old);
                             log.info("Kicked old session: userId={}, oldSessionId={}", userId, old.getSessionId());
@@ -108,6 +116,25 @@ public class SessionManager implements ISessionManager {
                     }
                 }
                 userSessions.get(userId).add(session);
+            }
+            case SAME_TERM_KICK -> {
+                // 仅踢同平台旧端
+                int newPlatformId = session.getPlatformId();
+                CopyOnWriteArrayList<ConnectionSession> sessions = userSessions.get(userId);
+                if (sessions != null) {
+                    for (ConnectionSession old : sessions) {
+                        if (old != session && old.getPlatformId() == newPlatformId) {
+                            sendKickedNotification(old, "SAME_TERM_KICK");
+                            old.getChannel().close();
+                            channelSessions.remove(old.getChannel(), old);
+                            sessions.remove(old);
+                            log.info("Kicked same-platform session: userId={}, platformId={}, oldSessionId={}",
+                                    userId, newPlatformId, old.getSessionId());
+                            kicked = old;
+                        }
+                    }
+                }
+                userSessions.computeIfAbsent(userId, k -> new CopyOnWriteArrayList<>()).add(session);
             }
             case REJECT_NEW -> {
                 CopyOnWriteArrayList<ConnectionSession> existing = userSessions.get(userId);
@@ -121,7 +148,7 @@ public class SessionManager implements ISessionManager {
                     userSessions.computeIfAbsent(userId, k -> new CopyOnWriteArrayList<>()).add(session);
         }
 
-        session.authenticate(userId);
+        session.authenticate(userId, session.getPlatformId());
         log.info("User bound: userId={}, sessionId={}, strategy={}",
                 userId, session.getSessionId(), loginStrategy);
         return kicked;
@@ -160,6 +187,25 @@ public class SessionManager implements ISessionManager {
         channelSessions.clear();
         userSessions.clear();
         log.info("All sessions cleared");
+    }
+
+    /**
+     * 向被踢 session 发送踢出通知。
+     * 格式：{"op":"kicked","code":0,"data":{"reason":"SAME_TERM_KICK"}}
+     */
+    private void sendKickedNotification(ConnectionSession session, String reason) {
+        try {
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("reason", reason);
+            Map<String, Object> msg = new LinkedHashMap<>();
+            msg.put("op", "kicked");
+            msg.put("code", 0);
+            msg.put("data", data);
+            String json = MAPPER.writeValueAsString(msg);
+            session.getChannel().writeAndFlush(new TextWebSocketFrame(json));
+        } catch (Exception e) {
+            log.warn("Failed to send kick notification to session {}", session.getSessionId(), e);
+        }
     }
 
     /** 设置多端登录策略。 */

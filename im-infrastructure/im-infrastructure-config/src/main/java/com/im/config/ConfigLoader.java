@@ -98,6 +98,15 @@ public final class ConfigLoader {
                 source.getClass().getSimpleName(), source.order());
     }
 
+    /**
+     * 清空自定义配置数据源（仅用于测试隔离）。
+     */
+    public static synchronized void clearCustomSources() {
+        customSources.clear();
+        config = null;
+        log.info("Custom config sources cleared");
+    }
+
     /** 获取预估的键总数（仅用于日志）。 */
     private static int countKeys(Config cfg) {
         // 简易估算：这里无法精确统计，留待后续完善

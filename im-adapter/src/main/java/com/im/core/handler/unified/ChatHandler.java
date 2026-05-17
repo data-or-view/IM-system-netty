@@ -26,8 +26,10 @@ public class ChatHandler implements RequestHandler {
 
     @Override
     public Object handle(ApiRequest req) {
-        String fromUserId = req.getString("fromUserId");
-        String uid = req.attribute("_uid");
+        String uid = req.currentUserId();
+        if (uid == null) {
+            throw new ImException(ImErrorCode.UNAUTHORIZED, "not authenticated");
+        }
         String toUserId = req.getString("toUserId");
         String groupId = req.getString("groupId");
 
@@ -43,7 +45,7 @@ public class ChatHandler implements RequestHandler {
         }
 
         SendMessageUseCase.SendMessageResult result = sendMessageUseCase.execute(
-                req.params(), fromUserId, toUserId, groupId, content, uid);
+                req.params(), uid, toUserId, groupId, content);
 
         if (result == null) {
             throw new ImException(ImErrorCode.FORBIDDEN, "message sending blocked");

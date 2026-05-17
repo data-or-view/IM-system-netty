@@ -6,6 +6,7 @@ import com.im.common.enums.ImErrorCode;
 import com.im.common.exception.ImException;
 import com.im.core.cache.ConcurrentHashCache;
 import com.im.core.cache.SafeCache;
+import com.im.core.sync.LocalIncrementalSync;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -49,18 +50,28 @@ public class LocalGroupManager implements IGroupManager {
     private final Cache<String, GroupInformation> groupInfoCache;
     private final Cache<String, List<String>> memberListCache;
 
+    /** 增量同步追踪 */
+    private final LocalIncrementalSync sync;
+
     public LocalGroupManager() {
-        this(null, null);
+        this(null, null, new LocalIncrementalSync());
     }
 
     public LocalGroupManager(Cache<String, GroupInformation> groupInfoCache,
                              Cache<String, List<String>> memberListCache) {
+        this(groupInfoCache, memberListCache, new LocalIncrementalSync());
+    }
+
+    public LocalGroupManager(Cache<String, GroupInformation> groupInfoCache,
+                             Cache<String, List<String>> memberListCache,
+                             LocalIncrementalSync sync) {
         this.groupInfoCache = groupInfoCache != null
                 ? new SafeCache<>(groupInfoCache, "LocalGroupManager.Info")
                 : null;
         this.memberListCache = memberListCache != null
                 ? new SafeCache<>(memberListCache, "LocalGroupManager.Members")
                 : null;
+        this.sync = sync;
     }
 
     @Override
@@ -90,7 +101,13 @@ public class LocalGroupManager implements IGroupManager {
         memberInfos.put(groupId, memberMap);
 
         addUserGroupIndex(ownerId, groupId);
-        members.forEach(m -> addUserGroupIndex(m, groupId));
+        sync.recordChange(ownerId, "group", groupId, "insert");
+        sync.recordChange(groupId, "member", ownerId, "insert");
+        for (String m : members) {
+            addUserGroupIndex(m, groupId);
+            sync.recordChange(m, "group", groupId, "insert");
+            sync.recordChange(groupId, "member", m, "insert");
+        }
 
         log.info("Group created: id={}, owner={}, members={}, type={}",
                 groupId, ownerId, memberSet.size(), groupType);
@@ -105,6 +122,8 @@ public class LocalGroupManager implements IGroupManager {
             removed.forEach(userId -> {
                 CopyOnWriteArraySet<String> joined = userGroups.get(userId);
                 if (joined != null) joined.remove(groupId);
+                sync.recordChange(userId, "group", groupId, "delete");
+                sync.recordChange(groupId, "member", userId, "delete");
             });
             log.info("Group disbanded: {}", groupId);
         }
@@ -146,6 +165,8 @@ public class LocalGroupManager implements IGroupManager {
             GroupInformation info = groupInfos.get(groupId);
             if (info != null) info.setMemberCount(memberSet.size());
             invalidateMemberCache(groupId);
+            sync.recordChange(userId, "group", groupId, "insert");
+            sync.recordChange(groupId, "member", userId, "insert");
         }
     }
 
@@ -169,10 +190,11 @@ public class LocalGroupManager implements IGroupManager {
         GroupInformation info = groupInfos.get(groupId);
         if (info != null) {
             info.setOwnerUserId(newOwnerId);
-            // 更新角色
             setMemberRoleLocal(groupId, oldOwnerId, 1);
             setMemberRoleLocal(groupId, newOwnerId, 200);
             invalidateGroupCache(groupId);
+            sync.recordChange(groupId, "member", oldOwnerId, "update");
+            sync.recordChange(groupId, "member", newOwnerId, "update");
             log.info("Owner transferred: group={}, from={}, to={}", groupId, oldOwnerId, newOwnerId);
         }
     }
@@ -180,6 +202,7 @@ public class LocalGroupManager implements IGroupManager {
     @Override
     public void setMemberRole(String groupId, String operatorId, String targetUserId, int roleLevel) {
         setMemberRoleLocal(groupId, targetUserId, roleLevel);
+        sync.recordChange(groupId, "member", targetUserId, "update");
         log.info("Member role set: group={}, user={}, role={}", groupId, targetUserId, roleLevel);
     }
 
@@ -190,6 +213,7 @@ public class LocalGroupManager implements IGroupManager {
             GroupMemberInformation member = memberMap.get(targetUserId);
             if (member != null) {
                 member.setMuteEndTime(muteEndTime);
+                sync.recordChange(groupId, "member", targetUserId, "update");
                 log.info("Member mute: group={}, user={}, muteEnd={}", groupId, targetUserId, muteEndTime);
             }
         }
@@ -318,6 +342,28 @@ public class LocalGroupManager implements IGroupManager {
         return null;
     }
 
+    @Override
+    public IncrementalSyncResult<String> getIncrementalGroups(String userId, long version) {
+        return sync.getChangesAsIds(userId, "group", version);
+    }
+
+    @Override
+    public IncrementalSyncResult<GroupMemberInformation> getIncrementalMembers(String groupId, long version) {
+        return sync.getChanges(groupId, "member", version,
+                uid -> {
+                    // 非删除：从当前数据构建 GroupMemberInformation
+                    ConcurrentMap<String, GroupMemberInformation> memberMap = memberInfos.get(groupId);
+                    return memberMap != null ? memberMap.get(uid) : null;
+                },
+                uid -> {
+                    GroupMemberInformation gmi = new GroupMemberInformation();
+                    gmi.setGroupId(groupId);
+                    gmi.setUserId(uid);
+                    gmi.setRoleLevel(-1); // deleted marker
+                    return gmi;
+                });
+    }
+
     // ── 内部方法 ──
 
     private GroupMemberInformation createMemberInfo(String groupId, String userId, int roleLevel) {
@@ -349,8 +395,16 @@ public class LocalGroupManager implements IGroupManager {
             if (memberMap != null) memberMap.remove(userId);
             GroupInformation info = groupInfos.get(groupId);
             if (info != null) info.setMemberCount(memberSet.size());
-            log.info("Member removed: userId={} from group={}", userId, groupId);
             invalidateMemberCache(groupId);
+            sync.recordChange(userId, "group", groupId, "delete");
+            sync.recordChange(groupId, "member", userId, "delete");
+            log.info("Member removed: userId={} from group={}", userId, groupId);
+        }
+    }
+
+    private void syncAllMembers(String groupId, List<String> memberIds, String action) {
+        for (String uid : memberIds) {
+            sync.recordChange(groupId, "member", uid, action);
         }
     }
 

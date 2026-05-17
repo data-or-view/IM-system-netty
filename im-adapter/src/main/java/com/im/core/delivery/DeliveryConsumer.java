@@ -100,6 +100,8 @@ public class DeliveryConsumer implements Lifecycle {
 
         if (routes.isEmpty()) {
             log.info("User {} offline, skip push for msg {}", toUserId, msg.getSequenceId());
+            // TODO: 离线推送 — 用户不在线时通过 IOfflinePusher 推送通知栏消息
+            // 类似微信/QQ 在手机通知栏弹出的消息提醒，需对接 FCM/APNs/Web Push 等三方服务
             return;
         }
 

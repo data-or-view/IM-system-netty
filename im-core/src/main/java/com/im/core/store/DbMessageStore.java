@@ -154,6 +154,18 @@ public class DbMessageStore implements IMessageStore {
         });
     }
 
+    @Override
+    public boolean revokeMessage(String conversationId, long seq, String revokerId, int role, String nickname) {
+        return retryExecutor.execute(CFG, () -> {
+            try (SqlSession session = MyBatisPlusFactory.openSession()) {
+                MessageMapper mapper = session.getMapper(MessageMapper.class);
+                int updated = mapper.revokeMessage(conversationId, seq, revokerId, role, nickname, System.currentTimeMillis());
+                session.commit();
+                return updated > 0;
+            }
+        });
+    }
+
     // ========== Entity / Message 互转 ==========
 
     private static MessageEntity toEntity(Message msg) {

@@ -47,7 +47,9 @@ public final class SchemaInitializer {
             "im_messages",
             "im_objects",
             "im_sequences",
-            "im_seq_users"
+            "im_seq_users",
+            "im_sync_versions",
+            "im_sync_changes"
     );
 
     /** 逆序（rebuild 时先删子表） */
@@ -341,6 +343,26 @@ public final class SchemaInitializer {
                         read_seq        BIGINT          NOT NULL DEFAULT 0,
                         updated_at      BIGINT          NOT NULL DEFAULT 0,
                         UNIQUE KEY uk_seq_user (user_id, conversation_id)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                    """;
+            case "im_sync_versions" -> """
+                    CREATE TABLE im_sync_versions (
+                        user_id         VARCHAR(64)     NOT NULL,
+                        entity_type     VARCHAR(32)     NOT NULL,
+                        version         BIGINT          NOT NULL DEFAULT 0,
+                        PRIMARY KEY (user_id, entity_type)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                    """;
+            case "im_sync_changes" -> """
+                    CREATE TABLE im_sync_changes (
+                        id              BIGINT          NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                        user_id         VARCHAR(64)     NOT NULL,
+                        entity_type     VARCHAR(32)     NOT NULL,
+                        entity_id       VARCHAR(128)   NOT NULL,
+                        version         BIGINT          NOT NULL DEFAULT 0,
+                        action          VARCHAR(8)      NOT NULL DEFAULT 'insert',
+                        created_at      BIGINT          NOT NULL DEFAULT 0,
+                        INDEX idx_sync_lookup (user_id, entity_type, version)
                     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
                     """;
             default -> {

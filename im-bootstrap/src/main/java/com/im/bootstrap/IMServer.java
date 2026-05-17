@@ -10,6 +10,7 @@ import com.im.core.auth.HmacTokenAuthenticator;
 import com.im.core.cache.ConcurrentHashCache;
 import com.im.core.conversation.DbConversationManager;
 import com.im.core.conversation.LocalConversationManager;
+import com.im.core.conversation.RedisConversationManager;
 import com.im.core.db.DatabaseConfiguration;
 import com.im.core.db.MyBatisPlusFactory;
 import com.im.core.db.SchemaInitializer;
@@ -93,6 +94,7 @@ public class IMServer implements Lifecycle {
     public IMServer(Config config) {
         this.config = config;
         this.sessionManager = new SessionManager();
+        applyMultiLoginStrategy(config);
         this.pendingAcknowledgementManager = new PendingAcknowledgementManager();
         this.virtualExecutor = Executors.newVirtualThreadPerTaskExecutor();
         String nodeId = config.getString("im.node.id", "node-1");
@@ -118,9 +120,13 @@ public class IMServer implements Lifecycle {
         this.groupManager = dbEnabled()
                 ? new DbGroupManager(retryExecutor)
                 : new LocalGroupManager(new ConcurrentHashCache<>(), new ConcurrentHashCache<>());
-        this.conversationManager = dbEnabled()
-                ? new DbConversationManager(retryExecutor)
-                : new LocalConversationManager(new ConcurrentHashCache<>());
+        if (dbEnabled()) {
+            this.conversationManager = new DbConversationManager(retryExecutor);
+        } else if (redisConfig != null) {
+            this.conversationManager = new RedisConversationManager(redisConfig);
+        } else {
+            this.conversationManager = new LocalConversationManager(new ConcurrentHashCache<>());
+        }
         this.friendManager = dbEnabled() ? new DbFriendManager(retryExecutor) : new LocalFriendManager();
         this.userManager = dbEnabled() ? new DbUserManager(retryExecutor, routeTable) : new LocalUserManager(routeTable);
 
@@ -137,7 +143,7 @@ public class IMServer implements Lifecycle {
                 : new MemoryMessageQueue();
 
         // 消费者
-        this.persistenceConsumer = new PersistenceConsumer(messageQueue, messageStore, conversationManager);
+        this.persistenceConsumer = new PersistenceConsumer(messageQueue, messageStore, conversationManager, groupManager);
         this.deliveryConsumer = new DeliveryConsumer(
                 messageQueue, sessionManager, routeTable, clusterMessageBus, nodeId, groupManager);
 
@@ -146,7 +152,7 @@ public class IMServer implements Lifecycle {
                 sessionManager, pendingAcknowledgementManager, routeTable, nodeId);
 
         // Use Cases
-        LoginUseCase loginUseCase = new LoginUseCase(authenticator, routeTable, messageStore, nodeId);
+        LoginUseCase loginUseCase = new LoginUseCase(authenticator, messageStore);
         WebhookService webhookService = new WebhookService(new LocalWebhookManager(
                 config.getString("im.webhook.url").orElse("")));
         SendMessageUseCase sendMessageUseCase = new SendMessageUseCase(
@@ -167,12 +173,17 @@ public class IMServer implements Lifecycle {
                 Operation.GROUP_DISBAND, Operation.GROUP_INFO_UPDATE, Operation.GROUP_INFO,
                 Operation.GROUP_SEARCH, Operation.GROUP_MEMBERS);
         dispatcher.registerHandlers(new com.im.core.handler.unified.ConversationHandler(conversationManager),
-                Operation.CONVERSATION_LIST, Operation.CONVERSATION_SET);
+                Operation.CONVERSATION_LIST, Operation.CONVERSATION_SET, Operation.CONVERSATION_READ);
         dispatcher.registerHandlers(new com.im.core.handler.unified.MessageHandler(messageStore, sequenceManager),
-                Operation.CHAT_PULL, Operation.CHAT_SEQ);
+                Operation.CHAT_PULL, Operation.CHAT_SEQ, Operation.CHAT_SYNC);
         dispatcher.registerHandler(Operation.CHAT_SEND, new com.im.core.handler.unified.ChatHandler(sendMessageUseCase));
         dispatcher.registerHandler(Operation.CHAT_SEND_GROUP, new com.im.core.handler.unified.ChatHandler(sendMessageUseCase));
-        dispatcher.registerHandler(Operation.LOGIN, new LoginHandler(loginUseCase, sessionManager));
+
+        // 撤回
+        RevokeUseCase revokeUseCase = new RevokeUseCase(messageStore, groupManager);
+        dispatcher.registerHandler(Operation.CHAT_REVOKE, new com.im.core.handler.unified.RevokeHandler(revokeUseCase, sessionManager));
+
+        dispatcher.registerHandler(Operation.LOGIN, new LoginHandler(loginUseCase, sessionManager, routeTable, nodeId));
         dispatcher.registerHandler(Operation.REGISTER, new RegisterHandler(new RegisterUseCase(userManager)));
         dispatcher.registerHandler(Operation.HEARTBEAT, new HeartbeatHandler(new HeartbeatUseCase(routeTable), sessionManager));
         dispatcher.registerHandler(Operation.FILE_UPLOAD, new com.im.core.handler.unified.FileUploadHandler(new FileUploadUseCase(fileStorage)));
@@ -183,6 +194,17 @@ public class IMServer implements Lifecycle {
     private record ClusterInfra(IRouteTable routeTable, RedisConfiguration redisConfig,
                                  IClusterMessageBus clusterMessageBus, INodeDiscovery nodeDiscovery,
                                  IClusterStateStore stateStore) {}
+
+    private void applyMultiLoginStrategy(Config config) {
+        String strategyName = config.getString("im.login.multi-strategy", "ALLOW_MULTIPLE");
+        try {
+            MultiLoginStrategy strategy = MultiLoginStrategy.valueOf(strategyName);
+            sessionManager.setLoginStrategy(strategy);
+            log.info("Multi-login strategy set: {}", strategy);
+        } catch (IllegalArgumentException e) {
+            log.warn("Invalid multi-login strategy '{}', using ALLOW_MULTIPLE", strategyName);
+        }
+    }
 
     private ClusterInfra initClusterInfrastructure(Config config, String nodeId) {
         IRouteTable rt;

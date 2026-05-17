@@ -85,8 +85,8 @@ public class UserHandler implements RequestHandler {
     }
 
     private Object handleUpdate(ApiRequest req) {
-        String userId = req.getString("userId");
-        if (userId == null) throw new ImException(ImErrorCode.BAD_REQUEST, "userId is required");
+        String userId = req.currentUserId();
+        if (userId == null) throw new ImException(ImErrorCode.UNAUTHORIZED, "not authenticated");
         userManager.updateUserInformation(userId, req.getString("nickname"),
                 req.getString("faceUrl"), req.getString("ex"),
                 req.getInt("globalRecvMsgOpt", -1));

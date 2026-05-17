@@ -60,6 +60,12 @@ public class ApiRequest {
         if (v instanceof String) try { return Integer.parseInt((String) v); } catch (NumberFormatException e) { return def; }
         return def;
     }
+    public long getLong(String key, long def) {
+        Object v = params.get(key);
+        if (v instanceof Number) return ((Number) v).longValue();
+        if (v instanceof String) try { return Long.parseLong((String) v); } catch (NumberFormatException e) { return def; }
+        return def;
+    }
     public boolean getBoolean(String key, boolean def) {
         Object v = params.get(key);
         if (v instanceof Boolean) return (Boolean) v;
@@ -76,6 +82,16 @@ public class ApiRequest {
     public void setAttribute(String key, Object value) { attributes.put(key, value); }
     @SuppressWarnings("unchecked")
     public <T> T attribute(String key) { return (T) attributes.get(key); }
+
+    /**
+     * 获取当前认证用户 ID。
+     * 由 AuthInterceptor 在验证 token 后设置到 {@code _uid} attribute。
+     * 未认证的操作返回 null。
+     */
+    public String currentUserId() {
+        Object uid = attributes.get("_uid");
+        return uid != null ? uid.toString() : null;
+    }
 
     /** 协议响应写回策略 */
     public ResponseWriter responseWriter() { return responseWriter; }

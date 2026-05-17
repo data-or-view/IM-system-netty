@@ -38,68 +38,68 @@ public class FriendHandler implements RequestHandler {
     }
 
     private Map<String, String> handleApply(ApiRequest req) {
-        String fromUserId = req.getString("fromUserId");
+        String fromUserId = req.currentUserId();
         String toUserId = req.getString("toUserId");
         String reqMsg = req.getString("reqMsg", "");
         if (fromUserId == null || toUserId == null) {
-            throw new ImException(ImErrorCode.BAD_REQUEST, "fromUserId and toUserId are required");
+            throw new ImException(ImErrorCode.UNAUTHORIZED, "fromUserId and toUserId are required");
         }
         friendManager.applyAddFriend(fromUserId, toUserId, reqMsg);
         return Map.of("status", "OK");
     }
 
     private Map<String, String> handleApprove(ApiRequest req) {
-        String userId = req.getString("userId");
+        String userId = req.currentUserId();
         String fromUserId = req.getString("fromUserId");
         boolean agreed = req.getBoolean("agreed", true);
         String handleMsg = req.getString("handleMsg", "");
         if (userId == null || fromUserId == null) {
-            throw new ImException(ImErrorCode.BAD_REQUEST, "userId and fromUserId are required");
+            throw new ImException(ImErrorCode.UNAUTHORIZED, "userId and fromUserId are required");
         }
         friendManager.respondFriendApply(userId, fromUserId, handleMsg, agreed);
         return Map.of("status", "OK");
     }
 
     private Map<String, String> handleRemove(ApiRequest req) {
-        String userId = req.getString("userId");
+        String userId = req.currentUserId();
         String friendUserId = req.getString("friendUserId");
         if (userId == null || friendUserId == null) {
-            throw new ImException(ImErrorCode.BAD_REQUEST, "userId and friendUserId are required");
+            throw new ImException(ImErrorCode.UNAUTHORIZED, "userId and friendUserId are required");
         }
         friendManager.deleteFriend(userId, friendUserId);
         return Map.of("status", "OK");
     }
 
     private Object handleList(ApiRequest req) {
-        String userId = req.getString("userId");
-        if (userId == null) throw new ImException(ImErrorCode.BAD_REQUEST, "userId is required");
+        String userId = req.currentUserId();
+        if (userId == null) throw new ImException(ImErrorCode.UNAUTHORIZED, "not authenticated");
         List<FriendInformation> friends = friendManager.getFriendList(userId);
         return Map.of("userId", userId, "friends", friends, "count", friends.size());
     }
 
     private Map<String, String> handleAddBlack(ApiRequest req) {
-        String userId = req.getString("userId");
+        String userId = req.currentUserId();
         String blockedUserId = req.getString("blockedUserId");
         if (userId == null || blockedUserId == null) {
-            throw new ImException(ImErrorCode.BAD_REQUEST, "userId and blockedUserId are required");
+            throw new ImException(ImErrorCode.UNAUTHORIZED, "userId and blockedUserId are required");
         }
         friendManager.addBlack(userId, blockedUserId);
         return Map.of("status", "OK");
     }
 
     private Map<String, String> handleRemoveBlack(ApiRequest req) {
-        String userId = req.getString("userId");
+        String userId = req.currentUserId();
         String blockedUserId = req.getString("blockedUserId");
         if (userId == null || blockedUserId == null) {
-            throw new ImException(ImErrorCode.BAD_REQUEST, "userId and blockedUserId are required");
+            throw new ImException(ImErrorCode.UNAUTHORIZED, "userId and blockedUserId are required");
         }
         friendManager.removeBlack(userId, blockedUserId);
         return Map.of("status", "OK");
     }
 
     private Object handleBlackList(ApiRequest req) {
-        String userId = req.getString("userId");
-        if (userId == null) throw new ImException(ImErrorCode.BAD_REQUEST, "userId is required");
+        String userId = req.currentUserId();
+        if (userId == null) throw new ImException(ImErrorCode.UNAUTHORIZED, "not authenticated");
         return Map.of("userId", userId, "blacklist", friendManager.getBlackList(userId));
     }
 }

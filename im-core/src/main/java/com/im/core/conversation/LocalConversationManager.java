@@ -2,10 +2,12 @@ package com.im.core.conversation;
 
 import com.im.api.Conversation;
 import com.im.api.IConversationManager;
+import com.im.api.IncrementalSyncResult;
 import com.im.api.Message;
 import com.im.core.cache.Cache;
 import com.im.core.cache.ConcurrentHashCache;
 import com.im.core.cache.SafeCache;
+import com.im.core.sync.LocalIncrementalSync;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -38,17 +40,29 @@ public class LocalConversationManager implements IConversationManager {
     /** ownerUserId + conversationId → Conversation（快速查找） */
     private final ConcurrentMap<String, Conversation> index = new ConcurrentHashMap<>();
 
+    /** ownerUserId::conversationId → readSeq */
+    private final ConcurrentMap<String, Long> readSeqStore = new ConcurrentHashMap<>();
+
     /** 会话列表缓存（key=ownerUserId） */
     private final Cache<String, List<Conversation>> conversationListCache;
 
+    /** 增量同步追踪 */
+    private final LocalIncrementalSync sync;
+
     public LocalConversationManager() {
-        this(null);
+        this(null, new LocalIncrementalSync());
     }
 
     public LocalConversationManager(Cache<String, List<Conversation>> conversationListCache) {
+        this(conversationListCache, new LocalIncrementalSync());
+    }
+
+    public LocalConversationManager(Cache<String, List<Conversation>> conversationListCache,
+                                    LocalIncrementalSync sync) {
         this.conversationListCache = conversationListCache != null
                 ? new SafeCache<>(conversationListCache, "LocalConversationManager")
                 : null;
+        this.sync = sync;
     }
 
     private static String indexKey(String ownerUserId, String conversationId) {
@@ -104,6 +118,7 @@ public class LocalConversationManager implements IConversationManager {
 
         // 更新索引
         index.put(indexKey(ownerUserId, conversationId), conv);
+        sync.recordChange(ownerUserId, "conversation", conversationId, "update");
 
         log.debug("Conversation updated: ownerUserId={}, conv={}, seq={}, unread={}",
                 ownerUserId, conversationId, msg.getSequenceId(), conv.getUnreadCount());
@@ -116,9 +131,28 @@ public class LocalConversationManager implements IConversationManager {
         if (conv != null) {
             conv.setUnreadCount(0);
             conv.setUpdateTime(System.currentTimeMillis());
+            sync.recordChange(ownerUserId, "conversation", conversationId, "update");
             log.debug("Conversation markRead: ownerUserId={}, conv={}", ownerUserId, conversationId);
             invalidateUserConversationCache(ownerUserId);
         }
+        readSeqStore.put(indexKey(ownerUserId, conversationId), readSeq);
+    }
+
+    @Override
+    public int getUnreadCount(String ownerUserId, String conversationId) {
+        Conversation conv = getConversation(ownerUserId, conversationId);
+        return conv != null ? (int) conv.getUnreadCount() : 0;
+    }
+
+    @Override
+    public int getTotalUnreadCount(String userId) {
+        List<Conversation> convs = getConversations(userId);
+        return convs.stream().mapToInt(c -> (int) c.getUnreadCount()).sum();
+    }
+
+    @Override
+    public long getReadSeq(String ownerUserId, String conversationId) {
+        return readSeqStore.getOrDefault(indexKey(ownerUserId, conversationId), 0L);
     }
 
     @Override
@@ -127,6 +161,7 @@ public class LocalConversationManager implements IConversationManager {
         if (conv != null) {
             conv.setPinned(pinned);
             conv.setUpdateTime(System.currentTimeMillis());
+            sync.recordChange(ownerUserId, "conversation", conversationId, "update");
             log.info("Conversation pin: ownerUserId={}, conv={}, pinned={}", ownerUserId, conversationId, pinned);
             invalidateUserConversationCache(ownerUserId);
         }
@@ -138,6 +173,7 @@ public class LocalConversationManager implements IConversationManager {
         if (conv != null) {
             conv.setRecvMsgOpt(recvMsgOpt);
             conv.setUpdateTime(System.currentTimeMillis());
+            sync.recordChange(ownerUserId, "conversation", conversationId, "update");
             log.info("Conversation recvMsgOpt: ownerUserId={}, conv={}, opt={}", ownerUserId, conversationId, recvMsgOpt);
             invalidateUserConversationCache(ownerUserId);
         }
@@ -149,6 +185,7 @@ public class LocalConversationManager implements IConversationManager {
         if (conv != null) {
             conv.setBurnDuration(burnDuration);
             conv.setUpdateTime(System.currentTimeMillis());
+            sync.recordChange(ownerUserId, "conversation", conversationId, "update");
             log.info("Conversation burnDuration: ownerUserId={}, conv={}, duration={}s",
                     ownerUserId, conversationId, burnDuration);
             invalidateUserConversationCache(ownerUserId);
@@ -158,14 +195,25 @@ public class LocalConversationManager implements IConversationManager {
     @Override
     public void createSingleConversation(String ownerUserId, String targetUserId, String conversationId) {
         getOrCreate(ownerUserId, conversationId);
+        sync.recordChange(ownerUserId, "conversation", conversationId, "insert");
     }
 
     @Override
     public void createGroupConversations(List<String> memberIds, String groupId, String conversationId) {
         for (String memberId : memberIds) {
             getOrCreate(memberId, conversationId);
+            sync.recordChange(memberId, "conversation", conversationId, "insert");
         }
         log.debug("Group conversations created: groupId={}, members={}", groupId, memberIds.size());
+    }
+
+    // ========== 增量同步 ==========
+
+    @Override
+    public IncrementalSyncResult<Conversation> getIncrementalConversations(String ownerUserId, long version) {
+        return sync.getChanges(ownerUserId, "conversation", version,
+                convId -> getConversation(ownerUserId, convId),
+                convId -> null);
     }
 
     // ── 缓存失效 ──
@@ -185,7 +233,7 @@ public class LocalConversationManager implements IConversationManager {
     private Conversation getOrCreate(String ownerUserId, String conversationId) {
         String key = indexKey(ownerUserId, conversationId);
         return index.computeIfAbsent(key, k -> {
-            int sessionType = conversationId.startsWith("g_")
+            int sessionType = conversationId.startsWith("group_")
                     ? Conversation.SESSION_TYPE_GROUP
                     : Conversation.SESSION_TYPE_SINGLE;
 

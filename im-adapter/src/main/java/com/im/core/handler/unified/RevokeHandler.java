@@ -1,0 +1,90 @@
+package com.im.core.handler.unified;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.im.api.ApiRequest;
+import com.im.api.IConnectionSession;
+import com.im.api.ISessionManager;
+import com.im.api.RequestHandler;
+import com.im.common.enums.ImErrorCode;
+import com.im.common.exception.ImException;
+import com.im.core.serialization.jackson.ObjectMapperProvider;
+import com.im.core.usecase.RevokeUseCase;
+import io.netty.channel.Channel;
+import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
+
+import java.util.LinkedHashMap;
+import java.util.Map;
+
+/**
+ * 消息撤回 handler。
+ *
+ * <p>接收 {@code {"op":"msg_revoke","conversationId":"xxx","messageSeq":123,"groupId":"xxx"}} 请求，
+ * 调用 {@link RevokeUseCase} 执行撤回，并向在线接收方推送撤回通知。</p>
+ */
+public class RevokeHandler implements RequestHandler {
+
+    private static final ObjectMapper MAPPER = ObjectMapperProvider.get();
+
+    private final RevokeUseCase revokeUseCase;
+    private final ISessionManager sessionManager;
+
+    public RevokeHandler(RevokeUseCase revokeUseCase, ISessionManager sessionManager) {
+        this.revokeUseCase = revokeUseCase;
+        this.sessionManager = sessionManager;
+    }
+
+    @Override
+    public Object handle(ApiRequest req) {
+        String userId = req.currentUserId();
+        if (userId == null) {
+            throw new ImException(ImErrorCode.UNAUTHORIZED, "not authenticated");
+        }
+
+        String conversationId = req.getString("conversationId");
+        long seq = req.getLong("messageSeq", 0);
+        String groupId = req.getString("groupId");
+
+        if (conversationId == null || seq <= 0) {
+            throw new ImException(ImErrorCode.BAD_REQUEST, "conversationId and messageSeq are required");
+        }
+
+        RevokeUseCase.RevokeResult result = revokeUseCase.execute(userId, conversationId, seq, groupId);
+
+        // 推送撤回通知给在线接收方
+        pushRevokeNotification(result);
+
+        return Map.of(
+                "conversationId", conversationId,
+                "messageSeq", seq,
+                "status", "REVOKED"
+        );
+    }
+
+    private void pushRevokeNotification(RevokeUseCase.RevokeResult result) {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("conversationId", result.conversationId());
+        data.put("seq", result.seq());
+        data.put("revokerId", result.revokerId());
+
+        Map<String, Object> notification = new LinkedHashMap<>();
+        notification.put("op", "msg_revoke");
+        notification.put("code", 0);
+        notification.put("data", data);
+
+        String json;
+        try {
+            json = MAPPER.writeValueAsString(notification);
+        } catch (Exception e) {
+            return;
+        }
+
+        for (String targetUserId : result.targetUserIds()) {
+            for (IConnectionSession session : sessionManager.getSessionsByUserId(targetUserId)) {
+                Channel ch = session.getChannel();
+                if (ch != null && ch.isActive()) {
+                    ch.writeAndFlush(new TextWebSocketFrame(json));
+                }
+            }
+        }
+    }
+}

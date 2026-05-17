@@ -129,6 +129,25 @@ public class LocalMessageStore implements IMessageStore {
         }
     }
 
+    @Override
+    public boolean revokeMessage(String conversationId, long seq, String revokerId, int role, String nickname) {
+        List<Message> messages = conversationStore.get(conversationId);
+        if (messages == null || messages.isEmpty()) return false;
+
+        for (Message msg : messages) {
+            if (msg.getMessageSeq() == seq) {
+                msg.setStatus(1);
+                msg.putMeta("revokerId", revokerId);
+                msg.putMeta("revokerRole", String.valueOf(role));
+                msg.putMeta("revokerNickname", nickname);
+                msg.putMeta("revokeTime", String.valueOf(System.currentTimeMillis()));
+                log.info("Message revoked locally: conv={}, seq={}, revoker={}", conversationId, seq, revokerId);
+                return true;
+            }
+        }
+        return false;
+    }
+
     // ========== helpers ==========
 
     /**

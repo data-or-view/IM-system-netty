@@ -135,6 +135,25 @@ public interface IMessageStore {
     }
 
     // ========================================
+    //  消息撤回
+    // ========================================
+
+    /**
+     * 撤回消息。
+     * <p>将消息状态标记为已撤回（status=1），记录撤回人信息。</p>
+     *
+     * @param conversationId 会话 ID
+     * @param seq            消息 seq
+     * @param revokerId      撤回人 ID
+     * @param role           撤回人角色（0=普通用户, 100=群主, 200=管理员）
+     * @param nickname       撤回人昵称
+     * @return true=撤回成功, false=消息不存在或已撤回
+     */
+    default boolean revokeMessage(String conversationId, long seq, String revokerId, int role, String nickname) {
+        throw new UnsupportedOperationException("revokeMessage not implemented");
+    }
+
+    // ========================================
     //  已读回执（seq 追踪）
     // ========================================
 

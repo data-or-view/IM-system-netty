@@ -44,9 +44,9 @@ public class GroupHandler implements RequestHandler {
     private Object handleCreate(ApiRequest req) {
         String groupId = req.getString("groupId");
         String groupName = req.getString("groupName");
-        String ownerId = req.getString("ownerId");
+        String ownerId = req.currentUserId();
         if (groupId == null || groupName == null || ownerId == null) {
-            throw new ImException(ImErrorCode.BAD_REQUEST, "groupId, groupName, and ownerId are required");
+            throw new ImException(ImErrorCode.UNAUTHORIZED, "groupId, groupName are required, owner from token");
         }
         String faceUrl = req.getString("faceUrl", "");
         int groupType = req.getInt("groupType", 0);
@@ -60,9 +60,9 @@ public class GroupHandler implements RequestHandler {
 
     private Object handleJoin(ApiRequest req) {
         String groupId = req.getString("groupId");
-        String userId = req.getString("userId");
+        String userId = req.currentUserId();
         if (groupId == null || userId == null) {
-            throw new ImException(ImErrorCode.BAD_REQUEST, "groupId and userId are required");
+            throw new ImException(ImErrorCode.UNAUTHORIZED, "groupId is required");
         }
         String reqMsg = req.getString("reqMsg", "");
         groupManager.joinGroup(groupId, userId, reqMsg);
@@ -71,9 +71,9 @@ public class GroupHandler implements RequestHandler {
 
     private Object handleQuit(ApiRequest req) {
         String groupId = req.getString("groupId");
-        String userId = req.getString("userId");
+        String userId = req.currentUserId();
         if (groupId == null || userId == null) {
-            throw new ImException(ImErrorCode.BAD_REQUEST, "groupId and userId are required");
+            throw new ImException(ImErrorCode.UNAUTHORIZED, "groupId is required");
         }
         groupManager.quitGroup(groupId, userId);
         return Map.of("status", "OK");
@@ -81,10 +81,10 @@ public class GroupHandler implements RequestHandler {
 
     private Object handleKick(ApiRequest req) {
         String groupId = req.getString("groupId");
-        String operatorId = req.getString("operatorId");
+        String operatorId = req.currentUserId();
         String targetUserId = req.getString("targetUserId");
         if (groupId == null || operatorId == null || targetUserId == null) {
-            throw new ImException(ImErrorCode.BAD_REQUEST, "groupId, operatorId, targetUserId are required");
+            throw new ImException(ImErrorCode.UNAUTHORIZED, "groupId, targetUserId required");
         }
         groupManager.kickMember(groupId, operatorId, targetUserId);
         return Map.of("status", "OK");
@@ -92,9 +92,9 @@ public class GroupHandler implements RequestHandler {
 
     private Object handleDisband(ApiRequest req) {
         String groupId = req.getString("groupId");
-        String operatorId = req.getString("operatorId");
+        String operatorId = req.currentUserId();
         if (groupId == null || operatorId == null) {
-            throw new ImException(ImErrorCode.BAD_REQUEST, "groupId and operatorId are required");
+            throw new ImException(ImErrorCode.UNAUTHORIZED, "groupId is required");
         }
         groupManager.disbandGroup(groupId, operatorId);
         return Map.of("status", "OK");
@@ -109,7 +109,7 @@ public class GroupHandler implements RequestHandler {
                 req.getInt("needVerification", -1),
                 req.getInt("lookMemberInfo", -1),
                 req.getInt("applyMemberFriend", -1),
-                req.getString("operatorId"));
+                req.currentUserId());
         return Map.of("status", "OK");
     }
 

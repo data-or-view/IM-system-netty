@@ -3,6 +3,7 @@ package com.im.core.friend;
 import com.im.api.*;
 import com.im.core.cache.Cache;
 import com.im.core.cache.SafeCache;
+import com.im.core.sync.LocalIncrementalSync;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -46,14 +47,23 @@ public class LocalFriendManager implements IFriendManager {
     /** 好友列表缓存（SafeCache 包裹） */
     private final Cache<String, List<FriendInformation>> friendCache;
 
+    /** 增量同步追踪 */
+    private final LocalIncrementalSync sync;
+
     public LocalFriendManager() {
-        this(null);
+        this(null, new LocalIncrementalSync());
     }
 
     public LocalFriendManager(Cache<String, List<FriendInformation>> friendCache) {
+        this(friendCache, new LocalIncrementalSync());
+    }
+
+    public LocalFriendManager(Cache<String, List<FriendInformation>> friendCache,
+                              LocalIncrementalSync sync) {
         this.friendCache = friendCache != null
                 ? new SafeCache<>(friendCache, "LocalFriendManager")
                 : null;
+        this.sync = sync;
     }
 
     @Override
@@ -113,6 +123,7 @@ public class LocalFriendManager implements IFriendManager {
         ConcurrentMap<String, Boolean> pinnedMap = pinnedFlags.get(ownerUserId);
         if (pinnedMap != null) pinnedMap.remove(friendUserId);
         invalidateFriendCache(ownerUserId, friendUserId);
+        sync.recordChange(ownerUserId, "friend", friendUserId, "delete");
         log.info("Friend deleted: owner={}, friend={}", ownerUserId, friendUserId);
     }
 
@@ -154,23 +165,27 @@ public class LocalFriendManager implements IFriendManager {
     @Override
     public void setFriendRemark(String ownerUserId, String friendUserId, String remark) {
         remarks.computeIfAbsent(ownerUserId, k -> new ConcurrentHashMap<>()).put(friendUserId, remark);
+        sync.recordChange(ownerUserId, "friend", friendUserId, "update");
     }
 
     @Override
     public void setFriendPinned(String ownerUserId, String friendUserId, boolean pinned) {
         pinnedFlags.computeIfAbsent(ownerUserId, k -> new ConcurrentHashMap<>()).put(friendUserId, pinned);
+        sync.recordChange(ownerUserId, "friend", friendUserId, "update");
         log.info("Friend pin: owner={}, friend={}, pinned={}", ownerUserId, friendUserId, pinned);
     }
 
     @Override
     public void addBlack(String ownerUserId, String blockedUserId) {
         blacks.computeIfAbsent(ownerUserId, k -> new CopyOnWriteArraySet<>()).add(blockedUserId);
+        sync.recordChange(ownerUserId, "black", blockedUserId, "insert");
     }
 
     @Override
     public void removeBlack(String ownerUserId, String blockedUserId) {
         CopyOnWriteArraySet<String> set = blacks.get(ownerUserId);
         if (set != null) set.remove(blockedUserId);
+        sync.recordChange(ownerUserId, "black", blockedUserId, "delete");
     }
 
     @Override
@@ -183,6 +198,38 @@ public class LocalFriendManager implements IFriendManager {
     public boolean isBlocked(String fromUserId, String toUserId) {
         CopyOnWriteArraySet<String> set = blacks.get(toUserId);
         return set != null && set.contains(fromUserId);
+    }
+
+    @Override
+    public IncrementalSyncResult<FriendInformation> getIncrementalFriends(String userId, long version) {
+        return sync.getChanges(userId, "friend", version,
+                fid -> {
+                    // 非删除：从当前数据构建 FriendInformation
+                    CopyOnWriteArraySet<String> friendIds = friends.get(userId);
+                    if (friendIds == null || !friendIds.contains(fid)) return null;
+                    FriendInformation fi = new FriendInformation();
+                    fi.setOwnerUserId(userId);
+                    fi.setFriendUserId(fid);
+                    ConcurrentMap<String, String> remarkMap = remarks.get(userId);
+                    if (remarkMap != null) fi.setRemark(remarkMap.get(fid));
+                    ConcurrentMap<String, Boolean> pinnedMap = pinnedFlags.get(userId);
+                    if (pinnedMap != null && pinnedMap.get(fid) != null) {
+                        fi.setPinned(pinnedMap.get(fid));
+                    }
+                    return fi;
+                },
+                fid -> {
+                    FriendInformation fi = new FriendInformation();
+                    fi.setOwnerUserId(userId);
+                    fi.setFriendUserId(fid);
+                    fi.setDeleted(true);
+                    return fi;
+                });
+    }
+
+    @Override
+    public IncrementalSyncResult<String> getIncrementalBlacks(String userId, long version) {
+        return sync.getChangesAsIds(userId, "black", version);
     }
 
     // ── 缓存失效 ──
@@ -200,5 +247,6 @@ public class LocalFriendManager implements IFriendManager {
 
     private void addFriend(String owner, String friend) {
         friends.computeIfAbsent(owner, k -> new CopyOnWriteArraySet<>()).add(friend);
+        sync.recordChange(owner, "friend", friend, "insert");
     }
 }

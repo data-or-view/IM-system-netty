@@ -4,12 +4,14 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.im.api.Conversation;
 import com.im.api.IConversationManager;
+import com.im.api.IncrementalSyncResult;
 import com.im.api.Message;
 import com.im.core.db.MyBatisPlusFactory;
 import com.im.core.db.entity.ConversationEntity;
 import com.im.core.db.entity.SeqUserEntity;
 import com.im.core.db.mapper.ConversationMapper;
 import com.im.core.db.mapper.SeqUserMapper;
+import com.im.core.sync.DbIncrementalSync;
 import com.im.common.retry.RetryConfig;
 import com.im.common.retry.RetryExecutor;
 import com.im.common.retry.RetryStrategies;
@@ -37,9 +39,15 @@ public class DbConversationManager implements IConversationManager {
     private static final RetryConfig CFG = RetryStrategies.DB_WRITE;
 
     private final RetryExecutor retryExecutor;
+    private final DbIncrementalSync sync;
 
     public DbConversationManager(RetryExecutor retryExecutor) {
+        this(retryExecutor, new DbIncrementalSync(retryExecutor));
+    }
+
+    public DbConversationManager(RetryExecutor retryExecutor, DbIncrementalSync sync) {
         this.retryExecutor = retryExecutor;
+        this.sync = sync;
     }
 
     @Override
@@ -72,14 +80,11 @@ public class DbConversationManager implements IConversationManager {
             try (SqlSession session = MyBatisPlusFactory.openSession()) {
                 ConversationMapper mapper = session.getMapper(ConversationMapper.class);
 
-                // 构造附加信息 JSON（存储 lastMsgId / lastMsgContent）
                 String attachedInfo = buildAttachedInfo(msg);
 
-                // 计算会话类型
                 int convType = conversationId != null && conversationId.startsWith("group_")
                         ? Conversation.SESSION_TYPE_GROUP : Conversation.SESSION_TYPE_SINGLE;
 
-                // 提取对方 userId
                 String targetUserId = null;
                 if (convType == Conversation.SESSION_TYPE_SINGLE) {
                     String from = msg.getFromUserId();
@@ -90,22 +95,67 @@ public class DbConversationManager implements IConversationManager {
                 long now = System.currentTimeMillis();
                 long newSeq = msg.getSequenceId();
 
-                // 插入或更新
                 mapper.upsertConversation(
                         ownerUserId, conversationId, convType,
                         targetUserId, msg.getGroupId(),
                         attachedInfo, newSeq, now
                 );
 
-                // 更新未读数：send 方的会话（isSelf=true）不加
                 if (!isSelf) {
                     mapper.incrementUnread(ownerUserId, conversationId);
                 }
+
+                ensureSeqUser(session, ownerUserId, conversationId, newSeq);
 
                 session.commit();
             }
             return null;
         });
+
+        sync.recordChange(ownerUserId, "conversation", conversationId, "update");
+    }
+
+    @Override
+    public long getReadSeq(String ownerUserId, String conversationId) {
+        try (SqlSession session = MyBatisPlusFactory.openSession()) {
+            SeqUserMapper seqMapper = session.getMapper(SeqUserMapper.class);
+            SeqUserEntity seqUser = seqMapper.selectByUserAndConversation(ownerUserId, conversationId);
+            return seqUser != null ? seqUser.getReadSeq() : 0;
+        } catch (Exception e) {
+            log.warn("Failed to get readSeq for {}: {}", conversationId, e.getMessage());
+            return 0;
+        }
+    }
+
+    @Override
+    public int getTotalUnreadCount(String userId) {
+        try (SqlSession session = MyBatisPlusFactory.openSession()) {
+            ConversationMapper mapper = session.getMapper(ConversationMapper.class);
+            List<ConversationEntity> entities = mapper.selectByUserOrdered(userId);
+            if (entities == null || entities.isEmpty()) return 0;
+
+            int total = 0;
+            for (ConversationEntity e : entities) {
+                total += computeUnreadCount(session, e);
+            }
+            return total;
+        } catch (Exception e) {
+            log.warn("Failed to get total unread count for {}: {}", userId, e.getMessage());
+            return 0;
+        }
+    }
+
+    @Override
+    public int getUnreadCount(String ownerUserId, String conversationId) {
+        try (SqlSession session = MyBatisPlusFactory.openSession()) {
+            ConversationMapper mapper = session.getMapper(ConversationMapper.class);
+            ConversationEntity entity = mapper.selectByUserAndConversation(ownerUserId, conversationId);
+            if (entity == null) return 0;
+            return (int) computeUnreadCount(session, entity);
+        } catch (Exception e) {
+            log.warn("Failed to get unread count for {}: {}", conversationId, e.getMessage());
+            return 0;
+        }
     }
 
     @Override
@@ -115,10 +165,18 @@ public class DbConversationManager implements IConversationManager {
                 ConversationMapper mapper = session.getMapper(ConversationMapper.class);
                 mapper.resetUnread(ownerUserId, conversationId);
                 mapper.updateUpdatedAt(ownerUserId, conversationId, System.currentTimeMillis());
+
+                if (readSeq > 0) {
+                    SeqUserMapper seqMapper = session.getMapper(SeqUserMapper.class);
+                    seqMapper.updateReadSeq(ownerUserId, conversationId, readSeq, System.currentTimeMillis());
+                }
+
                 session.commit();
             }
             return null;
         });
+
+        sync.recordChange(ownerUserId, "conversation", conversationId, "update");
     }
 
     @Override
@@ -138,6 +196,8 @@ public class DbConversationManager implements IConversationManager {
             }
             return null;
         });
+
+        sync.recordChange(ownerUserId, "conversation", conversationId, "update");
     }
 
     @Override
@@ -157,6 +217,8 @@ public class DbConversationManager implements IConversationManager {
             }
             return null;
         });
+
+        sync.recordChange(ownerUserId, "conversation", conversationId, "update");
     }
 
     @Override
@@ -176,6 +238,8 @@ public class DbConversationManager implements IConversationManager {
             }
             return null;
         });
+
+        sync.recordChange(ownerUserId, "conversation", conversationId, "update");
     }
 
     @Override
@@ -183,7 +247,6 @@ public class DbConversationManager implements IConversationManager {
         retryExecutor.execute(CFG, () -> {
             try (SqlSession session = MyBatisPlusFactory.openSession()) {
                 ConversationMapper mapper = session.getMapper(ConversationMapper.class);
-                // 检查是否已存在
                 ConversationEntity existing = mapper.selectByUserAndConversation(ownerUserId, conversationId);
                 if (existing != null) return null;
 
@@ -201,6 +264,8 @@ public class DbConversationManager implements IConversationManager {
             }
             return null;
         });
+
+        sync.recordChange(ownerUserId, "conversation", conversationId, "insert");
     }
 
     @Override
@@ -230,6 +295,19 @@ public class DbConversationManager implements IConversationManager {
             }
             return null;
         });
+
+        for (String memberId : memberIds) {
+            sync.recordChange(memberId, "conversation", conversationId, "insert");
+        }
+    }
+
+    // ========== 增量同步 ==========
+
+    @Override
+    public IncrementalSyncResult<Conversation> getIncrementalConversations(String ownerUserId, long version) {
+        return sync.getChanges(ownerUserId, "conversation", version,
+                convId -> getConversation(ownerUserId, convId),
+                convId -> null);
     }
 
     // ========== Entity ↔ Conversation 转换 ==========
@@ -256,10 +334,33 @@ public class DbConversationManager implements IConversationManager {
         // 从 attached_info 解析 lastMsgId/lastMsgContent
         parseAttachedInfo(conv, e.getAttachedInfo());
 
-        // 计算未读数：当前 conv max_seq - 用户 read_seq
+        // 计算未读数
         conv.setUnreadCount(computeUnreadCount(session, e));
 
         return conv;
+    }
+
+    private void ensureSeqUser(SqlSession session, String userId, String conversationId, long newSeq) {
+        try {
+            SeqUserMapper seqMapper = session.getMapper(SeqUserMapper.class);
+            SeqUserEntity existing = seqMapper.selectByUserAndConversation(userId, conversationId);
+            if (existing == null) {
+                SeqUserEntity su = new SeqUserEntity();
+                su.setUserId(userId);
+                su.setConversationId(conversationId);
+                su.setMinSeq(newSeq);
+                su.setMaxSeq(newSeq);
+                su.setReadSeq(0);
+                su.setUpdatedAt(System.currentTimeMillis());
+                seqMapper.insert(su);
+            } else if (newSeq > existing.getMaxSeq()) {
+                existing.setMaxSeq(newSeq);
+                existing.setUpdatedAt(System.currentTimeMillis());
+                seqMapper.updateById(existing);
+            }
+        } catch (Exception ex) {
+            log.warn("Failed to ensure seq_user for {}: {}", conversationId, ex.getMessage());
+        }
     }
 
     private long computeUnreadCount(SqlSession session, ConversationEntity e) {
@@ -268,7 +369,6 @@ public class DbConversationManager implements IConversationManager {
             SeqUserEntity seqUser = seqMapper.selectByUserAndConversation(
                     e.getOwnerUserId(), e.getConversationId());
             if (seqUser == null) {
-                // 没有 SeqUser 记录时，未读数 = max_seq - 0
                 return e.getMaxSeq() > 0 ? 1 : 0;
             }
             long unread = e.getMaxSeq() - seqUser.getReadSeq();
@@ -279,15 +379,9 @@ public class DbConversationManager implements IConversationManager {
         }
     }
 
-    /**
-     * 从 attached_info JSON 解析 lastMsgId, lastMsgContent, lastContentType。
-     * 格式: {@code {"mid":"xxx","txt":"hello","ct":1}}
-     */
     private void parseAttachedInfo(Conversation conv, String attachedInfo) {
         if (attachedInfo == null || attachedInfo.isEmpty()) return;
         try {
-            // 简易 JSON 解析（不引入依赖）
-            // 格式: {"mid":"xxx","txt":"hello","ct":1}
             String json = attachedInfo;
             conv.setLastMsgId(extractJsonValue(json, "mid"));
             conv.setLastMsgContent(extractJsonValue(json, "txt"));
@@ -301,9 +395,6 @@ public class DbConversationManager implements IConversationManager {
         }
     }
 
-    /**
-     * 构建 attached_info JSON 字符串。
-     */
     private String buildAttachedInfo(Message msg) {
         String mid = msg.getMessageId();
         String content = msg.getContent();
@@ -326,23 +417,19 @@ public class DbConversationManager implements IConversationManager {
         return sb.length() > 2 ? sb.toString() : "";
     }
 
-    /** 简易 JSON value 提取（不含嵌套） */
     private static String extractJsonValue(String json, String key) {
         String search = "\"" + key + "\":";
         int idx = json.indexOf(search);
         if (idx < 0) return null;
         idx += search.length();
-        // 跳过空白
         while (idx < json.length() && json.charAt(idx) == ' ') idx++;
         if (idx >= json.length()) return null;
         char c = json.charAt(idx);
         if (c == '"') {
-            // 字符串：查找关闭引号
             idx++;
             int end = json.indexOf('"', idx);
             return end > idx ? json.substring(idx, end) : json.substring(idx);
         } else {
-            // 数字/布尔
             int end = idx;
             while (end < json.length() && (Character.isDigit(json.charAt(end)) || json.charAt(end) == '-')) end++;
             return json.substring(idx, end);

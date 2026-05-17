@@ -1,10 +1,7 @@
 package com.im.core.group;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.im.api.GroupApply;
-import com.im.api.GroupInformation;
-import com.im.api.GroupMemberInformation;
-import com.im.api.IGroupManager;
+import com.im.api.*;
 import com.im.core.db.MyBatisPlusFactory;
 import com.im.core.db.entity.GroupEntity;
 import com.im.core.db.entity.GroupMemberEntity;
@@ -14,6 +11,7 @@ import com.im.core.db.mapper.GroupMapper;
 import com.im.core.db.mapper.GroupMemberMapper;
 import com.im.core.db.mapper.GroupRequestMapper;
 import com.im.core.db.mapper.UserMapper;
+import com.im.core.sync.DbIncrementalSync;
 import com.im.common.retry.RetryConfig;
 import com.im.common.retry.RetryExecutor;
 import com.im.common.retry.RetryStrategies;
@@ -37,9 +35,15 @@ public class DbGroupManager implements IGroupManager {
     private static final RetryConfig CFG = RetryStrategies.DB_WRITE;
 
     private final RetryExecutor retryExecutor;
+    private final DbIncrementalSync sync;
 
     public DbGroupManager(RetryExecutor retryExecutor) {
+        this(retryExecutor, new DbIncrementalSync(retryExecutor));
+    }
+
+    public DbGroupManager(RetryExecutor retryExecutor, DbIncrementalSync sync) {
         this.retryExecutor = retryExecutor;
+        this.sync = sync;
     }
 
     @Override
@@ -51,7 +55,6 @@ public class DbGroupManager implements IGroupManager {
             GroupMapper groupMapper = session.getMapper(GroupMapper.class);
             GroupMemberMapper memberMapper = session.getMapper(GroupMemberMapper.class);
 
-            // 创建群
             GroupEntity entity = new GroupEntity();
             entity.setGroupId(groupId);
             entity.setGroupName(groupName);
@@ -65,10 +68,8 @@ public class DbGroupManager implements IGroupManager {
             entity.setUpdatedAt(now);
             groupMapper.insert(entity);
 
-            // 加入群主
             addMemberRecord(memberMapper, groupId, ownerId, 200, 1, null, ownerId, now);
 
-            // 加入初始成员
             if (members != null) {
                 for (String m : members) {
                     if (!m.equals(ownerId)) {
@@ -84,10 +85,32 @@ public class DbGroupManager implements IGroupManager {
         }
                     return null;
         });
+
+        // 记录增量同步
+        sync.recordChange(ownerId, "group", groupId, "insert");
+        sync.recordChange(groupId, "member", ownerId, "insert");
+        if (members != null) {
+            for (String m : members) {
+                if (!m.equals(ownerId)) {
+                    sync.recordChange(m, "group", groupId, "insert");
+                    sync.recordChange(groupId, "member", m, "insert");
+                }
+            }
+        }
     }
 
     @Override
     public void disbandGroup(String groupId, String operatorId) {
+        Set<String> affectedMembers;
+        try (SqlSession session = MyBatisPlusFactory.openSession()) {
+            GroupMemberMapper memberMapper = session.getMapper(GroupMemberMapper.class);
+            affectedMembers = memberMapper.selectList(
+                    new LambdaQueryWrapper<GroupMemberEntity>()
+                            .eq(GroupMemberEntity::getGroupId, groupId)
+                            .select(GroupMemberEntity::getUserId)
+            ).stream().map(GroupMemberEntity::getUserId).collect(Collectors.toSet());
+        }
+
         retryExecutor.execute(CFG, () -> {
         try (SqlSession session = MyBatisPlusFactory.openSession()) {
             GroupMapper groupMapper = session.getMapper(GroupMapper.class);
@@ -99,10 +122,9 @@ public class DbGroupManager implements IGroupManager {
                 log.warn("Only owner can disband group: groupId={}, operator={}", groupId, operatorId);
                 return null;
             }
-            entity.setStatus(0); // 标记解散
+            entity.setStatus(0);
             entity.setUpdatedAt(System.currentTimeMillis());
             groupMapper.updateById(entity);
-            // 删除所有成员记录（或保留标记解散）
             LambdaQueryWrapper<GroupMemberEntity> qw = new LambdaQueryWrapper<>();
             qw.eq(GroupMemberEntity::getGroupId, groupId);
             memberMapper.delete(qw);
@@ -111,6 +133,11 @@ public class DbGroupManager implements IGroupManager {
         }
                     return null;
         });
+
+        for (String uid : affectedMembers) {
+            sync.recordChange(uid, "group", groupId, "delete");
+            sync.recordChange(groupId, "member", uid, "delete");
+        }
     }
 
     @Override
@@ -160,6 +187,9 @@ public class DbGroupManager implements IGroupManager {
         }
                     return null;
         });
+
+        sync.recordChange(userId, "group", groupId, "insert");
+        sync.recordChange(groupId, "member", userId, "insert");
     }
 
     @Override
@@ -173,7 +203,6 @@ public class DbGroupManager implements IGroupManager {
         try (SqlSession session = MyBatisPlusFactory.openSession()) {
             GroupMapper groupMapper = session.getMapper(GroupMapper.class);
             GroupMemberMapper memberMapper = session.getMapper(GroupMemberMapper.class);
-            // 操作者必须是群主或管理员
             GroupMemberEntity operator = getMemberInSession(memberMapper, groupId, operatorId);
             GroupMemberEntity target = getMemberInSession(memberMapper, groupId, targetUserId);
             if (operator == null || target == null) return null;
@@ -193,6 +222,9 @@ public class DbGroupManager implements IGroupManager {
         }
                     return null;
         });
+
+        sync.recordChange(targetUserId, "group", groupId, "delete");
+        sync.recordChange(groupId, "member", targetUserId, "delete");
     }
 
     @Override
@@ -215,6 +247,9 @@ public class DbGroupManager implements IGroupManager {
         }
                     return null;
         });
+
+        sync.recordChange(userId, "group", groupId, "delete");
+        sync.recordChange(groupId, "member", userId, "delete");
     }
 
     @Override
@@ -224,19 +259,16 @@ public class DbGroupManager implements IGroupManager {
             GroupMapper groupMapper = session.getMapper(GroupMapper.class);
             GroupMemberMapper memberMapper = session.getMapper(GroupMemberMapper.class);
 
-            // 旧群主降为管理员
             GroupMemberEntity oldOwner = getMemberInSession(memberMapper, groupId, oldOwnerId);
             if (oldOwner != null) {
                 oldOwner.setRoleLevel(100);
                 memberMapper.updateById(oldOwner);
             }
-            // 新群主升为群主
             GroupMemberEntity newOwner = getMemberInSession(memberMapper, groupId, newOwnerId);
             if (newOwner != null) {
                 newOwner.setRoleLevel(200);
                 memberMapper.updateById(newOwner);
             }
-            // 更新群 owner
             GroupEntity entity = groupMapper.selectById(groupId);
             if (entity != null) {
                 entity.setOwnerUserId(newOwnerId);
@@ -247,6 +279,9 @@ public class DbGroupManager implements IGroupManager {
         }
                     return null;
         });
+
+        sync.recordChange(groupId, "member", oldOwnerId, "update");
+        sync.recordChange(groupId, "member", newOwnerId, "update");
     }
 
     @Override
@@ -263,6 +298,8 @@ public class DbGroupManager implements IGroupManager {
         }
                     return null;
         });
+
+        sync.recordChange(groupId, "member", targetUserId, "update");
     }
 
     @Override
@@ -279,6 +316,8 @@ public class DbGroupManager implements IGroupManager {
         }
                     return null;
         });
+
+        sync.recordChange(groupId, "member", targetUserId, "update");
     }
 
     @Override
@@ -291,16 +330,13 @@ public class DbGroupManager implements IGroupManager {
             GroupEntity group = groupMapper.selectById(groupId);
             if (group == null) return null;
 
-            // 检查是否已有待处理申请
             LambdaQueryWrapper<GroupRequestEntity> qw = new LambdaQueryWrapper<>();
             qw.eq(GroupRequestEntity::getGroupId, groupId)
                     .eq(GroupRequestEntity::getUserId, userId)
                     .eq(GroupRequestEntity::getHandleResult, 0);
             if (mapper.selectCount(qw) > 0) return null;
 
-            // 根据群验证策略
             if (group.getNeedVerification() == 0) {
-                // 无需验证，直接加入
                 addMember(groupId, userId);
                 return null;
             }
@@ -425,6 +461,32 @@ public class DbGroupManager implements IGroupManager {
             GroupEntity entity = mapper.selectById(groupId);
             return entity != null ? toGroupInfo(entity) : null;
         }
+    }
+
+    // ========== 增量同步 ==========
+
+    @Override
+    public IncrementalSyncResult<String> getIncrementalGroups(String userId, long version) {
+        return sync.getChangesAsIds(userId, "group", version);
+    }
+
+    @Override
+    public IncrementalSyncResult<GroupMemberInformation> getIncrementalMembers(String groupId, long version) {
+        return sync.getChanges(groupId, "member", version,
+                uid -> {
+                    try (SqlSession session = MyBatisPlusFactory.openSession()) {
+                        GroupMemberMapper mapper = session.getMapper(GroupMemberMapper.class);
+                        GroupMemberEntity entity = getMemberInSession(mapper, groupId, uid);
+                        return entity != null ? toGroupMemberInfo(entity) : null;
+                    }
+                },
+                uid -> {
+                    GroupMemberInformation gmi = new GroupMemberInformation();
+                    gmi.setGroupId(groupId);
+                    gmi.setUserId(uid);
+                    gmi.setRoleLevel(-1);
+                    return gmi;
+                });
     }
 
     // ========== 内部方法 ==========

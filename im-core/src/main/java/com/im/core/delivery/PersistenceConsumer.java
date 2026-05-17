@@ -5,6 +5,8 @@ import com.im.common.lifecycle.Lifecycle;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Set;
+
 /**
  * 消息持久化消费者。
  *
@@ -23,18 +25,26 @@ public class PersistenceConsumer implements Lifecycle {
     private final IMessageQueue messageQueue;
     private final IMessageStore messageStore;
     private final IConversationManager conversationManager;
+    private final IGroupManager groupManager;
 
     private volatile IMessageQueue.MessageHandler handler;
 
     public PersistenceConsumer(IMessageQueue messageQueue, IMessageStore messageStore) {
-        this(messageQueue, messageStore, null);
+        this(messageQueue, messageStore, null, null);
     }
 
     public PersistenceConsumer(IMessageQueue messageQueue, IMessageStore messageStore,
-                           IConversationManager conversationManager) {
+                               IConversationManager conversationManager) {
+        this(messageQueue, messageStore, conversationManager, null);
+    }
+
+    public PersistenceConsumer(IMessageQueue messageQueue, IMessageStore messageStore,
+                               IConversationManager conversationManager,
+                               IGroupManager groupManager) {
         this.messageQueue = messageQueue;
         this.messageStore = messageStore;
         this.conversationManager = conversationManager;
+        this.groupManager = groupManager;
     }
 
     @Override
@@ -73,17 +83,23 @@ public class PersistenceConsumer implements Lifecycle {
                 if (groupId != null) {
                     // 群聊：更新每个成员的会话
                     String conversationId = "group_" + groupId;
-                    // 发送者的会话（不加未读数）
+
+                    // 发送者：不加未读数
                     if (fromUserId != null) {
-                        conversationManager.updateOnMessage(conversationId, fromUserId, msg, true);
+                        conversationManager.updateOnMessage(fromUserId, conversationId, msg, true);
                     }
-                    // 注意：其他成员的会话在 DeliveryConsumer 展开后触发
-                    // 目前由 DeliveryConsumer 的群聊展开逻辑负责，
-                    // 它会为每个成员复制消息并 publish 到 DELIVER，
-                    // 但不会再次走到 PERSIST。所以群成员会话在新消息到达时
-                    // 由 DeliveryConsumer 独立处理（暂未实现）。
-                    // 简化方案：群聊会话更新暂标记 TODO
-                    log.debug("Group conversation update TBD for group {}", groupId);
+
+                    // 其他成员：遍历群成员，更新会话 + 未读数
+                    Set<String> memberIds = groupManager != null
+                            ? groupManager.getMemberIds(groupId)
+                            : Set.of();
+                    for (String memberId : memberIds) {
+                        if (!memberId.equals(fromUserId)) {
+                            conversationManager.updateOnMessage(memberId, conversationId, msg, false);
+                        }
+                    }
+
+                    log.debug("Group conv updated for {} members: groupId={}", memberIds.size(), groupId);
 
                 } else if (toUserId != null) {
                     // 单聊：两方的会话都要更新
@@ -91,10 +107,10 @@ public class PersistenceConsumer implements Lifecycle {
 
                     // 发送方：不加未读数
                     if (fromUserId != null) {
-                        conversationManager.updateOnMessage(conversationId, fromUserId, msg, true);
+                        conversationManager.updateOnMessage(fromUserId, conversationId, msg, true);
                     }
                     // 接收方：+1 未读数
-                    conversationManager.updateOnMessage(conversationId, toUserId, msg, false);
+                    conversationManager.updateOnMessage(toUserId, conversationId, msg, false);
                 }
             }
 

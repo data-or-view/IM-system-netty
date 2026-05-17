@@ -35,20 +35,18 @@ public class SendMessageUseCase {
     // ── 新接口：统一 handler 使用 ──
 
     /**
-     * 从 ApiRequest params 处理消息发送（新）。
+     * 从 ApiRequest params 处理消息发送。
      *
-     * @param params     业务参数 map
-     * @param fromUserId 发送者
-     * @param toUserId   接收者（单聊）
-     * @param groupId    群 ID（群聊）
-     * @param content    已解析的消息内容
-     * @param uid        认证用户 ID（fromUserId 必须匹配）
+     * @param params   业务参数 map
+     * @param fromUserId 发送者（已认证，来自 token）
+     * @param toUserId 接收者（单聊）
+     * @param groupId  群 ID（群聊）
+     * @param content  已解析的消息内容
      * @return 处理结果，或 null 表示被阻断
      */
     public SendMessageResult execute(Map<String, Object> params, String fromUserId,
-                                     String toUserId, String groupId, IMessageContent content,
-                                     String uid) {
-        if (fromUserId == null || !fromUserId.equals(uid)) {
+                                     String toUserId, String groupId, IMessageContent content) {
+        if (fromUserId == null) {
             return null;
         }
 
@@ -123,7 +121,7 @@ public class SendMessageUseCase {
 
         // 内容类型
         if (content != null) {
-            msg.setContentType(content.getContentType().ordinal());
+            msg.setContentType(content.getContentType().getId());
             msg.setBody(ContentSerializer.toBytes(content));
         }
 

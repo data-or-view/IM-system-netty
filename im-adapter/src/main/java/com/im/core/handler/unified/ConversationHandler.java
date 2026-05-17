@@ -28,24 +28,38 @@ public class ConversationHandler implements RequestHandler {
         return switch (req.operation()) {
             case "conversation.list" -> handleList(req);
             case "conversation.set" -> handleSet(req);
+            case "conversation.read" -> handleRead(req);
             default -> throw new ImException(ImErrorCode.NOT_FOUND, "unsupported: " + req.operation());
         };
     }
 
-    private Object handleList(ApiRequest req) {
-        String userId = req.getString("userId");
-        if (userId == null) {
-            // WS 路径从 attributes 取 userId（认证拦截器设置）
-            userId = req.attribute("userId");
+    private Object handleRead(ApiRequest req) {
+        String userId = req.currentUserId();
+        String conversationId = req.getString("conversationId");
+        long readSeq = req.getLong("readSeq", 0);
+
+        if (userId == null || conversationId == null) {
+            throw new ImException(ImErrorCode.BAD_REQUEST, "userId and conversationId are required");
         }
-        if (userId == null) throw new ImException(ImErrorCode.BAD_REQUEST, "userId is required");
+
+        conversationManager.markRead(userId, conversationId, readSeq);
+        int unreadCount = conversationManager.getUnreadCount(userId, conversationId);
+
+        return Map.of(
+                "conversationId", conversationId,
+                "unreadCount", unreadCount
+        );
+    }
+
+    private Object handleList(ApiRequest req) {
+        String userId = req.currentUserId();
+        if (userId == null) throw new ImException(ImErrorCode.UNAUTHORIZED, "not authenticated");
         List<Conversation> conversations = conversationManager.getConversations(userId);
         return Map.of("userId", userId, "conversations", conversations, "count", conversations.size());
     }
 
     private Object handleSet(ApiRequest req) {
-        String userId = req.getString("userId");
-        if (userId == null) userId = req.attribute("userId");
+        String userId = req.currentUserId();
         String conversationId = req.getString("conversationId");
         if (userId == null || conversationId == null) {
             throw new ImException(ImErrorCode.BAD_REQUEST, "userId and conversationId are required");

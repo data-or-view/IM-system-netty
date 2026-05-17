@@ -3,8 +3,9 @@ package com.im.core.handler.unified;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.im.api.ApiRequest;
 import com.im.api.IConnectionSession;
-import com.im.api.Message;
+import com.im.api.IRouteTable;
 import com.im.api.ISessionManager;
+import com.im.api.Message;
 import com.im.api.RequestHandler;
 import com.im.common.enums.ImErrorCode;
 import com.im.common.exception.ImException;
@@ -30,10 +31,15 @@ public class LoginHandler implements RequestHandler {
 
     private final LoginUseCase loginUseCase;
     private final ISessionManager sessionManager;
+    private final IRouteTable routeTable;
+    private final String localNodeId;
 
-    public LoginHandler(LoginUseCase loginUseCase, ISessionManager sessionManager) {
+    public LoginHandler(LoginUseCase loginUseCase, ISessionManager sessionManager,
+                        IRouteTable routeTable, String localNodeId) {
         this.loginUseCase = loginUseCase;
         this.sessionManager = sessionManager;
+        this.routeTable = routeTable;
+        this.localNodeId = localNodeId;
     }
 
     @Override
@@ -45,10 +51,10 @@ public class LoginHandler implements RequestHandler {
 
         int platformId = req.getInt("platformId", 0);
 
-        // 业务：签发 token、注册路由、拉取离线
+        // ① 签发 token + 拉取离线消息（不注册路由）
         LoginUseCase.LoginResult result = loginUseCase.execute(userId, platformId, 0);
 
-        // 绑定 session（需要 Channel）
+        // ② 绑定 session（会触发多端登录策略检查，可能踢旧 session）
         Channel channel = req.attribute("_channel");
         if (channel != null) {
             IConnectionSession session = sessionManager.getByChannel(channel);
@@ -56,6 +62,13 @@ public class LoginHandler implements RequestHandler {
                 session.authenticate(userId, platformId);
             }
             sessionManager.bindUser(channel, userId);
+
+            // ③ 绑定成功后注册路由（先 bindUser 后注册，
+            //    避免被踢旧 session 的 channelInactive 清理逻辑误删新路由）
+            if (routeTable != null) {
+                routeTable.online(userId, localNodeId);
+                routeTable.setOnline(userId, platformId);
+            }
         }
 
         // 投递离线消息（通过 Channel 直接写 WS 帧）
