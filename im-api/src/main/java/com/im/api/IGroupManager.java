@@ -137,6 +137,17 @@ public interface IGroupManager {
     }
 
     /**
+     * 判断群成员是否被禁言。
+     *
+     * @param groupId 群 ID
+     * @param userId  成员 ID
+     * @return true 如果该成员被禁言且禁言未过期
+     */
+    default boolean isMemberMuted(String groupId, String userId) {
+        throw new UnsupportedOperationException("isMemberMuted not implemented");
+    }
+
+    /**
      * 设置群成员自定义信息（如群昵称）。
      *
      * @param groupId    群 ID

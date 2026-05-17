@@ -306,6 +306,42 @@ public class DbFriendManager implements IFriendManager {
         return sync.getChangesAsIds(userId, "black", version);
     }
 
+    // ── 好友申请查询 ──
+
+    @Override
+    public List<FriendApply> getSentFriendApplyList(String userId) {
+        try (SqlSession session = MyBatisPlusFactory.openSession()) {
+            FriendRequestMapper mapper = session.getMapper(FriendRequestMapper.class);
+            LambdaQueryWrapper<FriendRequestEntity> qw = new LambdaQueryWrapper<>();
+            qw.eq(FriendRequestEntity::getFromUserId, userId);
+            qw.orderByDesc(FriendRequestEntity::getCreatedAt);
+            return mapper.selectList(qw).stream().map(this::toFriendApply).toList();
+        }
+    }
+
+    @Override
+    public FriendApply getFriendApplyDetail(String fromUserId, String toUserId) {
+        try (SqlSession session = MyBatisPlusFactory.openSession()) {
+            FriendRequestMapper mapper = session.getMapper(FriendRequestMapper.class);
+            LambdaQueryWrapper<FriendRequestEntity> qw = new LambdaQueryWrapper<>();
+            qw.eq(FriendRequestEntity::getFromUserId, fromUserId)
+                    .eq(FriendRequestEntity::getToUserId, toUserId);
+            FriendRequestEntity entity = mapper.selectOne(qw);
+            return entity != null ? toFriendApply(entity) : null;
+        }
+    }
+
+    @Override
+    public int getUnhandledApplyCount(String userId) {
+        try (SqlSession session = MyBatisPlusFactory.openSession()) {
+            FriendRequestMapper mapper = session.getMapper(FriendRequestMapper.class);
+            Long count = mapper.selectCount(new LambdaQueryWrapper<FriendRequestEntity>()
+                    .eq(FriendRequestEntity::getToUserId, userId)
+                    .eq(FriendRequestEntity::getHandleResult, 0));
+            return count != null ? count.intValue() : 0;
+        }
+    }
+
     // ── 转换 ──
 
     private FriendApply toFriendApply(FriendRequestEntity entity) {

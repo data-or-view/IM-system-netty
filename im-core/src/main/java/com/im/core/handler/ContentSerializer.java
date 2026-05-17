@@ -10,11 +10,18 @@ import java.util.Map;
  * 消息内容序列化/反序列化。
  * 将 IMessageContent 实例 ↔ JSON bytes 互相转换。
  *
- * 序列化约定：
- *   TEXT   → {"text":"..."}
- *   FILE   → {"fileName":"...","fileSize":123,"url":"..."}
- *   IMAGE  → {"width":800,"height":600,"format":"png","fileSize":12345,"url":"..."}
- *   SYSTEM → 空（body 为空，信息存 IMCommand.headers 的 _sys_type / _sys_msg）
+ * 序列化约定（与 OpenIM 对齐）：
+ *   TEXT    → {"text":"..."}
+ *   FILE    → {"uuid":"...","fileName":"...","fileSize":123,"url":"..."}
+ *   IMAGE   → {"sourcePicture":{...},"bigPicture":{...},"snapshotPicture":{...}}
+ *   SYSTEM  → 空（body 为空，信息存 IMCommand.headers 的 _sys_type / _sys_msg）
+ *   SIGNAL  → {"_act":1,"_room":"...","_token":"..."}
+ *   VOICE   → {"uuid":"...","url":"...","fileSize":123,"duration":30}
+ *   VIDEO   → {"videoUrl":"...","videoUuid":"...","videoType":"...","videoSize":123,"duration":120,"snapshotUrl":"...","snapshotWidth":640,"snapshotHeight":480,"snapshotSize":23456}
+ *   LOCATION → {"description":"...","longitude":116.46,"latitude":39.92}
+ *   AT_TEXT → {"text":"@...","atUserList":["user1"]}
+ *   QUOTE   → {"text":"...","quotedMessageId":"...","quotedSenderId":"...","quotedContent":"..."}
+ *   CUSTOM  → {"data":"...","description":"...","extension":"..."}
  */
 public class ContentSerializer {
 
@@ -86,6 +93,12 @@ public class ContentSerializer {
             case IMAGE -> ImageContent.class;
             case SYSTEM -> SystemContent.class;
             case SIGNAL -> SignalingContent.class;
+            case VOICE -> VoiceContent.class;
+            case VIDEO -> VideoContent.class;
+            case LOCATION -> LocationContent.class;
+            case AT_TEXT -> AtTextContent.class;
+            case QUOTE -> QuoteContent.class;
+            case CUSTOM -> CustomContent.class;
         };
     }
 }

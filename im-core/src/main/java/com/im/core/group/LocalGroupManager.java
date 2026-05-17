@@ -219,6 +219,38 @@ public class LocalGroupManager implements IGroupManager {
         }
     }
 
+    private static final long FAR_FUTURE = 253402300799999L; // 9999-12-31 毫秒
+
+    @Override
+    public void muteGroupAll(String groupId, String operatorId, boolean mute) {
+        ConcurrentMap<String, GroupMemberInformation> memberMap = memberInfos.get(groupId);
+        if (memberMap == null) {
+            log.warn("Group not found: {}", groupId);
+            return;
+        }
+        GroupMemberInformation operator = memberMap.get(operatorId);
+        if (operator == null || operator.getRoleLevel() < 100) {
+            log.warn("Only admin can toggle mute-all: groupId={}, operator={}", groupId, operatorId);
+            return;
+        }
+        long muteEndTime = mute ? FAR_FUTURE : 0;
+        for (GroupMemberInformation member : memberMap.values()) {
+            if (member.getRoleLevel() < 100) {
+                member.setMuteEndTime(muteEndTime);
+            }
+        }
+        log.info("Group mute-all {}: groupId={}, operator={}", mute ? "enabled" : "disabled", groupId, operatorId);
+    }
+
+    @Override
+    public boolean isMemberMuted(String groupId, String userId) {
+        ConcurrentMap<String, GroupMemberInformation> memberMap = memberInfos.get(groupId);
+        if (memberMap == null) return false;
+        GroupMemberInformation member = memberMap.get(userId);
+        if (member == null) return false;
+        return member.getMuteEndTime() > 0 && member.getMuteEndTime() > System.currentTimeMillis();
+    }
+
     @Override
     public void joinGroup(String groupId, String userId, String reqMsg) {
         GroupApply apply = new GroupApply();

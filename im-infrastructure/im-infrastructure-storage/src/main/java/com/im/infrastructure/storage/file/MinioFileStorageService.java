@@ -2,12 +2,16 @@ package com.im.infrastructure.storage.file;
 
 import com.im.api.IFileStorageService;
 import io.minio.*;
+import io.minio.errors.*;
 import io.minio.http.Method;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
+import java.security.InvalidKeyException;
+import java.security.NoSuchAlgorithmException;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -27,6 +31,9 @@ public class MinioFileStorageService implements IFileStorageService {
 
     private final MinioClient client;
     private final String endpoint;
+    private final String accessKey;
+    private final String secretKey;
+    private final S3MultipartUploader multipartUploader;
 
     public MinioFileStorageService() {
         this(env("MINIO_ENDPOINT", "http://127.0.0.1:9000"),
@@ -40,11 +47,14 @@ public class MinioFileStorageService implements IFileStorageService {
             ep = ep.substring(0, ep.length() - 1);
         }
         this.endpoint = ep;
+        this.accessKey = accessKey;
+        this.secretKey = secretKey;
 
         this.client = MinioClient.builder()
                 .endpoint(ep)
                 .credentials(accessKey, secretKey)
                 .build();
+        this.multipartUploader = new S3MultipartUploader(ep, "us-east-1", accessKey, secretKey);
 
         // 启动时检查连接（静默）
         try {
@@ -128,6 +138,60 @@ public class MinioFileStorageService implements IFileStorageService {
             return true;
         } catch (Exception e) {
             return false;
+        }
+    }
+
+    // ── 分片上传 ──
+
+    @Override
+    public String initiateMultipartUpload(String bucket, String objectId) {
+        try {
+            ensureBucket(bucket);
+            String uploadId = multipartUploader.initiateMultipartUpload(bucket, objectId);
+            log.debug("Multipart upload initiated: bucket={}, object={}, uploadId={}",
+                    bucket, objectId, uploadId);
+            return uploadId;
+        } catch (Exception e) {
+            throw new RuntimeException("MinIO initiateMultipartUpload failed: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public String uploadPart(String bucket, String objectId, String uploadId,
+                             int partNumber, byte[] data) {
+        try {
+            String etag = multipartUploader.uploadPart(bucket, objectId, uploadId, partNumber, data);
+            log.debug("Part uploaded: bucket={}, object={}, part={}, etag={}",
+                    bucket, objectId, partNumber, etag);
+            return etag;
+        } catch (Exception e) {
+            throw new RuntimeException("MinIO uploadPart failed: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public void completeMultipartUpload(String bucket, String objectId, String uploadId,
+                                         List<PartInfo> parts) {
+        try {
+            List<S3MultipartUploader.PartInfo> converted = parts.stream()
+                    .map(p -> new S3MultipartUploader.PartInfo(p.partNumber(), p.etag()))
+                    .toList();
+            multipartUploader.completeMultipartUpload(bucket, objectId, uploadId, converted);
+            log.info("Multipart upload completed: bucket={}, object={}, parts={}",
+                    bucket, objectId, parts.size());
+        } catch (Exception e) {
+            throw new RuntimeException("MinIO completeMultipartUpload failed: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public void abortMultipartUpload(String bucket, String objectId, String uploadId) {
+        try {
+            multipartUploader.abortMultipartUpload(bucket, objectId, uploadId);
+            log.info("Multipart upload aborted: bucket={}, object={}, uploadId={}",
+                    bucket, objectId, uploadId);
+        } catch (Exception e) {
+            throw new RuntimeException("MinIO abortMultipartUpload failed: " + e.getMessage(), e);
         }
     }
 

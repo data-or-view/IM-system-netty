@@ -85,6 +85,8 @@ class RevokeE2ETest extends BaseE2ETest {
 
             // 等待异步持久化完成
             Thread.sleep(500);
+            // 排掉已投递的消息（MessageEncoder 现在会推送消息给接收方）
+            drainQueue(ws2In);
 
             // ── 撤回消息 ──
             String revokeReq = "{\"op\":\"msg_revoke\",\"seq\":1,\"Authorization\":\"" + senderToken

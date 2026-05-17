@@ -64,6 +64,7 @@ im:
     api-key: "devkey"
     api-secret: "im-system-livekit-secret-2024"
     sfu-endpoint: "ws://localhost:7880"
+    timeout-seconds: 30          # 通话超时秒数（超时未接听自动 TIMEOUT）
 
   # ── MinIO 文件存储 ──
   minio:

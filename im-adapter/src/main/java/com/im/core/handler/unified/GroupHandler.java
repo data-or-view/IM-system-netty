@@ -37,6 +37,7 @@ public class GroupHandler implements RequestHandler {
             case "group.info" -> handleInfo(req);
             case "group.search" -> handleSearch(req);
             case "group.members" -> handleMembers(req);
+            case "group.mute_all" -> handleMuteAll(req);
             default -> throw new ImException(ImErrorCode.NOT_FOUND, "unsupported: " + req.operation());
         };
     }
@@ -136,5 +137,16 @@ public class GroupHandler implements RequestHandler {
         if (groupId == null) throw new ImException(ImErrorCode.BAD_REQUEST, "groupId is required");
         List<GroupMemberInformation> members = groupManager.getMemberList(groupId);
         return Map.of("groupId", groupId, "members", members, "count", members.size());
+    }
+
+    private Object handleMuteAll(ApiRequest req) {
+        String groupId = req.getString("groupId");
+        String operatorId = req.currentUserId();
+        boolean mute = req.getBoolean("mute", true);
+        if (groupId == null || operatorId == null) {
+            throw new ImException(ImErrorCode.UNAUTHORIZED, "groupId is required");
+        }
+        groupManager.muteGroupAll(groupId, operatorId, mute);
+        return Map.of("status", "OK", "mute", mute);
     }
 }

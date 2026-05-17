@@ -1,5 +1,6 @@
 package com.im.bootstrap;
 
+import com.im.bootstrap.ws.MessageEncoder;
 import com.im.bootstrap.ws.WsRequestAdapter;
 import com.im.core.dispatcher.ApiDispatcher;
 import io.netty.bootstrap.ServerBootstrap;
@@ -67,6 +68,7 @@ public class WsServerBootstrap {
                         p.addLast(new WebSocketServerProtocolHandler(
                                 "/ws", null, true, 65536));
                         p.addLast(connectionEventHandler);
+                        p.addLast(new MessageEncoder());
                         p.addLast(new WsRequestAdapter(dispatcher, virtualExecutor));
                     }
                 });

@@ -8,26 +8,29 @@ import java.util.UUID;
 
 public class FileUploadUseCase {
 
-    /** 最大文件大小：10 MB */
-    public static final int MAX_FILE_SIZE = 10 * 1024 * 1024;
-
     private static final String DEFAULT_BUCKET = "im-system";
 
     private final IFileStorageService fileStorage;
+    private final long maxFileSize;
 
     public FileUploadUseCase(IFileStorageService fileStorage) {
-        this.fileStorage = fileStorage;
+        this(fileStorage, 100L * 1024 * 1024);
     }
 
-    public record FileUploadResult(String fileUrl, String fileId, String fileName, String mimeType, int fileSize) {}
+    public FileUploadUseCase(IFileStorageService fileStorage, long maxFileSize) {
+        this.fileStorage = fileStorage;
+        this.maxFileSize = maxFileSize;
+    }
+
+    public record FileUploadResult(String fileUrl, String fileId, String fileName, String mimeType, long fileSize) {}
 
     public FileUploadResult execute(String fileName, String mimeType, byte[] body) {
         if (body == null || body.length == 0) {
             throw new ImException(ImErrorCode.BAD_REQUEST, "file body is empty");
         }
-        if (body.length > MAX_FILE_SIZE) {
+        if (body.length > maxFileSize) {
             throw new ImException(ImErrorCode.BAD_REQUEST,
-                    "file too large: " + body.length + " (max " + MAX_FILE_SIZE + ")");
+                    "file too large: " + body.length + " (max " + maxFileSize + ")");
         }
 
         String ext = extractExtension(fileName);

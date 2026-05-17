@@ -1,7 +1,10 @@
 package com.im.core.store;
 
 import com.im.api.Message;
+import com.im.api.SearchMessagesParam;
+import com.im.api.SearchMessagesResult;
 import com.im.api.IMessageStore;
+import com.im.api.content.ContentType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -127,6 +130,59 @@ public class LocalMessageStore implements IMessageStore {
                 return userId.equals(msg.getToUserId()) && seqOf(msg) < seqId;
             });
         }
+    }
+
+    @Override
+    public SearchMessagesResult searchMessages(SearchMessagesParam param) {
+        if (param == null || param.getUserId() == null) {
+            return SearchMessagesResult.empty();
+        }
+
+        Set<Integer> contentTypeFilter = null;
+        if (param.getContentTypeFilter() != null && !param.getContentTypeFilter().isEmpty()) {
+            contentTypeFilter = new HashSet<>(param.getContentTypeFilter().size());
+            for (String typeName : param.getContentTypeFilter()) {
+                try {
+                    contentTypeFilter.add(ContentType.valueOf(typeName.toUpperCase()).getId());
+                } catch (IllegalArgumentException e) {
+                    // skip
+                }
+            }
+        }
+
+        Set<String> convFilter = param.getConversationIds() != null
+                ? new HashSet<>(param.getConversationIds()) : null;
+
+        List<Message> all = new ArrayList<>();
+        for (Map.Entry<String, CopyOnWriteArrayList<Message>> entry : conversationStore.entrySet()) {
+            String convId = entry.getKey();
+            if (convFilter != null && !convFilter.contains(convId)) continue;
+
+            for (Message msg : entry.getValue()) {
+                if (msg.getStatus() != 0) continue;
+                if (param.getKeyword() != null && !param.getKeyword().isEmpty()
+                        && (msg.getContent() == null || !msg.getContent().contains(param.getKeyword())))
+                    continue;
+                if (contentTypeFilter != null && !contentTypeFilter.contains(msg.getContentType()))
+                    continue;
+                if (param.getSenderId() != null && !param.getSenderId().equals(msg.getFromUserId()))
+                    continue;
+                if (param.getStartTime() != null && msg.getTimestamp() < param.getStartTime())
+                    continue;
+                if (param.getEndTime() != null && msg.getTimestamp() > param.getEndTime())
+                    continue;
+                all.add(msg);
+            }
+        }
+
+        all.sort((a, b) -> Long.compare(b.getTimestamp(), a.getTimestamp()));
+
+        int total = all.size();
+        int from = Math.min(param.getOffset(), total);
+        int to = Math.min(from + param.getLimit(), total);
+        boolean hasMore = to < total;
+
+        return new SearchMessagesResult(all.subList(from, to), total, hasMore);
     }
 
     @Override

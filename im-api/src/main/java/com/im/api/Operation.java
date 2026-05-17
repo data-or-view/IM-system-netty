@@ -29,6 +29,9 @@ public enum Operation {
     FRIEND_BLACK("friend.black", "POST", "/api/friend/black", true),
     FRIEND_UNBLACK("friend.unblack", "POST", "/api/friend/unblack", true),
     FRIEND_BLACKLIST("friend.blacklist", "GET", "/api/friend/blacklist", true),
+    FRIEND_APPLY_SENT("friend.get_sent_apply_list", "GET", "/api/friend/apply/sent", true),
+    FRIEND_APPLY_DETAIL("friend.get_apply_detail", "GET", "/api/friend/apply/detail", true),
+    FRIEND_APPLY_UNHANDLED_COUNT("friend.get_unhandled_apply_count", "GET", "/api/friend/apply/unhandled/count", true),
 
     // ── 群组 ──
     GROUP_CREATE("group.create", "POST", "/api/group/create", true),
@@ -40,6 +43,7 @@ public enum Operation {
     GROUP_INFO("group.info", "GET", "/api/group/info", true),
     GROUP_SEARCH("group.search", "GET", "/api/group/search", true),
     GROUP_MEMBERS("group.members", "GET", "/api/group/members", true),
+    GROUP_MUTE_ALL("group.mute_all", "POST", "/api/group/mute/all", true),
 
     // ── 会话 ──
     CONVERSATION_LIST("conversation.list", "GET", "/api/conversation/list", true),
@@ -50,12 +54,17 @@ public enum Operation {
     CHAT_PULL("chat.pull", "POST", "/api/msg/pull", true),
     CHAT_SEQ("chat.seq", "GET", "/api/msg/seq", true),
     CHAT_SYNC("chat.sync", "POST", "/api/msg/sync", true),
+    CHAT_SEARCH("chat.search", "POST", "/api/msg/search", true),
     CHAT_SEND("chat.send", null, null, true),
     CHAT_SEND_GROUP("chat.send.group", null, null, true),
     CHAT_REVOKE("msg_revoke", "POST", "/api/msg/revoke", true),
 
     // ── 文件 ──
     FILE_UPLOAD("file.upload", "POST", "/api/file/upload", true),
+    FILE_MULTIPART_INIT("file.multipart.init", "POST", "/api/file/multipart/init", true),
+    FILE_MULTIPART_UPLOAD("file.multipart.upload", "POST", "/api/file/multipart/upload", true),
+    FILE_MULTIPART_COMPLETE("file.multipart.complete", "POST", "/api/file/multipart/complete", true),
+    FILE_MULTIPART_ABORT("file.multipart.abort", "POST", "/api/file/multipart/abort", true),
 
     // ── WS 独有（无 HTTP 映射） ──
     LOGIN("login", null, null, false),

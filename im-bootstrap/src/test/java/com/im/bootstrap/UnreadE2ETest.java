@@ -84,6 +84,8 @@ class UnreadE2ETest extends BaseE2ETest {
 
             // 等待异步持久化 + 会话更新完成
             Thread.sleep(1000);
+            // 排掉已投递的消息（MessageEncoder 现在会推送消息给接收方）
+            drainQueue(ws2In);
 
             // ── 接收方调用已读 ──
             String readReq = "{\"op\":\"conversation.read\",\"seq\":1,\"Authorization\":\"" + receiverToken

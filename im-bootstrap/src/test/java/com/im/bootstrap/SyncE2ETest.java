@@ -86,6 +86,8 @@ class SyncE2ETest extends BaseE2ETest {
 
             // 等待异步持久化完成
             Thread.sleep(500);
+            // 排掉已投递的消息（MessageEncoder 现在会推送消息给接收方）
+            drainQueue(ws2In);
 
             // ── 接收方调用 chat.sync（已知 seq=0，拉取全部）──
             String syncReq = "{\"op\":\"chat.sync\",\"seq\":1,\"Authorization\":\"" + receiverToken

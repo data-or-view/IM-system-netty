@@ -20,7 +20,19 @@ public enum ContentType {
     /** 系统通知（无 body，仅 headers） */
     SYSTEM(4),
     /** 音视频通话信令（通过 SFU 传输媒体，IM 管道仅做信令转发） */
-    SIGNAL(5);
+    SIGNAL(5),
+    /** 语音消息 */
+    VOICE(6),
+    /** 视频消息 */
+    VIDEO(7),
+    /** 位置消息 */
+    LOCATION(8),
+    /** @提及消息 */
+    AT_TEXT(9),
+    /** 引用回复 */
+    QUOTE(10),
+    /** 自定义消息（红包、名片等业务数据） */
+    CUSTOM(11);
 
     private final int id;
 

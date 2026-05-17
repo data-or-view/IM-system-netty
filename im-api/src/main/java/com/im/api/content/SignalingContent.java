@@ -37,13 +37,7 @@ public class SignalingContent implements IMessageContent {
     private int duration;
 
     /** Jackson 反序列化用 */
-    private SignalingContent() {
-        this.action = null;
-        this.roomId = null;
-        this.token = null;
-        this.sdp = null;
-        this.ice = null;
-        this.duration = 0;
+    public SignalingContent() {
     }
 
     public SignalingContent(SignalingAction action, String roomId, String token,
@@ -78,4 +72,11 @@ public class SignalingContent implements IMessageContent {
     public String getSdp() { return sdp; }
     public String getIce() { return ice; }
     public int getDuration() { return duration; }
+
+    public void setAction(SignalingAction action) { this.action = action; }
+    public void setRoomId(String roomId) { this.roomId = roomId; }
+    public void setToken(String token) { this.token = token; }
+    public void setSdp(String sdp) { this.sdp = sdp; }
+    public void setIce(String ice) { this.ice = ice; }
+    public void setDuration(int duration) { this.duration = duration; }
 }

@@ -20,6 +20,7 @@ public class FileContent implements IMessageContent {
             "json", "xml", "csv", "md"
     );
 
+    private String uuid;
     private String fileName;
     private long fileSize;
     private String url;
@@ -27,11 +28,15 @@ public class FileContent implements IMessageContent {
     /** Jackson 反序列化用 */
     public FileContent() {}
 
-    public FileContent(String fileName, long fileSize, String url) {
+    public FileContent(String uuid, String fileName, long fileSize, String url) {
+        this.uuid = uuid;
         this.fileName = fileName;
         this.fileSize = fileSize;
         this.url = url;
     }
+
+    public String getUuid() { return uuid; }
+    public void setUuid(String uuid) { this.uuid = uuid; }
 
     public String getFileName() { return fileName; }
     public void setFileName(String fileName) { this.fileName = fileName; }
@@ -79,12 +84,13 @@ public class FileContent implements IMessageContent {
         if (this == o) return true;
         if (!(o instanceof FileContent that)) return false;
         return fileSize == that.fileSize
+                && Objects.equals(uuid, that.uuid)
                 && Objects.equals(fileName, that.fileName)
                 && Objects.equals(url, that.url);
     }
 
     @Override
-    public int hashCode() { return Objects.hash(fileName, fileSize, url); }
+    public int hashCode() { return Objects.hash(uuid, fileName, fileSize, url); }
 
     @Override
     public String toString() {

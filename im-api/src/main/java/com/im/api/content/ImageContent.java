@@ -1,102 +1,138 @@
 package com.im.api.content;
 
 import java.util.Objects;
-import java.util.Set;
 
 /**
- * 图片消息内容。
- * 支持主流图片格式 + 最大 20MB。
+ * 图片消息内容（三级图片结构）。
+ * 对标 OpenIM PictureElem → sourcePicture / bigPicture / snapshotPicture。
  */
 public class ImageContent implements IMessageContent {
 
-    /** 最大图片 20MB */
-    public static final long MAX_IMAGE_SIZE = 20L * 1024 * 1024;
+    /** 原图信息 */
+    private PictureInfo sourcePicture;
+    /** 大图（服务端/客户端压缩后的适配版本） */
+    private PictureInfo bigPicture;
+    /** 缩略图（聊天列表等场景使用） */
+    private PictureInfo snapshotPicture;
 
-    /** 最大尺寸 */
-    public static final int MAX_DIMENSION = 16384;
-
-    private static final Set<String> ALLOWED_FORMATS = Set.of(
-            "png", "jpg", "jpeg", "gif", "webp", "bmp"
-    );
-
-    private int width;
-    private int height;
-    private String format;
-    private long fileSize;
-    private String url;
-
-    /** Jackson 反序列化用 */
     public ImageContent() {}
 
-    public ImageContent(int width, int height, String format, long fileSize, String url) {
-        this.width = width;
-        this.height = height;
-        this.format = format;
-        this.fileSize = fileSize;
-        this.url = url;
+    public ImageContent(PictureInfo sourcePicture, PictureInfo bigPicture, PictureInfo snapshotPicture) {
+        this.sourcePicture = sourcePicture;
+        this.bigPicture = bigPicture;
+        this.snapshotPicture = snapshotPicture;
     }
 
-    public int getWidth() { return width; }
-    public void setWidth(int width) { this.width = width; }
+    public PictureInfo getSourcePicture() { return sourcePicture; }
+    public void setSourcePicture(PictureInfo sourcePicture) { this.sourcePicture = sourcePicture; }
 
-    public int getHeight() { return height; }
-    public void setHeight(int height) { this.height = height; }
+    public PictureInfo getBigPicture() { return bigPicture; }
+    public void setBigPicture(PictureInfo bigPicture) { this.bigPicture = bigPicture; }
 
-    public String getFormat() { return format; }
-    public void setFormat(String format) { this.format = format; }
-
-    public long getFileSize() { return fileSize; }
-    public void setFileSize(long fileSize) { this.fileSize = fileSize; }
-
-    public String getUrl() { return url; }
-    public void setUrl(String url) { this.url = url; }
+    public PictureInfo getSnapshotPicture() { return snapshotPicture; }
+    public void setSnapshotPicture(PictureInfo snapshotPicture) { this.snapshotPicture = snapshotPicture; }
 
     @Override
     public ContentType getContentType() { return ContentType.IMAGE; }
 
     @Override
     public void validate() {
-        if (width <= 0 || height <= 0) {
-            throw new IllegalArgumentException(
-                    "image dimensions must be positive: " + width + "x" + height);
+        if (sourcePicture == null) {
+            throw new IllegalArgumentException("sourcePicture must not be null");
         }
-        if (width > MAX_DIMENSION || height > MAX_DIMENSION) {
-            throw new IllegalArgumentException(
-                    "image dimensions too large: " + width + "x" + height + " (max " + MAX_DIMENSION + ")");
-        }
-        if (format == null || format.isBlank()) {
-            throw new IllegalArgumentException("image format must not be null or blank");
-        }
-        if (!ALLOWED_FORMATS.contains(format.toLowerCase())) {
-            throw new IllegalArgumentException("unsupported image format: " + format);
-        }
-        if (fileSize <= 0) {
-            throw new IllegalArgumentException("image file size must be positive, got: " + fileSize);
-        }
-        if (fileSize > MAX_IMAGE_SIZE) {
-            throw new IllegalArgumentException(
-                    "image too large: " + fileSize + " bytes (max " + MAX_IMAGE_SIZE + ")");
-        }
-        if (url == null || url.isBlank()) {
-            throw new IllegalArgumentException("image URL must not be null or blank");
-        }
+        sourcePicture.validate();
+        if (bigPicture != null) bigPicture.validate();
+        if (snapshotPicture != null) snapshotPicture.validate();
     }
 
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
         if (!(o instanceof ImageContent that)) return false;
-        return width == that.width && height == that.height
-                && fileSize == that.fileSize
-                && Objects.equals(format, that.format)
-                && Objects.equals(url, that.url);
+        return Objects.equals(sourcePicture, that.sourcePicture)
+                && Objects.equals(bigPicture, that.bigPicture)
+                && Objects.equals(snapshotPicture, that.snapshotPicture);
     }
 
     @Override
-    public int hashCode() { return Objects.hash(width, height, format, fileSize, url); }
+    public int hashCode() { return Objects.hash(sourcePicture, bigPicture, snapshotPicture); }
 
     @Override
     public String toString() {
-        return "ImageContent{" + width + "x" + height + ", " + format + ", size=" + fileSize + "}";
+        return "ImageContent{source=" + sourcePicture + ", big=" + bigPicture + ", snapshot=" + snapshotPicture + "}";
+    }
+
+    /**
+     * 单张图片信息。
+     * 对标 OpenIM PictureBaseInfo。
+     */
+    public static class PictureInfo {
+        private String uuid;
+        private String type;      // MIME类型如 "image/png"
+        private long fileSize;
+        private int width;
+        private int height;
+        private String url;
+
+        public PictureInfo() {}
+
+        public PictureInfo(String uuid, String type, long fileSize, int width, int height, String url) {
+            this.uuid = uuid;
+            this.type = type;
+            this.fileSize = fileSize;
+            this.width = width;
+            this.height = height;
+            this.url = url;
+        }
+
+        public String getUuid() { return uuid; }
+        public void setUuid(String uuid) { this.uuid = uuid; }
+
+        public String getType() { return type; }
+        public void setType(String type) { this.type = type; }
+
+        public long getFileSize() { return fileSize; }
+        public void setFileSize(long fileSize) { this.fileSize = fileSize; }
+
+        public int getWidth() { return width; }
+        public void setWidth(int width) { this.width = width; }
+
+        public int getHeight() { return height; }
+        public void setHeight(int height) { this.height = height; }
+
+        public String getUrl() { return url; }
+        public void setUrl(String url) { this.url = url; }
+
+        public void validate() {
+            if (width <= 0 || height <= 0) {
+                throw new IllegalArgumentException("image dimensions must be positive: " + width + "x" + height);
+            }
+            if (type == null || type.isBlank()) {
+                throw new IllegalArgumentException("image type must not be null or blank");
+            }
+            if (fileSize <= 0) {
+                throw new IllegalArgumentException("image fileSize must be positive, got: " + fileSize);
+            }
+            if (url == null || url.isBlank()) {
+                throw new IllegalArgumentException("image url must not be null or blank");
+            }
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (!(o instanceof PictureInfo that)) return false;
+            return fileSize == that.fileSize && width == that.width && height == that.height
+                    && Objects.equals(uuid, that.uuid) && Objects.equals(type, that.type)
+                    && Objects.equals(url, that.url);
+        }
+
+        @Override
+        public int hashCode() { return Objects.hash(uuid, type, fileSize, width, height, url); }
+
+        @Override
+        public String toString() {
+            return width + "x" + height + "," + type + ",url=" + url;
+        }
     }
 }

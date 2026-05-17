@@ -33,6 +33,9 @@ public class FriendHandler implements RequestHandler {
             case "friend.black" -> handleAddBlack(req);
             case "friend.unblack" -> handleRemoveBlack(req);
             case "friend.blacklist" -> handleBlackList(req);
+            case "friend.get_sent_apply_list" -> handleSentApplyList(req);
+            case "friend.get_apply_detail" -> handleApplyDetail(req);
+            case "friend.get_unhandled_apply_count" -> handleUnhandledApplyCount(req);
             default -> throw new ImException(ImErrorCode.NOT_FOUND, "unsupported: " + req.operation());
         };
     }
@@ -101,5 +104,35 @@ public class FriendHandler implements RequestHandler {
         String userId = req.currentUserId();
         if (userId == null) throw new ImException(ImErrorCode.UNAUTHORIZED, "not authenticated");
         return Map.of("userId", userId, "blacklist", friendManager.getBlackList(userId));
+    }
+
+    private Object handleSentApplyList(ApiRequest req) {
+        String userId = req.currentUserId();
+        if (userId == null) throw new ImException(ImErrorCode.UNAUTHORIZED, "not authenticated");
+        var applies = friendManager.getSentFriendApplyList(userId);
+        return Map.of("applies", applies, "count", applies.size());
+    }
+
+    private Object handleApplyDetail(ApiRequest req) {
+        String userId = req.currentUserId();
+        String fromUserId = req.getString("fromUserId");
+        String toUserId = req.getString("toUserId");
+        if (userId == null || fromUserId == null || toUserId == null) {
+            throw new ImException(ImErrorCode.BAD_REQUEST, "fromUserId and toUserId are required");
+        }
+        // 只有申请双方可以查看详情
+        if (!userId.equals(fromUserId) && !userId.equals(toUserId)) {
+            throw new ImException(ImErrorCode.UNAUTHORIZED, "not authorized to view this apply");
+        }
+        var apply = friendManager.getFriendApplyDetail(fromUserId, toUserId);
+        if (apply == null) throw new ImException(ImErrorCode.NOT_FOUND, "friend apply not found");
+        return apply;
+    }
+
+    private Object handleUnhandledApplyCount(ApiRequest req) {
+        String userId = req.currentUserId();
+        if (userId == null) throw new ImException(ImErrorCode.UNAUTHORIZED, "not authenticated");
+        int count = friendManager.getUnhandledApplyCount(userId);
+        return Map.of("count", count);
     }
 }

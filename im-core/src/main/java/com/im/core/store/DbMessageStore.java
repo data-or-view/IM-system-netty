@@ -3,6 +3,8 @@ package com.im.core.store;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.im.api.Message;
+import com.im.api.SearchMessagesParam;
+import com.im.api.SearchMessagesResult;
 import com.im.api.IMessageStore;
 import com.im.core.db.MyBatisPlusFactory;
 import com.im.core.db.entity.MessageEntity;
@@ -10,6 +12,7 @@ import com.im.core.db.mapper.MessageMapper;
 import com.im.common.retry.RetryConfig;
 import com.im.common.retry.RetryExecutor;
 import com.im.common.retry.RetryStrategies;
+import com.im.api.content.ContentType;
 import org.apache.ibatis.session.SqlSession;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -164,6 +167,57 @@ public class DbMessageStore implements IMessageStore {
                 return updated > 0;
             }
         });
+    }
+
+    @Override
+    public SearchMessagesResult searchMessages(SearchMessagesParam param) {
+        if (param == null || param.getUserId() == null) {
+            return SearchMessagesResult.empty();
+        }
+
+        // 解析 contentTypeFilter: String → int IDs
+        List<Integer> contentTypeIds = null;
+        if (param.getContentTypeFilter() != null && !param.getContentTypeFilter().isEmpty()) {
+            contentTypeIds = new ArrayList<>(param.getContentTypeFilter().size());
+            for (String typeName : param.getContentTypeFilter()) {
+                try {
+                    ContentType ct = ContentType.valueOf(typeName.toUpperCase());
+                    contentTypeIds.add(ct.getId());
+                } catch (IllegalArgumentException e) {
+                    // 跳过未知类型
+                }
+            }
+        }
+
+        try (SqlSession session = MyBatisPlusFactory.openSession()) {
+            MessageMapper mapper = session.getMapper(MessageMapper.class);
+
+            long total = mapper.countByKeyword(
+                    param.getConversationIds(), param.getKeyword(),
+                    contentTypeIds, param.getSenderId(),
+                    param.getStartTime(), param.getEndTime());
+
+            int limit = param.getLimit();
+            int offset = param.getOffset();
+            // 多查一行判断 hasMore
+            List<MessageEntity> entities = mapper.selectByKeyword(
+                    param.getConversationIds(), param.getKeyword(),
+                    contentTypeIds, param.getSenderId(),
+                    param.getStartTime(), param.getEndTime(),
+                    limit + 1, offset);
+
+            boolean hasMore = entities.size() > limit;
+            if (hasMore) {
+                entities = entities.subList(0, limit);
+            }
+
+            List<Message> messages = new ArrayList<>(entities.size());
+            for (MessageEntity e : entities) {
+                messages.add(toMessage(e));
+            }
+
+            return new SearchMessagesResult(messages, (int) total, hasMore);
+        }
     }
 
     // ========== Entity / Message 互转 ==========

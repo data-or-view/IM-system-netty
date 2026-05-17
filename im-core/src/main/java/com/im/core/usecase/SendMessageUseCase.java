@@ -9,6 +9,7 @@ import com.im.api.content.IMessageContent;
 import com.im.core.handler.ContentSerializer;
 import com.im.core.handler.WebhookService;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -83,6 +84,7 @@ public class SendMessageUseCase {
     private SendMessageResult handleGroupChat(Map<String, Object> params, String fromUserId,
                                                String groupId, IMessageContent content) {
         if (groupManager != null && !groupManager.isMember(groupId, fromUserId)) return null;
+        if (groupManager != null && groupManager.isMemberMuted(groupId, fromUserId)) return null;
 
         if (!webhookService.beforeSendGroup(params, fromUserId, groupId, content)) return null;
 
@@ -122,7 +124,11 @@ public class SendMessageUseCase {
         // 内容类型
         if (content != null) {
             msg.setContentType(content.getContentType().getId());
-            msg.setBody(ContentSerializer.toBytes(content));
+            byte[] bytes = ContentSerializer.toBytes(content);
+            msg.setBody(bytes);
+            // content 字段给 MessageEncoder 推送客户端用
+            msg.setContent(bytes != null && bytes.length > 0
+                    ? new String(bytes, StandardCharsets.UTF_8) : null);
         }
 
         return msg;

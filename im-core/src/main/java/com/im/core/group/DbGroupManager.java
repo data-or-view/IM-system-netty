@@ -320,6 +320,37 @@ public class DbGroupManager implements IGroupManager {
         sync.recordChange(groupId, "member", targetUserId, "update");
     }
 
+    private static final long FAR_FUTURE = 253402300799999L; // 9999-12-31 毫秒
+
+    @Override
+    public void muteGroupAll(String groupId, String operatorId, boolean mute) {
+        // 校验操作者身份
+        GroupMemberEntity operator = getMemberInSession(null, groupId, operatorId);
+        if (operator == null || operator.getRoleLevel() < 100) {
+            log.warn("Only admin can toggle mute-all: groupId={}, operator={}", groupId, operatorId);
+            return;
+        }
+
+        long muteEndTime = mute ? FAR_FUTURE : 0;
+        retryExecutor.execute(CFG, () -> {
+            try (SqlSession session = MyBatisPlusFactory.openSession()) {
+                GroupMemberMapper mapper = session.getMapper(GroupMemberMapper.class);
+                int updated = mapper.batchSetMuteEndTime(groupId, muteEndTime);
+                session.commit();
+                log.info("Group mute-all {}: groupId={}, operator={}, affected={}",
+                        mute ? "enabled" : "disabled", groupId, operatorId, updated);
+            }
+            return null;
+        });
+    }
+
+    @Override
+    public boolean isMemberMuted(String groupId, String userId) {
+        GroupMemberEntity member = getMemberInSession(null, groupId, userId);
+        if (member == null) return false;
+        return member.getMuteEndTime() > 0 && member.getMuteEndTime() > System.currentTimeMillis();
+    }
+
     @Override
     public void joinGroup(String groupId, String userId, String reqMsg) {
         long now = System.currentTimeMillis();

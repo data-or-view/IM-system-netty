@@ -5,6 +5,8 @@ import com.im.api.ApiRequest;
 import com.im.api.IMessageStore;
 import com.im.api.ISequenceManager;
 import com.im.api.RequestHandler;
+import com.im.api.SearchMessagesParam;
+import com.im.api.SearchMessagesResult;
 import com.im.common.enums.ImErrorCode;
 import com.im.common.exception.ImException;
 import com.im.core.serialization.jackson.ObjectMapperProvider;
@@ -40,6 +42,7 @@ public class MessageHandler implements RequestHandler {
             case "chat.pull" -> handlePull(req);
             case "chat.seq" -> handleSeq(req);
             case "chat.sync" -> handleSync(req);
+            case "chat.search" -> handleSearch(req);
             default -> throw new ImException(ImErrorCode.NOT_FOUND, "unsupported: " + req.operation());
         };
     }
@@ -119,5 +122,53 @@ public class MessageHandler implements RequestHandler {
         }
 
         return Map.of("syncs", syncs);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Object handleSearch(ApiRequest req) {
+        String userId = req.currentUserId();
+        if (userId == null) throw new ImException(ImErrorCode.UNAUTHORIZED, "not authenticated");
+
+        String keyword = req.getString("keyword");
+        List<String> contentTypeFilter = (List<String>) req.params().get("contentTypeFilter");
+        List<String> conversationIds = (List<String>) req.params().get("conversationIds");
+        Number startTimeVal = (Number) req.params().get("startTime");
+        Long startTime = startTimeVal != null ? startTimeVal.longValue() : null;
+        Number endTimeVal = (Number) req.params().get("endTime");
+        Long endTime = endTimeVal != null ? endTimeVal.longValue() : null;
+        String senderId = req.getString("senderId");
+        int limit = req.getInt("limit", 20);
+        int offset = req.getInt("offset", 0);
+
+        SearchMessagesParam param = SearchMessagesParam.builder()
+                .userId(userId)
+                .keyword(keyword)
+                .contentTypeFilter(contentTypeFilter)
+                .conversationIds(conversationIds)
+                .startTime(startTime)
+                .endTime(endTime)
+                .senderId(senderId)
+                .limit(limit)
+                .offset(offset)
+                .build();
+
+        SearchMessagesResult result = messageStore.searchMessages(param);
+
+        @SuppressWarnings({"rawtypes", "unchecked"})
+        List<Map> rawMaps = result.getMessages().stream()
+                .map(msg -> {
+                    try {
+                        return MAPPER.convertValue(msg, Map.class);
+                    } catch (Exception e) {
+                        return Map.of("error", "serialization failed");
+                    }
+                })
+                .collect(Collectors.toList());
+
+        return Map.of(
+                "messages", rawMaps,
+                "totalCount", result.getTotalCount(),
+                "hasMore", result.hasMore()
+        );
     }
 }

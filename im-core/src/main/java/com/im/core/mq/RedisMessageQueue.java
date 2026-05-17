@@ -5,12 +5,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.im.api.Message;
 import com.im.api.IMessageQueue;
 import com.im.core.redis.RedisConfiguration;
+import com.im.core.redis.RedisConfiguration.CloseableRedisCommands;
 import com.im.core.serialization.jackson.ObjectMapperProvider;
 import io.lettuce.core.Consumer;
+import io.lettuce.core.api.sync.RedisCommands;
 import io.lettuce.core.XReadArgs;
 import io.lettuce.core.XGroupCreateArgs;
 import io.lettuce.core.cluster.api.async.RedisClusterAsyncCommands;
-import io.lettuce.core.api.sync.RedisCommands;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -49,8 +50,8 @@ public class RedisMessageQueue implements IMessageQueue {
     /** Consumer Group 前缀 */
     static final String GROUP_PREFIX = "im:mq:group:";
 
-    /** XREADGROUP BLOCK 超时 */
-    private static final Duration BLOCK_TIMEOUT = Duration.ofSeconds(3);
+    /** XREADGROUP BLOCK 超时（必须小于 Redis command timeout 以避免 RedisCommandTimeoutException） */
+    private static final Duration BLOCK_TIMEOUT = Duration.ofSeconds(2);
 
     /** 每次 XREADGROUP 最大条数 */
     private static final int BATCH_SIZE = 10;
@@ -110,13 +111,33 @@ public class RedisMessageQueue implements IMessageQueue {
             return;
         }
 
+        String json;
         try {
-            String json = serialize(msg);
-            String streamKey = streamKey(topic);
+            json = serialize(msg);
+        } catch (Exception e) {
+            log.error("Failed to serialize message for topic '{}': {}", topic, e.getMessage(), e);
+            return;
+        }
+
+        String streamKey = streamKey(topic);
+
+        // 先尝试异步发送（共享连接）
+        try {
             async.xadd(streamKey, "payload", json);
             log.trace("Published to topic '{}': seqId={}", topic, msg.getSequenceId());
+            return;
         } catch (Exception e) {
-            log.error("Failed to publish to topic '{}': {}", topic, e.getMessage(), e);
+            log.warn("Async publish failed for topic '{}', falling back to sync: {}",
+                    topic, e.getMessage());
+        }
+
+        // 异步发送失败时，使用专用同步连接重试（不共享 async 连接，避免竞争）
+        try (CloseableRedisCommands redis = redisConfig.createSyncCommands()) {
+            RedisCommands<String, String> sync = redis.sync();
+            sync.xadd(streamKey, "payload", json);
+            log.info("Published to topic '{}' via sync fallback: seqId={}", topic, msg.getSequenceId());
+        } catch (Exception e2) {
+            log.error("Sync fallback also failed for topic '{}': {}", topic, e2.getMessage(), e2);
         }
     }
 

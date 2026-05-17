@@ -227,6 +227,36 @@ public class LocalFriendManager implements IFriendManager {
                 });
     }
 
+    // ── 好友申请查询 ──
+
+    @Override
+    public List<FriendApply> getSentFriendApplyList(String userId) {
+        ConcurrentMap<String, FriendApply> fromApplies = applies.get(userId);
+        if (fromApplies == null) return List.of();
+        List<FriendApply> result = new ArrayList<>(fromApplies.values());
+        result.sort((a, b) -> Long.compare(b.getCreateTime(), a.getCreateTime()));
+        return result;
+    }
+
+    @Override
+    public FriendApply getFriendApplyDetail(String fromUserId, String toUserId) {
+        ConcurrentMap<String, FriendApply> fromApplies = applies.get(fromUserId);
+        if (fromApplies == null) return null;
+        return fromApplies.get(toUserId);
+    }
+
+    @Override
+    public int getUnhandledApplyCount(String userId) {
+        int count = 0;
+        for (ConcurrentMap<String, FriendApply> fromApplies : applies.values()) {
+            FriendApply apply = fromApplies.get(userId);
+            if (apply != null && apply.getHandleResult() == 0) {
+                count++;
+            }
+        }
+        return count;
+    }
+
     @Override
     public IncrementalSyncResult<String> getIncrementalBlacks(String userId, long version) {
         return sync.getChangesAsIds(userId, "black", version);

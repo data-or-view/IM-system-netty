@@ -8,18 +8,25 @@ import com.im.config.ConfigLoader;
 import com.im.config.YamlConfigSource;
 import com.im.core.auth.HmacTokenAuthenticator;
 import com.im.core.cache.ConcurrentHashCache;
+import com.im.core.call.CallStateManager;
+import com.im.core.call.LiveKitCallManager;
 import com.im.core.conversation.DbConversationManager;
 import com.im.core.conversation.LocalConversationManager;
 import com.im.core.conversation.RedisConversationManager;
 import com.im.core.db.DatabaseConfiguration;
 import com.im.core.db.MyBatisPlusFactory;
 import com.im.core.db.SchemaInitializer;
-import com.im.core.delivery.*;
+import com.im.core.delivery.ClusterDeliveryHandler;
+import com.im.core.delivery.DeliveryConsumer;
+import com.im.core.delivery.LocalClusterMessageBus;
+import com.im.core.delivery.PersistenceConsumer;
+import com.im.core.delivery.RedisClusterMessageBus;
 import com.im.core.discovery.*;
 import com.im.core.dispatcher.ApiDispatcher;
 import com.im.core.dispatcher.PendingAcknowledgementManager;
 import com.im.infrastructure.storage.file.MinioFileStorageService;
 import com.im.infrastructure.storage.usecase.FileUploadUseCase;
+import com.im.infrastructure.storage.usecase.MultipartUploadUseCase;
 import com.im.core.friend.DbFriendManager;
 import com.im.core.friend.LocalFriendManager;
 import com.im.core.group.DbGroupManager;
@@ -82,6 +89,7 @@ public class IMServer implements Lifecycle {
     private final DeliveryConsumer deliveryConsumer;
     private final IMessageStore messageStore;
     private final IFileStorageService fileStorage;
+    private CallStateManager callStateManager;
     private final ExecutorService virtualExecutor;
     private static boolean databaseFailed = false;
 
@@ -136,16 +144,36 @@ public class IMServer implements Lifecycle {
                 config.getString("im.minio.access-key").orElse("minioadmin"),
                 config.getString("im.minio.secret-key").orElse("minioadmin"));
 
+        // RTC 通话（LiveKit）— callManager 只在此处创建，不依赖 messageQueue
+        ICallManager callManager = null;
+        if (config.getBoolean("im.call.enabled", false)) {
+            callManager = new LiveKitCallManager(
+                    config.getString("im.call.api-key", "devkey"),
+                    config.getString("im.call.api-secret", ""),
+                    config.getString("im.call.sfu-endpoint", "ws://localhost:7880"));
+            log.info("LiveKitCallManager enabled: endpoint={}", config.getString("im.call.sfu-endpoint"));
+        }
+
         // 消息存储 + 队列
         this.messageStore = dbEnabled() ? new DbMessageStore(retryExecutor) : new LocalMessageStore();
         this.messageQueue = redisConfig != null
                 ? new RedisMessageQueue(redisConfig, nodeId)
                 : new MemoryMessageQueue();
 
+        // 通话超时管理（依赖 messageQueue，需在其之后初始化）
+        this.callStateManager = (callManager != null)
+                ? new CallStateManager(messageQueue, config.getLong("im.call.timeout-seconds", 30))
+                : null;
+
         // 消费者
         this.persistenceConsumer = new PersistenceConsumer(messageQueue, messageStore, conversationManager, groupManager);
         this.deliveryConsumer = new DeliveryConsumer(
                 messageQueue, sessionManager, routeTable, clusterMessageBus, nodeId, groupManager);
+
+        // 注册集群消息处理器（接收远端节点转发来的消息，投递到本地 session）
+        ClusterDeliveryHandler clusterDeliveryHandler = new ClusterDeliveryHandler(sessionManager);
+        clusterMessageBus.subscribe("SINGLE_CHAT", clusterDeliveryHandler);
+        clusterMessageBus.subscribe("GROUP_CHAT", clusterDeliveryHandler);
 
         // 连接事件
         this.connectionEventHandler = new ConnectionEventHandler(
@@ -167,17 +195,19 @@ public class IMServer implements Lifecycle {
                 Operation.USER_REGISTER, Operation.USER_INFO, Operation.USER_SEARCH, Operation.USER_UPDATE);
         dispatcher.registerHandlers(new com.im.core.handler.unified.FriendHandler(friendManager),
                 Operation.FRIEND_APPLY, Operation.FRIEND_APPROVE, Operation.FRIEND_REMOVE, Operation.FRIEND_LIST,
-                Operation.FRIEND_BLACK, Operation.FRIEND_UNBLACK, Operation.FRIEND_BLACKLIST);
+                Operation.FRIEND_BLACK, Operation.FRIEND_UNBLACK, Operation.FRIEND_BLACKLIST,
+                Operation.FRIEND_APPLY_SENT, Operation.FRIEND_APPLY_DETAIL, Operation.FRIEND_APPLY_UNHANDLED_COUNT);
         dispatcher.registerHandlers(new com.im.core.handler.unified.GroupHandler(groupManager),
                 Operation.GROUP_CREATE, Operation.GROUP_JOIN, Operation.GROUP_QUIT, Operation.GROUP_KICK,
                 Operation.GROUP_DISBAND, Operation.GROUP_INFO_UPDATE, Operation.GROUP_INFO,
-                Operation.GROUP_SEARCH, Operation.GROUP_MEMBERS);
+                Operation.GROUP_SEARCH, Operation.GROUP_MEMBERS, Operation.GROUP_MUTE_ALL);
         dispatcher.registerHandlers(new com.im.core.handler.unified.ConversationHandler(conversationManager),
                 Operation.CONVERSATION_LIST, Operation.CONVERSATION_SET, Operation.CONVERSATION_READ);
         dispatcher.registerHandlers(new com.im.core.handler.unified.MessageHandler(messageStore, sequenceManager),
-                Operation.CHAT_PULL, Operation.CHAT_SEQ, Operation.CHAT_SYNC);
-        dispatcher.registerHandler(Operation.CHAT_SEND, new com.im.core.handler.unified.ChatHandler(sendMessageUseCase));
-        dispatcher.registerHandler(Operation.CHAT_SEND_GROUP, new com.im.core.handler.unified.ChatHandler(sendMessageUseCase));
+                Operation.CHAT_PULL, Operation.CHAT_SEQ, Operation.CHAT_SYNC, Operation.CHAT_SEARCH);
+        var chatHandler = new com.im.core.handler.unified.ChatHandler(sendMessageUseCase, callManager, this.callStateManager);
+        dispatcher.registerHandler(Operation.CHAT_SEND, chatHandler);
+        dispatcher.registerHandler(Operation.CHAT_SEND_GROUP, chatHandler);
 
         // 撤回
         RevokeUseCase revokeUseCase = new RevokeUseCase(messageStore, groupManager);
@@ -186,7 +216,12 @@ public class IMServer implements Lifecycle {
         dispatcher.registerHandler(Operation.LOGIN, new LoginHandler(loginUseCase, sessionManager, routeTable, nodeId));
         dispatcher.registerHandler(Operation.REGISTER, new RegisterHandler(new RegisterUseCase(userManager)));
         dispatcher.registerHandler(Operation.HEARTBEAT, new HeartbeatHandler(new HeartbeatUseCase(routeTable), sessionManager));
-        dispatcher.registerHandler(Operation.FILE_UPLOAD, new com.im.core.handler.unified.FileUploadHandler(new FileUploadUseCase(fileStorage)));
+        dispatcher.registerHandler(Operation.FILE_UPLOAD, new com.im.core.handler.unified.FileUploadHandler(
+                new FileUploadUseCase(fileStorage, config.getLong("im.minio.max-file-size", 100L * 1024 * 1024))));
+        dispatcher.registerHandlers(new com.im.core.handler.unified.FileMultipartHandler(
+                        new MultipartUploadUseCase(fileStorage)),
+                Operation.FILE_MULTIPART_INIT, Operation.FILE_MULTIPART_UPLOAD,
+                Operation.FILE_MULTIPART_COMPLETE, Operation.FILE_MULTIPART_ABORT);
     }
 
     // ── Cluster infrastructure setup ──
@@ -290,6 +325,7 @@ public class IMServer implements Lifecycle {
         nodeDiscovery.stop();
         if (scanScheduler != null) scanScheduler.shutdown();
         connectionEventHandler.shutdown();
+        if (callStateManager != null) callStateManager.shutdown();
         pendingAcknowledgementManager.shutdown();
         sessionManager.clear();
         if (redisConfig != null) redisConfig.close();

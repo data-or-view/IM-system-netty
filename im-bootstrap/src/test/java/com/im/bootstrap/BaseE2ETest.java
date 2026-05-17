@@ -192,6 +192,15 @@ public abstract class BaseE2ETest {
         }
     }
 
+    /**
+     * 从队列中清空所有当前消息（用于在发送新请求前排掉异步推送的消息）。
+     */
+    protected static void drainQueue(BlockingQueue<?> queue) {
+        if (queue != null) {
+            queue.clear();
+        }
+    }
+
     // ========== JSON 工具 ==========
 
     @SuppressWarnings("unchecked")
