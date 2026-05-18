@@ -64,19 +64,18 @@ export default function CreateGroupPage() {
 
         <Separator className="my-4" />
 
-        {/* Member selection */}
+        {/* Member selection (optional) */}
         <div className="mb-3 text-sm font-medium text-muted-foreground">
-          选择初始成员（{selectedIds.length} / {state.friends.length}）
+          选择初始成员（可选，{selectedIds.length} 人）
         </div>
 
-        {state.friends.length === 0 && (
+        {state.friends.length === 0 ? (
           <div className="py-8 text-center text-sm text-muted-foreground">
-            暂无好友，请先添加好友后再创建群
+            暂无好友，可以先创建群，后续再邀请成员
           </div>
-        )}
-
-        <div className="space-y-1">
-          {state.friends.map((friend) => {
+        ) : (
+          <div className="space-y-1">
+            {state.friends.map((friend) => {
             const uid = friend.friendUserId;
             const selected = selectedIds.includes(uid);
             return (
@@ -102,6 +101,7 @@ export default function CreateGroupPage() {
             );
           })}
         </div>
+      )}
       </ScrollArea>
 
       {/* Bottom bar */}

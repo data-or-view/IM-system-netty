@@ -11,7 +11,10 @@ export class FriendAPI {
   list(): Promise<FriendInfo[]> {
     const { frame, promise } = this.transport.requestManager.createRequest(OP.FRIEND_LIST);
     this.transport.send(frame);
-    return promise.then((r) => r.data as FriendInfo[]);
+    return promise.then((r) => {
+      const data = r.data as { friends?: FriendInfo[] } | null;
+      return data?.friends ?? [];
+    });
   }
 
   /** 搜索用户（添加好友前搜索） */
@@ -21,7 +24,10 @@ export class FriendAPI {
       limit,
     });
     this.transport.send(frame);
-    return promise.then((r) => r.data as FriendInfo[]);
+    return promise.then((r) => {
+      const data = r.data as { users?: FriendInfo[] } | null;
+      return data?.users ?? [];
+    });
   }
 
   /** 申请加好友 */
@@ -75,24 +81,20 @@ export class FriendAPI {
   blacklist(): Promise<FriendInfo[]> {
     const { frame, promise } = this.transport.requestManager.createRequest(OP.FRIEND_BLACKLIST);
     this.transport.send(frame);
-    return promise.then((r) => r.data as FriendInfo[]);
+    return promise.then((r) => {
+      const data = r.data as { blacklist?: FriendInfo[] } | null;
+      return data?.blacklist ?? [];
+    });
   }
 
   /** 已发送的好友申请列表 */
   sentApplyList(): Promise<FriendApply[]> {
     const { frame, promise } = this.transport.requestManager.createRequest(OP.FRIEND_APPLY_SENT);
     this.transport.send(frame);
-    return promise.then((r) => r.data as FriendApply[]);
-  }
-
-  /** 好友申请详情 */
-  applyDetail(fromUserId: string, toUserId: string): Promise<FriendApply> {
-    const { frame, promise } = this.transport.requestManager.createRequest(OP.FRIEND_APPLY_DETAIL, {
-      fromUserId,
-      toUserId,
+    return promise.then((r) => {
+      const data = r.data as { applies?: FriendApply[] } | null;
+      return data?.applies ?? [];
     });
-    this.transport.send(frame);
-    return promise.then((r) => r.data as FriendApply);
   }
 
   /** 未处理的好友申请数量 */

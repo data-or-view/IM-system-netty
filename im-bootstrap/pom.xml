@@ -16,7 +16,7 @@
     <dependencies>
         <dependency>
             <groupId>com.im</groupId>
-            <artifactId>im-adapter</artifactId>
+            <artifactId>im-core</artifactId>
         </dependency>
         <dependency>
             <groupId>com.im</groupId>
@@ -24,7 +24,15 @@
         </dependency>
         <dependency>
             <groupId>com.im</groupId>
+            <artifactId>im-infrastructure-common</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.im</groupId>
             <artifactId>im-infrastructure-config</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
         </dependency>
         <dependency>
             <groupId>io.netty</groupId>

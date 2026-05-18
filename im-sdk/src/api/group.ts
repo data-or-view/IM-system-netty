@@ -76,14 +76,20 @@ export class GroupAPI {
       limit,
     });
     this.transport.send(frame);
-    return promise.then((r) => r.data as GroupInfo[]);
+    return promise.then((r) => {
+      const data = r.data as { groups?: GroupInfo[] } | null;
+      return data?.groups ?? [];
+    });
   }
 
   /** 获取群成员列表 */
   members(groupId: string): Promise<GroupMember[]> {
     const { frame, promise } = this.transport.requestManager.createRequest(OP.GROUP_MEMBERS, { groupId });
     this.transport.send(frame);
-    return promise.then((r) => r.data as GroupMember[]);
+    return promise.then((r) => {
+      const data = r.data as { members?: GroupMember[] } | null;
+      return data?.members ?? [];
+    });
   }
 
   /** 全员禁言 */

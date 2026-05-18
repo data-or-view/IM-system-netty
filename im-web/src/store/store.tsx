@@ -277,7 +277,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const cachedUserId = localStorage.getItem("im_userId");
         if (!cachedToken && cachedUserId) {
           im.user.login(cachedUserId).then((resp) => {
-            const token = resp.data as string;
+            const data = resp.data as { token?: string } | null;
+            const token = data?.token || "";
             localStorage.setItem("im_token", token);
             localStorage.setItem("im_userId", cachedUserId);
             dispatch({ type: "SET_AUTH", userId: cachedUserId, token });
@@ -357,7 +358,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     localStorage.setItem("im_userId", userId);
     try {
       const resp = await im.user.login(userId, password);
-      const token = resp.data as string;
+      const data = resp.data as { token?: string } | null;
+      const token = data?.token || "";
       localStorage.setItem("im_token", token);
       dispatch({ type: "SET_AUTH", userId, token });
       // 登录后拉取数据

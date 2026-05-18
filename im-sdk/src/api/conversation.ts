@@ -11,7 +11,10 @@ export class ConversationAPI {
   list(): Promise<Conversation[]> {
     const { frame, promise } = this.transport.requestManager.createRequest(OP.CONVERSATION_LIST);
     this.transport.send(frame);
-    return promise.then((r) => r.data as Conversation[]);
+    return promise.then((r) => {
+      const data = r.data as { conversations?: Conversation[] } | null;
+      return data?.conversations ?? [];
+    });
   }
 
   /** 更新会话设置（置顶、免打扰等） */

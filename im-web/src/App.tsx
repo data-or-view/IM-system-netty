@@ -109,9 +109,7 @@ export default function App() {
   return (
     <StoreProvider>
       <Routes>
-        <Route path="/login" element={<AuthGate />} />
-        <Route path="/chat/*" element={<AuthGate />} />
-        <Route path="*" element={<Navigate to="/login" replace />} />
+        <Route path="*" element={<AuthGate />} />
       </Routes>
     </StoreProvider>
   );

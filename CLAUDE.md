@@ -17,7 +17,7 @@ When designing new features, evaluating architecture changes, or debugging messa
 |--------|------|------|
 | `im-api` | `im-api/` | Public interfaces (IUserManager, IMessageQueue, IRouteTable, etc.) |
 | `im-core` | `im-core/` | Use cases + dispatcher + 所有基础设施实现（DB, Redis, 存储, 推送等） |
-| `im-adapter` | `im-adapter/` | WS/HTTP 协议适配层，handler |
+| `im-bootstrap` | `im-bootstrap/` | Server boot, DI wiring, WS/HTTP 协议适配层, handler (含原 im-adapter) |
 | `im-bootstrap` | `im-bootstrap/` | Server boot, DI wiring, main() |
 | `im-infrastructure-*` | `im-infrastructure/` | 通用基础设施（序列化、缓存接口、配置、消息队列封装） |
 

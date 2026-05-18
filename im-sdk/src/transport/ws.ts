@@ -90,6 +90,11 @@ export class WsTransport {
       this.emitError(new IMError(-1, "Not connected"));
       return;
     }
+    // 自动注入 Authorization token
+    const token = this.getToken();
+    if (token) {
+      frame.Authorization = token;
+    }
     this.ws.send(JSON.stringify(frame));
   }
 
