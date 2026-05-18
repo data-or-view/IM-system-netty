@@ -36,6 +36,8 @@
         <failsafe.version>3.3.2</failsafe.version>
         <snakeyaml.version>2.4</snakeyaml.version>
         <kafka.version>3.9.0</kafka.version>
+        <opentelemetry.version>1.62.0</opentelemetry.version>
+        <opentelemetry-javaagent.version>2.27.0</opentelemetry-javaagent.version>
     </properties>
 
     <dependencyManagement>
@@ -231,6 +233,21 @@
                 <groupId>org.apache.kafka</groupId>
                 <artifactId>kafka-clients</artifactId>
                 <version>${kafka.version}</version>
+            </dependency>
+
+            <!-- OpenTelemetry -->
+            <dependency>
+                <groupId>io.opentelemetry</groupId>
+                <artifactId>opentelemetry-bom</artifactId>
+                <version>${opentelemetry.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>io.opentelemetry.javaagent</groupId>
+                <artifactId>opentelemetry-javaagent</artifactId>
+                <version>${opentelemetry-javaagent.version}</version>
+                <scope>runtime</scope>
             </dependency>
         </dependencies>
     </dependencyManagement>

@@ -188,6 +188,7 @@ public class IMServer implements Lifecycle {
 
         // ── 统一 ApiDispatcher ──
         this.dispatcher = new ApiDispatcher();
+        dispatcher.addInterceptor(new com.im.core.handler.unified.TelemetryInterceptor());
         dispatcher.addInterceptor(new AuthInterceptor(authenticator));
 
         // 注册 handler（使用 Operation 枚举，路由+认证元数据由枚举统一管理）

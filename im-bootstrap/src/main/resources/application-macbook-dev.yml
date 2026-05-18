@@ -36,3 +36,4 @@ im:
     access-key: "myuser"
     secret-key: "mysecret123"
     bucket: "im-system"
+

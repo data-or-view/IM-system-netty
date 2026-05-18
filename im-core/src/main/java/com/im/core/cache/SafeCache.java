@@ -29,6 +29,7 @@ public class SafeCache<K, V> implements Cache<K, V> {
     private static final Logger log = LoggerFactory.getLogger(SafeCache.class);
 
     private final Cache<K, V> delegate;
+    
     private final String name;
 
     public SafeCache(Cache<K, V> delegate) {

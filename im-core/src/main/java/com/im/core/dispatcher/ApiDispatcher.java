@@ -6,6 +6,10 @@ import com.im.api.Operation;
 import com.im.api.RequestHandler;
 import com.im.common.enums.ImErrorCode;
 import com.im.common.exception.ImException;
+import io.opentelemetry.api.GlobalOpenTelemetry;
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.api.trace.Tracer;
+import io.opentelemetry.context.Scope;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -32,6 +36,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 public class ApiDispatcher {
 
     private static final Logger log = LoggerFactory.getLogger(ApiDispatcher.class);
+    private static final Tracer TRACER = GlobalOpenTelemetry.getTracer("im-system");
 
     private final Map<String, RequestHandler> handlerMap = new ConcurrentHashMap<>();
     private final List<ApiInterceptor> interceptors = new CopyOnWriteArrayList<>();
@@ -98,7 +103,15 @@ public class ApiDispatcher {
             return;
         }
 
-        process(request, handler);
+        Span span = TRACER.spanBuilder(operation).startSpan();
+        try (Scope scope = span.makeCurrent()) {
+            process(request, handler);
+        } catch (Exception e) {
+            span.recordException(e);
+            throw e;
+        } finally {
+            span.end();
+        }
     }
 
     private void process(ApiRequest request, RequestHandler handler) {

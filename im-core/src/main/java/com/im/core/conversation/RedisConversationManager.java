@@ -30,6 +30,7 @@ import java.util.stream.Collectors;
 public class RedisConversationManager implements IConversationManager {
 
     private static final Logger log = LoggerFactory.getLogger(RedisConversationManager.class);
+
     private static final long REDIS_TIMEOUT_MS = 3000;
 
     private static final String KEY_DATA_PREFIX = "conv:data:";
@@ -60,6 +61,7 @@ public class RedisConversationManager implements IConversationManager {
         try {
             List<String> convIds = async.zrevrange(listKey(ownerUserId), 0, -1)
                     .get(REDIS_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+
             if (convIds == null || convIds.isEmpty()) return Collections.emptyList();
 
             List<Conversation> result = new ArrayList<>(convIds.size());

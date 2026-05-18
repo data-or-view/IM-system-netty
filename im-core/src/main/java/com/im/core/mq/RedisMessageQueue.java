@@ -42,6 +42,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class RedisMessageQueue implements IMessageQueue {
 
     private static final Logger log = LoggerFactory.getLogger(RedisMessageQueue.class);
+    
     private static final ObjectMapper MAPPER = ObjectMapperProvider.get();
 
     /** Redis Stream key 前缀 */

@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { useStore, type Conversation, type FriendInfo, type GroupInfo } from "@/store/store";
+import { useNavigate } from "react-router-dom";
+import { useStore, type Conversation } from "@/store/store";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -19,22 +20,24 @@ import {
   MessageCircle,
   Users,
   UserPlus,
-  Search,
+  Plus,
   MoreHorizontal,
   UserMinus,
-  LogOut,
 } from "lucide-react";
 import UserSearchDialog from "./sidebar/UserSearchDialog";
 import GroupSearchDialog from "./sidebar/GroupSearchDialog";
+import FriendRequestDialog from "./sidebar/FriendRequestDialog";
 import { toast } from "sonner";
 
-type Tab = "chats" | "contacts" | "groups";
+type Tab = "chats" | "contacts";
 
 export default function Sidebar() {
   const { state } = useStore();
+  const navigate = useNavigate();
   const [tab, setTab] = useState<Tab>("chats");
   const [searchUserOpen, setSearchUserOpen] = useState(false);
   const [searchGroupOpen, setSearchGroupOpen] = useState(false);
+  const [friendRequestOpen, setFriendRequestOpen] = useState(false);
 
   return (
     <TooltipProvider>
@@ -57,14 +60,17 @@ export default function Sidebar() {
           <ChatList
             onSearchUser={() => setSearchUserOpen(true)}
             onSearchGroup={() => setSearchGroupOpen(true)}
+            onCreateGroup={() => navigate("/chat/create-group")}
           />
         )}
-        {tab === "contacts" && <ContactList onSearchUser={() => setSearchUserOpen(true)} />}
-        {tab === "groups" && <GroupList onSearchGroup={() => setSearchGroupOpen(true)} />}
+        {tab === "contacts" && (
+          <ContactList onSearchUser={() => setSearchUserOpen(true)} />
+        )}
 
         {/* Dialogs */}
         <UserSearchDialog open={searchUserOpen} onOpenChange={setSearchUserOpen} />
         <GroupSearchDialog open={searchGroupOpen} onOpenChange={setSearchGroupOpen} />
+        <FriendRequestDialog open={friendRequestOpen} onOpenChange={setFriendRequestOpen} />
       </div>
     </TooltipProvider>
   );
@@ -108,9 +114,11 @@ function TabButton({
 function ChatList({
   onSearchUser,
   onSearchGroup,
+  onCreateGroup,
 }: {
   onSearchUser: () => void;
   onSearchGroup: () => void;
+  onCreateGroup: () => void;
 }) {
   const { state } = useStore();
 
@@ -140,6 +148,17 @@ function ChatList({
               </button>
             </TooltipTrigger>
             <TooltipContent>搜索并加入群组</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={onCreateGroup}
+                className="flex-1 rounded-md bg-secondary px-2 py-1.5 text-left text-xs text-muted-foreground hover:bg-secondary/80"
+              >
+                <Plus className="mr-1 inline h-3 w-3" /> 创建群
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>创建一个新群</TooltipContent>
           </Tooltip>
         </TooltipProvider>
       </div>
@@ -205,7 +224,8 @@ function ConversationItem({ conv }: { conv: Conversation }) {
 // ====== Contact List ======
 
 function ContactList({ onSearchUser }: { onSearchUser: () => void }) {
-  const { state, removeFriend } = useStore();
+  const { state, removeFriend, fetchUnhandledApplyCount } = useStore();
+  const [friendRequestOpen, setFriendRequestOpen] = useState(false);
   const friends = state.friends;
 
   return (
@@ -216,6 +236,20 @@ function ContactList({ onSearchUser }: { onSearchUser: () => void }) {
           className="flex-1 rounded-md bg-secondary px-2 py-1.5 text-left text-xs text-muted-foreground hover:bg-secondary/80"
         >
           <UserPlus className="mr-1 inline h-3 w-3" /> 添加好友
+        </button>
+        <button
+          onClick={() => {
+            setFriendRequestOpen(true);
+            fetchUnhandledApplyCount();
+          }}
+          className="relative rounded-md bg-secondary px-2 py-1.5 text-xs text-muted-foreground hover:bg-secondary/80"
+        >
+          申请
+          {state.unhandledApplyCount > 0 && (
+            <span className="absolute -right-1.5 -top-1.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-destructive px-1 text-[10px] text-destructive-foreground">
+              {state.unhandledApplyCount > 99 ? "99+" : state.unhandledApplyCount}
+            </span>
+          )}
         </button>
       </div>
 
@@ -266,77 +300,8 @@ function ContactList({ onSearchUser }: { onSearchUser: () => void }) {
           </div>
         ))}
       </ScrollArea>
-    </div>
-  );
-}
 
-// ====== Group List ======
-
-function GroupList({ onSearchGroup }: { onSearchGroup: () => void }) {
-  const { state, quitGroup } = useStore();
-  // 从 conversations 提取群组列表
-  const groups: GroupInfo[] = state.conversations
-    .filter((c) => c.conversationType === 2)
-    .map((c) => ({
-      groupId: c.groupId || c.conversationId,
-      groupName: c.showName,
-      faceUrl: c.faceUrl,
-    }));
-
-  return (
-    <div className="flex flex-1 flex-col">
-      <div className="flex items-center gap-1 border-b px-3 py-2">
-        <button
-          onClick={onSearchGroup}
-          className="flex-1 rounded-md bg-secondary px-2 py-1.5 text-left text-xs text-muted-foreground hover:bg-secondary/80"
-        >
-          <Search className="mr-1 inline h-3 w-3" /> 搜索群组
-        </button>
-      </div>
-
-      <ScrollArea className="flex-1">
-        {groups.length === 0 && (
-          <div className="p-4 text-center text-sm text-muted-foreground">暂无群组</div>
-        )}
-
-        {groups.map((g) => (
-          <div
-            key={g.groupId}
-            className="group flex items-center justify-between px-4 py-2.5 transition-colors hover:bg-accent/50"
-          >
-            <div className="flex items-center gap-3">
-              <Avatar className="h-9 w-9">
-                <AvatarImage src={g.faceUrl} />
-                <AvatarFallback>{g.groupName.charAt(0).toUpperCase()}</AvatarFallback>
-              </Avatar>
-              <div>
-                <div className="text-sm font-medium">{g.groupName}</div>
-                <div className="text-xs text-muted-foreground">ID: {g.groupId}</div>
-              </div>
-            </div>
-
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button className="invisible rounded-md p-1 text-muted-foreground opacity-0 transition-all hover:bg-accent group-hover:visible group-hover:opacity-100">
-                  <MoreHorizontal className="h-4 w-4" />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem
-                  className="text-destructive"
-                  onClick={() => {
-                    quitGroup(g.groupId);
-                    toast("已退出群组");
-                  }}
-                >
-                  <LogOut className="mr-2 h-4 w-4" />
-                  退出群组
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-        ))}
-      </ScrollArea>
+      <FriendRequestDialog open={friendRequestOpen} onOpenChange={setFriendRequestOpen} />
     </div>
   );
 }

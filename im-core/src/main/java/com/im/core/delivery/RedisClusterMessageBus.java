@@ -15,6 +15,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -45,6 +46,7 @@ public class RedisClusterMessageBus implements IClusterMessageBus {
     private static final ObjectMapper MAPPER = ObjectMapperProvider.get();
 
     private final RedisConfiguration redisConfig;
+
     private final String nodeId;
 
     /** topic → 订阅者列表 */
@@ -54,6 +56,7 @@ public class RedisClusterMessageBus implements IClusterMessageBus {
     private final ExecutorService dispatchExecutor;
 
     private StatefulRedisPubSubConnection<String, String> pubSubConnection;
+
     private RedisPubSubAsyncCommands<String, String> pubSubAsync;
 
     public RedisClusterMessageBus(RedisConfiguration redisConfig, String nodeId) {
@@ -66,6 +69,7 @@ public class RedisClusterMessageBus implements IClusterMessageBus {
     @Override
     public void start() {
         pubSubConnection = redisConfig.createPubSubConnection();
+
         pubSubAsync = pubSubConnection.async();
 
         pubSubConnection.addListener(new RedisPubSubListener<String, String>() {
@@ -196,7 +200,7 @@ public class RedisClusterMessageBus implements IClusterMessageBus {
         Message message = msg.getMessage();
         Map<String, Object> msgMap = message.toJsonMap();
 
-        Map<String, Object> root = new java.util.LinkedHashMap<>();
+        Map<String, Object> root = new LinkedHashMap<>();
         root.put("kind", msg.getKind().name());
         root.put("fromNodeId", msg.getFromNodeId());
         root.put("ttl", msg.getTtl());
