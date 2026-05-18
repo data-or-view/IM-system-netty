@@ -13,9 +13,8 @@
 
     <modules>
         <module>im-api</module>
-        <module>im-core</module>
+        <module>im-server</module>
         <module>im-infrastructure</module>
-        <module>im-bootstrap</module>
     </modules>
 
     <properties>
@@ -49,7 +48,7 @@
             </dependency>
             <dependency>
                 <groupId>com.im</groupId>
-                <artifactId>im-core</artifactId>
+                <artifactId>im-server</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

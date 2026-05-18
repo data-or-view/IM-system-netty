@@ -9,10 +9,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-JAR="$PROJECT_DIR/im-bootstrap/target/im-bootstrap-1.0.0-SNAPSHOT.jar"
+JAR="$PROJECT_DIR/im-server/target/im-server-1.0.0-SNAPSHOT.jar"
 LOG_DIR="$PROJECT_DIR/logs"
 PID_DIR="$PROJECT_DIR/bin/pids"
-CLASSPATH_JAR="$PROJECT_DIR/im-bootstrap/target/original-im-bootstrap-1.0.0-SNAPSHOT.jar"
+CLASSPATH_JAR="$PROJECT_DIR/im-server/target/original-im-server-1.0.0-SNAPSHOT.jar"
 
 # Node configurations
 NODE1_ID="node-1"

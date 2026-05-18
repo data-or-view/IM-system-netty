@@ -4,8 +4,6 @@ import com.im.api.*;
 import com.im.common.lifecycle.Lifecycle;
 import com.im.common.retry.RetryExecutor;
 import com.im.config.Config;
-import com.im.config.ConfigLoader;
-import com.im.config.YamlConfigSource;
 import com.im.core.auth.HmacTokenAuthenticator;
 import com.im.core.cache.ConcurrentHashCache;
 import com.im.core.call.CallStateManager;
@@ -13,9 +11,6 @@ import com.im.core.call.LiveKitCallManager;
 import com.im.core.conversation.DbConversationManager;
 import com.im.core.conversation.LocalConversationManager;
 import com.im.core.conversation.RedisConversationManager;
-import com.im.core.db.DatabaseConfiguration;
-import com.im.core.db.MyBatisPlusFactory;
-import com.im.core.db.SchemaInitializer;
 import com.im.core.delivery.ClusterDeliveryHandler;
 import com.im.core.delivery.DeliveryConsumer;
 import com.im.core.delivery.LocalClusterMessageBus;
@@ -92,6 +87,10 @@ public class IMServer implements Lifecycle {
     private CallStateManager callStateManager;
     private final ExecutorService virtualExecutor;
     private static boolean databaseFailed = false;
+
+    static void markDatabaseFailed() {
+        databaseFailed = true;
+    }
 
     private EventLoopGroup bossGroup;
     private EventLoopGroup workerGroup;
@@ -358,58 +357,5 @@ public class IMServer implements Lifecycle {
     private boolean dbEnabled() {
         if (databaseFailed) return false;
         return config.getBoolean("im.db.enabled").orElse(false);
-    }
-
-    // ── 配置加载 ──
-
-    static Config loadConfig() {
-        String activeEnv = System.getProperty("im.env");
-        if (activeEnv == null || activeEnv.isBlank()) activeEnv = System.getenv("IM_ENV");
-        if (activeEnv != null && !activeEnv.isBlank()) {
-            // order=1 优先级高于内置的 classpath:application.yml (order=2)
-            ConfigLoader.register(new YamlConfigSource("classpath:application-" + activeEnv.trim() + ".yml", 1));
-        }
-        // 内置 classpath:application.yml 由 ConfigLoader.doLoad() 自动加载
-        return ConfigLoader.load();
-    }
-
-    // ========== main ==========
-
-    public static void main(String[] args) throws Exception {
-        Config config = loadConfig();
-
-        // 数据库初始化（仅在 im.db.enabled=true 时启动）
-        if ("true".equalsIgnoreCase(config.getString("im.db.enabled").orElse("false"))) {
-            String jdbcUrl = config.getString("im.db.jdbc-url").orElse(null);
-            DatabaseConfiguration dbConfig = jdbcUrl != null
-                    ? new DatabaseConfiguration.Builder()
-                        .jdbcUrl(jdbcUrl)
-                        .username(config.getString("im.db.username", "root"))
-                        .password(config.getString("im.db.password", "password"))
-                        .build()
-                    : DatabaseConfiguration.develop();
-            try {
-                MyBatisPlusFactory.init(dbConfig);
-                SchemaInitializer.initialize(MyBatisPlusFactory.getDataSource(),
-                        config.getString("im.db.schema").orElse("auto"));
-            } catch (Exception e) {
-                log.error("Failed to initialize database, falling back to in-memory storage", e);
-                databaseFailed = true;
-            }
-        } else {
-            log.info("Database disabled (set im.db.enabled=true to enable)");
-        }
-
-        // 节点 ID（命令行参数覆盖）
-        String nodeId = config.getString("im.node.id", "node-1");
-        if (args.length > 0) nodeId = args[0];
-
-        IMServer server = new IMServer(config);
-        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            server.stop();
-        }));
-        server.start();
-        log.info("Server ready. Press Ctrl+C to stop.");
-        Thread.currentThread().join();
     }
 }
