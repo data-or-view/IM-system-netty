@@ -116,56 +116,53 @@ public class ApiDispatcher {
 
     private void process(ApiRequest request, RequestHandler handler) {
         int idx = 0;
-        try {
-            // ── preHandle 链 ──
-            for (; idx < interceptors.size(); idx++) {
-                ApiInterceptor interceptor = interceptors.get(idx);
-                try {
-                    if (!interceptor.preHandle(request)) {
-                        log.debug("Interceptor '{}' blocked request op={}", interceptor.name(), request.operation());
-                        afterCompleteReverse(request, idx, null);
-                        request.responseWriter().writeError(ImErrorCode.FORBIDDEN,
-                                "blocked by interceptor: " + interceptor.name());
-                        return;
-                    }
-                } catch (ImException e) {
-                    log.warn("Interceptor '{}' preHandle rejected: {} {}", interceptor.name(),
-                            e.getErrorCode().getCode(), e.getDetail());
-                    afterCompleteReverse(request, idx, e);
-                    request.responseWriter().writeError(e.getErrorCode(), e.getDetail());
-                    return;
-                } catch (Exception e) {
-                    log.warn("Interceptor '{}' preHandle threw", interceptor.name(), e);
+        // ── preHandle 链 ──
+        for (; idx < interceptors.size(); idx++) {
+            ApiInterceptor interceptor = interceptors.get(idx);
+            try {
+                if (!interceptor.preHandle(request)) {
+                    log.debug("Interceptor '{}' blocked request op={}", interceptor.name(), request.operation());
                     afterCompleteReverse(request, idx, null);
-                    request.responseWriter().writeError(ImErrorCode.INTERNAL_ERROR,
-                            "interceptor error: " + interceptor.name());
+                    request.responseWriter().writeError(ImErrorCode.FORBIDDEN,
+                            "blocked by interceptor: " + interceptor.name());
                     return;
                 }
-            }
-
-            // ── handler 执行 ──
-            Object result = null;
-            Exception handlerEx = null;
-            try {
-                result = handler.handle(request);
             } catch (ImException e) {
-                handlerEx = e;
-                log.warn("Handler rejected: {} {} op={}", e.getCode(), e.getMessage(), request.operation());
+                log.warn("Interceptor '{}' preHandle rejected: {} {}", interceptor.name(),
+                        e.getErrorCode().getCode(), e.getDetail());
+                afterCompleteReverse(request, idx, e);
                 request.responseWriter().writeError(e.getErrorCode(), e.getDetail());
+                return;
             } catch (Exception e) {
-                handlerEx = e;
-                log.error("Handler error: op={}", request.operation(), e);
-                request.responseWriter().writeError(ImErrorCode.INTERNAL_ERROR, e.getMessage());
-            } finally {
-                afterCompleteReverse(request, idx, handlerEx);
+                log.warn("Interceptor '{}' preHandle threw", interceptor.name(), e);
+                afterCompleteReverse(request, idx, null);
+                request.responseWriter().writeError(ImErrorCode.INTERNAL_ERROR,
+                        "interceptor error: " + interceptor.name());
+                return;
             }
+        }
 
-            // handler 正常返回且未自行写响应时，由 ResponseWriter 自动序列化
-            if (handlerEx == null) {
-                request.responseWriter().write(result);
-            }
+        // ── handler 执行 ──
+        Object result = null;
+        Exception handlerEx = null;
+        try {
+            result = handler.handle(request);
+        } catch (ImException e) {
+            handlerEx = e;
+            log.warn("Handler rejected: {} {} op={}", e.getCode(), e.getMessage(), request.operation());
+            request.responseWriter().writeError(e.getErrorCode(), e.getDetail());
+        } catch (Exception e) {
+            handlerEx = e;
+            log.error("Handler error: op={}", request.operation(), e);
+            request.responseWriter().writeError(ImErrorCode.INTERNAL_ERROR, e.getMessage());
         } finally {
-            // 最外层保障，防止拦截器抛意外异常
+            afterCompleteReverse(request, idx, handlerEx);
+        }
+
+        // handler 正常返回且未自行写响应时，由 ResponseWriter 自动序列化
+        if (handlerEx == null) {
+            Object response = result;
+            request.responseWriter().write(response);
         }
     }
 

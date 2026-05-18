@@ -129,10 +129,14 @@ public class PersistenceConsumer implements Lifecycle {
         log.info("PersistenceConsumer stopped");
     }
 
+    // 与 SendMessageUseCase.buildConversationId 保持一致。Alice→Bob 和 Bob→Alice 必须映射到同一个
+    // conversationId，否则双方看到两个独立会话，未读数也无法合并。
     private String buildConversationId(String userA, String userB) {
         if (userA == null || userB == null) return null;
-        String user1 = userA.compareTo(userB) <= 0 ? userA : userB;
-        String user2 = userA.compareTo(userB) <= 0 ? userB : userA;
-        return "single_" + user1 + "_" + user2;
+        if (userA.compareTo(userB) <= 0) {
+            return "single_" + userA + "_" + userB;
+        } else {
+            return "single_" + userB + "_" + userA;
+        }
     }
 }

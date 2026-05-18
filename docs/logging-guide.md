@@ -22,19 +22,19 @@
 mvn package -DskipTests -q
 
 # 2. 启动（开发环境：控制台输出 span）
-java -javaagent:im-bootstrap/target/agent/opentelemetry-javaagent-2.27.0.jar \
+java -javaagent:im-server/target/agent/opentelemetry-javaagent-2.27.0.jar \
      -Dotel.service.name=im-system \
      -Dotel.traces.exporter=console \
      -Dotel.metrics.exporter=none \
-     -jar im-bootstrap/target/im-bootstrap-1.0.0-SNAPSHOT.jar
+     -jar im-server/target/im-server-1.0.0-SNAPSHOT.jar
 
 # 3. 生产环境：对接 Jaeger/Zipkin
-java -javaagent:im-bootstrap/target/agent/opentelemetry-javaagent-2.27.0.jar \
+java -javaagent:im-server/target/agent/opentelemetry-javaagent-2.27.0.jar \
      -Dotel.service.name=im-system \
      -Dotel.traces.exporter=otlp \
      -Dotel.exporter.otlp.endpoint=http://jaeger:4318 \
      -Dotel.metrics.exporter=none \
-     -jar im-bootstrap/target/im-bootstrap-1.0.0-SNAPSHOT.jar
+     -jar im-server/target/im-server-1.0.0-SNAPSHOT.jar
 ```
 
 ### 1.3 日志效果
@@ -150,11 +150,11 @@ mvn package -DskipTests -q
 
 # 重启（开发环境，带 OTel 追踪）
 kill $(lsof -ti:8081) 2>/dev/null
-nohup java -javaagent:im-bootstrap/target/agent/opentelemetry-javaagent-2.27.0.jar \
+nohup java -javaagent:im-server/target/agent/opentelemetry-javaagent-2.27.0.jar \
   -Dotel.service.name=im-system \
   -Dotel.traces.exporter=console \
   -Dotel.metrics.exporter=none \
-  -jar im-bootstrap/target/im-bootstrap-1.0.0-SNAPSHOT.jar \
+  -jar im-server/target/im-server-1.0.0-SNAPSHOT.jar \
   > logs/console.log 2>&1 &
 
 tail -f logs/im-system.log | grep "Server ready"

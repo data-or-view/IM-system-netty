@@ -134,12 +134,14 @@ public class SendMessageUseCase {
         return msg;
     }
 
-    private static String buildConversationId(String fromUserId, String toUserId) {
-        if (fromUserId != null && toUserId != null) {
-            String user1 = fromUserId.compareTo(toUserId) <= 0 ? fromUserId : toUserId;
-            String user2 = fromUserId.compareTo(toUserId) <= 0 ? toUserId : fromUserId;
-            return "single_" + user1 + "_" + user2;
+    // 字典序拼接保证 Alice→Bob 和 Bob→Alice 共享同一 conversationId。
+    // 与 PersistenceConsumer.buildConversationId 保持同步，修改须两处一起改。
+    private static String buildConversationId(String a, String b) {
+        if (a == null || b == null) return null;
+        if (a.compareTo(b) <= 0) {
+            return "single_" + a + "_" + b;
+        } else {
+            return "single_" + b + "_" + a;
         }
-        return null;
     }
 }

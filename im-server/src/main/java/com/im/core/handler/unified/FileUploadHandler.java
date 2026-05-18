@@ -35,6 +35,13 @@ public class FileUploadHandler implements RequestHandler {
         if (body == null || body.length == 0) {
             throw new ImException(ImErrorCode.BAD_REQUEST, "file body is empty");
         }
+        // fileName/mimeType 缺失会存脏数据到对象存储，必须校验
+        if (fileName == null || fileName.isBlank()) {
+            throw new ImException(ImErrorCode.BAD_REQUEST, "fileName is required");
+        }
+        if (mimeType == null || mimeType.isBlank()) {
+            throw new ImException(ImErrorCode.BAD_REQUEST, "mimeType is required");
+        }
 
         FileUploadUseCase.FileUploadResult result = fileUploadUseCase.execute(fileName, mimeType, body);
 

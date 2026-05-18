@@ -100,7 +100,8 @@ public class HttpRequestAdapter extends SimpleChannelInboundHandler<FullHttpRequ
             buf.getBytes(buf.readerIndex(), bytes);
 
             if (operation.opName().equals("file.upload") || operation.opName().equals("file.multipart.upload")) {
-                // 文件上传：保留原始 body，由 handler 自行解析
+                // 文件上传：body 是文件二进制数据，不当作 JSON 解析。
+                // fileName/mimeType 等元信息通过 query string 传入，已在上一步合并到 params。
                 bodyRaw = bytes;
             } else {
                 // JSON body → 合并到 params

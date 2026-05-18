@@ -14,9 +14,10 @@ import org.slf4j.LoggerFactory;
 /**
  * HTTP REST 协议的 Netty ServerBootstrap。
  *
- * <p>Pipeline: HttpServerCodec → HttpObjectAggregator → httpRestHandler</p>
+ * <p>Pipeline: HttpServerCodec → HttpObjectAggregator → HttpRequestAdapter</p>
  *
- * <p>提供 RESTful HTTP API 供管理后台和第三方系统调用。</p>
+ * <p>与 WS 共用同一 ApiDispatcher，HTTP 请求经过 HttpRequestAdapter 转为 ApiRequest。
+ * 提供 RESTful API 供管理后台和第三方系统调用。</p>
  */
 public class HttpServerBootstrap {
 

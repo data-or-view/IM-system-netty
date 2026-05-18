@@ -6,6 +6,8 @@ import com.im.api.RequestHandler;
 import com.im.api.UserInformation;
 import com.im.common.enums.ImErrorCode;
 import com.im.common.exception.ImException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.List;
 import java.util.Map;
@@ -16,6 +18,8 @@ import java.util.Map;
  * <p>合并 WS {@code UserSearchHandler} + HTTP {@code UserRestHandler}。</p>
  */
 public class UserHandler implements RequestHandler {
+
+    private static final Logger log = LoggerFactory.getLogger(UserHandler.class);
 
     private final IUserManager userManager;
 
@@ -61,7 +65,9 @@ public class UserHandler implements RequestHandler {
                 if (user != null && user.getPassword() == null) {
                     user.setPassword(password);
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                log.warn("Failed to set password for {}: {}", userId, e.getMessage());
+            }
         }
         return Map.of("userId", userId, "nickname", nickname, "status", "OK");
     }

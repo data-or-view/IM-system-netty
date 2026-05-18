@@ -64,8 +64,9 @@ public class ConnectionEventHandler extends ChannelInboundHandlerAdapter {
         if (evt instanceof IdleStateEvent idleEvent
                 && idleEvent.state() == IdleState.ALL_IDLE) {
             log.warn("Connection idle timeout, closing: remote={}", ctx.channel().remoteAddress());
-            // 先触发 channelInactive 清理流程
-            channelInactive(ctx);
+            // 在 close 前强制清理（close 会触发 channelInactive 二次入队），
+            // 二次 failFastAll 是幂等的，但 session.remove 第二次返回 null 被跳过。
+            cleanupSession(ctx);
             ctx.close();
             return;
         }
@@ -74,38 +75,28 @@ public class ConnectionEventHandler extends ChannelInboundHandlerAdapter {
 
     @Override
     public void channelInactive(ChannelHandlerContext ctx) {
-        eventExecutor.submit(() -> {
-            IConnectionSession session = sessionManager.removeSession(ctx.channel());
-            if (session != null && session.getUserId() != null && routeTable != null) {
-                String userId = session.getUserId();
-                int platformId = session.getPlatformId();
-
-                // ① 路由表下线
-                routeTable.offline(userId, localNodeId);
-                log.info("Route unregistered: userId={}, node={}", userId, localNodeId);
-
-                // ② 在线状态移除
-                routeTable.setOffline(userId, platformId);
-                log.info("Online status removed: userId={}, platform={}", userId, platformId);
-            }
-            pendingAcknowledgementManager.failFastAll();
-            log.info("Channel inactive and cleaned: remote={}", ctx.channel().remoteAddress());
-        });
+        eventExecutor.submit(() -> cleanupSession(ctx));
         ctx.fireChannelInactive();
     }
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
         log.error("Channel exception: remote={}", ctx.channel().remoteAddress(), cause);
-        eventExecutor.submit(() -> {
-            IConnectionSession session = sessionManager.removeSession(ctx.channel());
-            if (session != null && session.getUserId() != null && routeTable != null) {
-                routeTable.offline(session.getUserId(), localNodeId);
-                routeTable.setOffline(session.getUserId(), session.getPlatformId());
-            }
-            pendingAcknowledgementManager.failFastAll();
-        });
+        eventExecutor.submit(() -> cleanupSession(ctx));
         ctx.close();
+    }
+
+    /** 提取 session 清理逻辑，channelInactive / exceptionCaught / idle 三处复用。 */
+    private void cleanupSession(ChannelHandlerContext ctx) {
+        IConnectionSession session = sessionManager.removeSession(ctx.channel());
+        if (session != null && session.getUserId() != null && routeTable != null) {
+            String userId = session.getUserId();
+            int platformId = session.getPlatformId();
+            routeTable.offline(userId, localNodeId);
+            routeTable.setOffline(userId, platformId);
+            log.info("Session cleaned: userId={}, node={}", userId, localNodeId);
+        }
+        pendingAcknowledgementManager.failFastAll();
     }
 
     public void shutdown() {

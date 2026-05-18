@@ -8,9 +8,8 @@ import org.slf4j.LoggerFactory;
 
 /**
  * OpenTelemetry 拦截器：为当前 span 注入用户行为属性。
- *
- * <p>在所有拦截器之前执行（order = Integer.MIN_VALUE），
- * 确保 span 在 AuthInterceptor 和业务 handler 中已携带上下文。</p>
+ * 必须最先执行（与 AuthInterceptor 同 order=MIN_VALUE，靠插入顺序保证 Telemetry 先跑），
+ * 确保 auth 失败等请求也有 trace 记录。
  */
 public class TelemetryInterceptor implements ApiInterceptor {
 

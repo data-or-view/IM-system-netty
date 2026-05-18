@@ -20,14 +20,15 @@ import java.util.concurrent.ExecutorService;
 /**
  * WebSocket 协议的 Netty ServerBootstrap。
  *
- * <p>Pipeline: HttpServerCodec → HttpObjectAggregator → WebSocketServerProtocolHandler
- * → connectionEventHandler → WsRequestAdapter</p>
+ * <p>Pipeline 顺序有要求：HttpServerCodec → HttpObjectAggregator → WebSocketServerProtocolHandler
+ * （完成 HTTP 升级到 WS）→ connectionEventHandler（管理连接生命周期）
+ * → MessageEncoder（出站 Message 编码）→ WsRequestAdapter（入站 JSON 帧转 ApiRequest）。</p>
  *
- * <p>WsRequestAdapter 替代旧的 JsonWsCodec + MessageRouterHandler 组合：</p>
- * <ul>
- *   <li>解析 JSON 帧为 {@link com.im.api.ApiRequest}</li>
- *   <li>提交到虚拟线程池由 {@link ApiDispatcher} 处理</li>
- * </ul>
+ * <p>MessageEncoder 放在 connectionEventHandler 之后、WsRequestAdapter 之前，
+ * 如此出站消息从 pipeline 尾部写入时能经过 encoder；若放在更前，出站 Message 会绕过 encoder。</p>
+ *
+ * <p>WsRequestAdapter 替代旧的 JsonWsCodec + MessageRouterHandler 组合：
+ * 解析 JSON 帧为 {@link com.im.api.ApiRequest} 后提交到虚拟线程池由 {@link ApiDispatcher} 处理。</p>
  */
 public class WsServerBootstrap {
 

@@ -32,7 +32,7 @@ When designing new features, evaluating architecture changes, or debugging messa
 
 - **Functional / E2E tests must use real infrastructure**（Redis、MySQL 等），不能用 Local/in-memory 实现。例如 `MultiLoginE2ETest` 连接本地 Redis 验证多端登录逻辑，`IMServerE2ETest` 也应改为连接真实数据库。
 - **Unit tests** 适用于与基础设施无关的纯逻辑测试（如枚举转换、校验、工具类），可以使用 mock 或纯内存对象。
-- E2E 测试类命名规范：以 `E2ETest` 或 `E2E` 结尾，放在 `im-bootstrap/src/test/java/com/im/bootstrap/` 下。
+- E2E 测试类命名规范：以 `E2ETest` 或 `E2E` 结尾，放在 `im-server/src/test/java/com/im/bootstrap/` 下。
 - 测试之前确认本地基础设施已启动（如 `redis-cli ping`）。
 
 ## E2E 测试基类 BaseE2ETest

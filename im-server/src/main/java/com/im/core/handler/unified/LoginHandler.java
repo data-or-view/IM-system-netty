@@ -55,6 +55,7 @@ public class LoginHandler implements RequestHandler {
         LoginUseCase.LoginResult result = loginUseCase.execute(userId, platformId, 0);
 
         // ② 绑定 session（会触发多端登录策略检查，可能踢旧 session）
+        //    _channel 由 WsRequestAdapter 注入，HTTP 场景没有 channel 跳过 session 绑定
         Channel channel = req.attribute("_channel");
         if (channel != null) {
             IConnectionSession session = sessionManager.getByChannel(channel);
@@ -71,7 +72,7 @@ public class LoginHandler implements RequestHandler {
             }
         }
 
-        // 投递离线消息（通过 Channel 直接写 WS 帧）
+        // 投递离线消息（仅 WS 场景有 channel）
         if (channel != null && result.offlineMessages() != null && !result.offlineMessages().isEmpty()) {
             for (Message offlineMsg : result.offlineMessages()) {
                 try {

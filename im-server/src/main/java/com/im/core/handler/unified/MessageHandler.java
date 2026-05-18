@@ -55,19 +55,9 @@ public class MessageHandler implements RequestHandler {
         int limit = req.getInt("limit", 50);
 
         var messages = messageStore.pullBySequence(conversationId, startSeq, endSeq, limit);
-        @SuppressWarnings("rawtypes")
-        List<Map> msgMaps = messages.stream()
-                .map(msg -> {
-                    try {
-                        return MAPPER.convertValue(msg, Map.class);
-                    } catch (Exception e) {
-                        return Map.of("error", "serialization failed");
-                    }
-                })
-                .collect(Collectors.toList());
         long maxSeq = sequenceManager.getMaximumSequence(conversationId);
-        return Map.of("conversationId", conversationId, "messages", msgMaps,
-                "count", msgMaps.size(), "maxSeq", maxSeq);
+        return Map.of("conversationId", conversationId, "messages", toMapList(messages),
+                "count", messages.size(), "maxSeq", maxSeq);
     }
 
     private Object handleSeq(ApiRequest req) {
@@ -102,21 +92,10 @@ public class MessageHandler implements RequestHandler {
 
             // 拉取 lastSeq 之后的新消息
             var messages = messageStore.pullBySequence(convId, lastSeq + 1, 0, limit);
-            @SuppressWarnings("rawtypes")
-            List<Map> msgMaps = messages.stream()
-                    .map(msg -> {
-                        try {
-                            return MAPPER.convertValue(msg, Map.class);
-                        } catch (Exception e) {
-                            return Map.of("error", "serialization failed");
-                        }
-                    })
-                    .collect(Collectors.toList());
-
             long maxSeq = sequenceManager.getMaximumSequence(convId);
             syncs.add(Map.of(
                     "conversationId", convId,
-                    "messages", msgMaps,
+                    "messages", toMapList(messages),
                     "maxSeq", maxSeq
             ));
         }
@@ -154,21 +133,22 @@ public class MessageHandler implements RequestHandler {
 
         SearchMessagesResult result = messageStore.searchMessages(param);
 
-        @SuppressWarnings({"rawtypes", "unchecked"})
-        List<Map> rawMaps = result.getMessages().stream()
-                .map(msg -> {
-                    try {
-                        return MAPPER.convertValue(msg, Map.class);
-                    } catch (Exception e) {
-                        return Map.of("error", "serialization failed");
-                    }
-                })
-                .collect(Collectors.toList());
-
         return Map.of(
-                "messages", rawMaps,
+                "messages", toMapList(result.getMessages()),
                 "totalCount", result.getTotalCount(),
                 "hasMore", result.hasMore()
         );
+    }
+
+    // 抽取公共方法而非三次重复 lambda，统一处理序列化异常
+    @SuppressWarnings("rawtypes")
+    private List<Map> toMapList(List<?> items) {
+        return items.stream().map(item -> {
+            try {
+                return MAPPER.convertValue(item, Map.class);
+            } catch (Exception e) {
+                return Map.of("error", "serialization failed");
+            }
+        }).collect(Collectors.toList());
     }
 }
