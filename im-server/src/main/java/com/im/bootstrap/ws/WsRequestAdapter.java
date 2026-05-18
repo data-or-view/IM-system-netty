@@ -70,6 +70,7 @@ public class WsRequestAdapter extends SimpleChannelInboundHandler<WebSocketFrame
             raw = MAPPER.readValue(text, MAP_TYPE);
         } catch (Exception e) {
             log.warn("Invalid WS JSON from {}: {}", ctx.channel().remoteAddress(), e.getMessage());
+            WsResponseWriter.writeProtocolError(ctx, "invalid json: " + e.getMessage());
             return;
         }
 
@@ -77,11 +78,13 @@ public class WsRequestAdapter extends SimpleChannelInboundHandler<WebSocketFrame
         String opStr = raw.containsKey("op") ? raw.get("op").toString() : null;
         if (opStr == null || opStr.isBlank()) {
             log.warn("Missing 'op' in WS frame from {}", ctx.channel().remoteAddress());
+            WsResponseWriter.writeProtocolError(ctx, "missing 'op' field");
             return;
         }
         Operation operation = Operation.fromOpName(opStr);
         if (operation == null) {
             log.warn("Unknown operation '{}' from {}", opStr, ctx.channel().remoteAddress());
+            WsResponseWriter.writeProtocolError(ctx, "unknown operation: " + opStr);
             return;
         }
 

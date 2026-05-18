@@ -5,44 +5,36 @@ import com.im.common.lifecycle.Lifecycle;
 import com.im.common.retry.RetryExecutor;
 import com.im.config.Config;
 import com.im.core.auth.HmacTokenAuthenticator;
-import com.im.core.cache.ConcurrentHashCache;
 import com.im.core.call.CallStateManager;
 import com.im.core.call.LiveKitCallManager;
 import com.im.core.conversation.DbConversationManager;
-import com.im.core.conversation.LocalConversationManager;
-import com.im.core.conversation.RedisConversationManager;
 import com.im.core.delivery.ClusterDeliveryHandler;
 import com.im.core.delivery.DeliveryConsumer;
-import com.im.core.delivery.LocalClusterMessageBus;
 import com.im.core.delivery.PersistenceConsumer;
 import com.im.core.delivery.RedisClusterMessageBus;
-import com.im.core.discovery.*;
+import com.im.core.discovery.RedisNodeDiscovery;
 import com.im.core.dispatcher.ApiDispatcher;
 import com.im.core.dispatcher.PendingAcknowledgementManager;
 import com.im.infrastructure.storage.file.MinioFileStorageService;
 import com.im.infrastructure.storage.usecase.FileUploadUseCase;
 import com.im.infrastructure.storage.usecase.MultipartUploadUseCase;
 import com.im.core.friend.DbFriendManager;
-import com.im.core.friend.LocalFriendManager;
 import com.im.core.group.DbGroupManager;
-import com.im.core.group.LocalGroupManager;
 import com.im.core.handler.*;
 import com.im.core.handler.unified.*;
-import com.im.core.mq.MemoryMessageQueue;
 import com.im.core.mq.RedisMessageQueue;
 import com.im.core.redis.RedisConfiguration;
 import com.im.core.redis.RedisRouteTable;
-import com.im.core.redis.RedisStateStore;
 import com.im.core.retry.FailsafeRetryExecutor;
-import com.im.core.seq.LocalSequenceManager;
 import com.im.core.seq.RedisSequenceManager;
+import com.im.core.session.RedisSessionManager;
 import com.im.core.session.SessionManager;
+import com.im.core.db.DatabaseConfiguration;
+import com.im.core.db.MyBatisPlusFactory;
+import com.im.core.db.SchemaInitializer;
 import com.im.core.store.DbMessageStore;
-import com.im.core.store.LocalMessageStore;
-import com.im.core.store.LocalStateStore;
 import com.im.core.usecase.*;
 import com.im.core.user.DbUserManager;
-import com.im.core.user.LocalUserManager;
 import com.im.common.util.IMExecutors;
 import com.im.core.webhook.LocalWebhookManager;
 import io.netty.channel.Channel;
@@ -92,6 +84,10 @@ public class IMServer implements Lifecycle {
         databaseFailed = true;
     }
 
+    static void resetDatabaseFailed() {
+        databaseFailed = false;
+    }
+
     private EventLoopGroup bossGroup;
     private EventLoopGroup workerGroup;
     private Channel wsChannel;
@@ -100,42 +96,41 @@ public class IMServer implements Lifecycle {
 
     public IMServer(Config config) {
         this.config = config;
-        this.sessionManager = new SessionManager();
+        this.redisConfig = buildRedisConfig(config);
+        if (this.redisConfig == null) {
+            throw new IllegalStateException(
+                    "Cluster mode requires Redis. Set im.redis.host (and im.db.enabled=true).");
+        }
+        if (!dbEnabled()) {
+            throw new IllegalStateException(
+                    "Cluster mode requires database. Set im.db.enabled=true and initialize schema.");
+        }
+        initDatabase();
+        this.sessionManager = new RedisSessionManager(redisConfig);
         applyMultiLoginStrategy(config);
         this.pendingAcknowledgementManager = new PendingAcknowledgementManager();
         this.virtualExecutor = Executors.newVirtualThreadPerTaskExecutor();
         String nodeId = config.getString("im.node.id", "node-1");
 
-        // 集群基础设施（Redis / Local）
-        ClusterInfra infra = initClusterInfrastructure(config, nodeId);
+        // 集群基础设施
+        ClusterInfra infra = initClusterInfrastructure(config, redisConfig, nodeId);
         this.routeTable = infra.routeTable;
-        this.redisConfig = infra.redisConfig;
         this.clusterMessageBus = infra.clusterMessageBus;
         this.nodeDiscovery = infra.nodeDiscovery;
 
         // 消息序号
-        this.sequenceManager = redisConfig != null
-                ? new RedisSequenceManager(redisConfig)
-                : new LocalSequenceManager();
+        this.sequenceManager = new RedisSequenceManager(redisConfig);
 
         // 认证 + 重试
         var authenticator = new HmacTokenAuthenticator(
                 config.getString("im.token.secret", "im-system-dev-secret-change-in-production"));
         this.retryExecutor = new FailsafeRetryExecutor();
 
-        // 业务 Manager（DB / 内存）
-        this.groupManager = dbEnabled()
-                ? new DbGroupManager(retryExecutor)
-                : new LocalGroupManager(new ConcurrentHashCache<>(), new ConcurrentHashCache<>());
-        if (dbEnabled()) {
-            this.conversationManager = new DbConversationManager(retryExecutor);
-        } else if (redisConfig != null) {
-            this.conversationManager = new RedisConversationManager(redisConfig);
-        } else {
-            this.conversationManager = new LocalConversationManager(new ConcurrentHashCache<>());
-        }
-        this.friendManager = dbEnabled() ? new DbFriendManager(retryExecutor) : new LocalFriendManager();
-        this.userManager = dbEnabled() ? new DbUserManager(retryExecutor, routeTable) : new LocalUserManager(routeTable);
+        // 业务 Manager（集群模式：必须 DB）
+        this.groupManager = new DbGroupManager(retryExecutor);
+        this.conversationManager = new DbConversationManager(retryExecutor);
+        this.friendManager = new DbFriendManager(retryExecutor);
+        this.userManager = new DbUserManager(retryExecutor, routeTable);
 
         // 文件存储
         this.fileStorage = new MinioFileStorageService(
@@ -143,7 +138,7 @@ public class IMServer implements Lifecycle {
                 config.getString("im.minio.access-key").orElse("minioadmin"),
                 config.getString("im.minio.secret-key").orElse("minioadmin"));
 
-        // RTC 通话（LiveKit）— callManager 只在此处创建，不依赖 messageQueue
+        // RTC 通话（LiveKit）
         ICallManager callManager = null;
         if (config.getBoolean("im.call.enabled", false)) {
             callManager = new LiveKitCallManager(
@@ -153,11 +148,9 @@ public class IMServer implements Lifecycle {
             log.info("LiveKitCallManager enabled: endpoint={}", config.getString("im.call.sfu-endpoint"));
         }
 
-        // 消息存储 + 队列
-        this.messageStore = dbEnabled() ? new DbMessageStore(retryExecutor) : new LocalMessageStore();
-        this.messageQueue = redisConfig != null
-                ? new RedisMessageQueue(redisConfig, nodeId)
-                : new MemoryMessageQueue();
+        // 消息存储 + 队列（集群模式：必须 DB + Redis）
+        this.messageStore = new DbMessageStore(retryExecutor);
+        this.messageQueue = new RedisMessageQueue(redisConfig, nodeId);
 
         // 通话超时管理（依赖 messageQueue，需在其之后初始化）
         this.callStateManager = (callManager != null)
@@ -226,9 +219,8 @@ public class IMServer implements Lifecycle {
 
     // ── Cluster infrastructure setup ──
 
-    private record ClusterInfra(IRouteTable routeTable, RedisConfiguration redisConfig,
-                                 IClusterMessageBus clusterMessageBus, INodeDiscovery nodeDiscovery,
-                                 IClusterStateStore stateStore) {}
+    private record ClusterInfra(IRouteTable routeTable,
+                                 IClusterMessageBus clusterMessageBus, INodeDiscovery nodeDiscovery) {}
 
     private void applyMultiLoginStrategy(Config config) {
         String strategyName = config.getString("im.login.multi-strategy", "ALLOW_MULTIPLE");
@@ -241,36 +233,52 @@ public class IMServer implements Lifecycle {
         }
     }
 
-    private ClusterInfra initClusterInfrastructure(Config config, String nodeId) {
-        IRouteTable rt;
-        RedisConfiguration rc = null;
-
-        String redisHost = config.getString("im.redis.host").orElse(null);
-        if (redisHost != null && !redisHost.isEmpty()) {
-            int redisPort = config.getInt("im.redis.port", 6379);
-            String redisPassword = config.getString("im.redis.password").orElse("");
-            int redisDatabase = config.getInt("im.redis.database", 0);
-            String redisClusterNodes = config.getString("im.redis.cluster.nodes").orElse(null);
-
-            RedisConfiguration.Builder rcb = RedisConfiguration.builder()
-                    .password(redisPassword)
-                    .database(redisDatabase);
-            if (redisClusterNodes != null && !redisClusterNodes.isEmpty()) {
-                rcb.clusterNodes(redisClusterNodes.split(","));
-            } else {
-                rcb.host(redisHost).port(redisPort);
-            }
-            rc = rcb.build();
-            rt = new RedisRouteTable(rc, sessionManager, nodeId);
-        } else {
-            rt = new LocalRouteTable(sessionManager, nodeId);
-        }
-
+    private ClusterInfra initClusterInfrastructure(Config config, RedisConfiguration rc, String nodeId) {
         return new ClusterInfra(
-                rt, rc,
-                rc != null ? new RedisClusterMessageBus(rc, nodeId) : new LocalClusterMessageBus(),
-                rc != null ? new RedisNodeDiscovery(rc) : new LocalNodeDiscovery(),
-                rc != null ? new RedisStateStore(rc) : new LocalStateStore());
+                new RedisRouteTable(rc, sessionManager, nodeId),
+                new RedisClusterMessageBus(rc, nodeId),
+                new RedisNodeDiscovery(rc));
+    }
+
+    private RedisConfiguration buildRedisConfig(Config config) {
+        String redisHost = config.getString("im.redis.host").orElse(null);
+        if (redisHost == null || redisHost.isEmpty()) return null;
+
+        int redisPort = config.getInt("im.redis.port", 6379);
+        String redisPassword = config.getString("im.redis.password").orElse("");
+        int redisDatabase = config.getInt("im.redis.database", 0);
+        String redisClusterNodes = config.getString("im.redis.cluster.nodes").orElse(null);
+
+        RedisConfiguration.Builder rcb = RedisConfiguration.builder()
+                .password(redisPassword)
+                .database(redisDatabase);
+        if (redisClusterNodes != null && !redisClusterNodes.isEmpty()) {
+            rcb.clusterNodes(redisClusterNodes.split(","));
+        } else {
+            rcb.host(redisHost).port(redisPort);
+        }
+        return rcb.build();
+    }
+
+    private void initDatabase() {
+        String jdbcUrl = config.getString("im.db.jdbc-url").orElse(null);
+        DatabaseConfiguration dbConfig = jdbcUrl != null
+                ? new DatabaseConfiguration.Builder()
+                .jdbcUrl(jdbcUrl)
+                .username(config.getString("im.db.username", "root"))
+                .password(config.getString("im.db.password", "password"))
+                .build()
+                : DatabaseConfiguration.develop();
+        try {
+            MyBatisPlusFactory.init(dbConfig);
+            SchemaInitializer.initialize(MyBatisPlusFactory.getDataSource(),
+                    config.getString("im.db.schema").orElse("auto"));
+            log.info("Database initialized: jdbcUrl={}", dbConfig.getJdbcUrl());
+        } catch (Exception e) {
+            log.error("Database initialization failed", e);
+            markDatabaseFailed();
+            throw new IllegalStateException("Database initialization failed", e);
+        }
     }
 
     // ── Lifecycle ──

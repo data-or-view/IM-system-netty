@@ -61,12 +61,28 @@ public class WsResponseWriter implements ResponseWriter {
         writeFrame(envelope);
     }
 
+    /**
+     * 写协议层错误帧（用于 JSON 解析失败、op 缺失等无法构建正常 ack 的场景）。
+     * 使用固定 {@code "error"} 作为 op，不包含 seq。
+     */
+    public static void writeProtocolError(ChannelHandlerContext ctx, String message) {
+        Map<String, Object> envelope = new LinkedHashMap<>();
+        envelope.put("op", "error");
+        envelope.put("code", 400);
+        envelope.put("msg", message);
+        writeRawFrame(ctx, envelope);
+    }
+
     private void writeFrame(Map<String, Object> envelope) {
+        writeRawFrame(ctx, envelope);
+    }
+
+    private static void writeRawFrame(ChannelHandlerContext ctx, Map<String, Object> envelope) {
         try {
             String json = MAPPER.writeValueAsString(envelope);
             ctx.channel().writeAndFlush(new TextWebSocketFrame(json));
         } catch (Exception e) {
-            log.error("Failed to write WS response: op={}, seq={}", operation, seq, e);
+            log.error("Failed to write WS response", e);
         }
     }
 }

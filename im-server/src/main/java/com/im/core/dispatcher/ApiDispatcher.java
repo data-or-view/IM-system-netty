@@ -15,6 +15,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -40,8 +41,33 @@ public class ApiDispatcher {
 
     private final Map<String, RequestHandler> handlerMap = new ConcurrentHashMap<>();
     private final List<ApiInterceptor> interceptors = new CopyOnWriteArrayList<>();
+    private final Map<Class<? extends Throwable>, ExceptionHandler> exceptionHandlers = new LinkedHashMap<>();
+
+    /**
+     * 自定义异常处理器，用于为特定异常类型定制错误响应。
+     *
+     * <p>注册后，handler 执行中抛出该类型异常时优先调用此处理器。
+     * 处理器需自行通过 {@link ApiRequest#responseWriter()} 写回响应。
+     * 查找时按继承链向上匹配（子类 → 父类）。</p>
+     */
+    @FunctionalInterface
+    public interface ExceptionHandler {
+        void handle(Exception e, ApiRequest request);
+    }
 
     public ApiDispatcher() {
+    }
+
+    /**
+     * 注册自定义异常处理器（按 class 精确匹配 + 继承链查找）。
+     *
+     * @param type    异常类型（如 {@code RetryExecutionException.class}）
+     * @param handler 自定义处理逻辑
+     */
+    public ApiDispatcher registerExceptionHandler(Class<? extends Throwable> type, ExceptionHandler handler) {
+        exceptionHandlers.put(type, handler);
+        log.info("ExceptionHandler registered: {}", type.getSimpleName());
+        return this;
     }
 
     // ── 注册 ──
@@ -153,8 +179,15 @@ public class ApiDispatcher {
             request.responseWriter().writeError(e.getErrorCode(), e.getDetail());
         } catch (Exception e) {
             handlerEx = e;
-            log.error("Handler error: op={}", request.operation(), e);
-            request.responseWriter().writeError(ImErrorCode.INTERNAL_ERROR, e.getMessage());
+            ExceptionHandler customHandler = findExceptionHandler(e.getClass());
+            if (customHandler != null) {
+                log.warn("Handler error handled by custom handler: op={}, ex={}",
+                        request.operation(), e.getClass().getSimpleName());
+                customHandler.handle(e, request);
+            } else {
+                log.error("Handler error: op={}", request.operation(), e);
+                request.responseWriter().writeError(ImErrorCode.INTERNAL_ERROR, null);
+            }
         } finally {
             afterCompleteReverse(request, idx, handlerEx);
         }
@@ -176,5 +209,14 @@ public class ApiDispatcher {
                 log.warn("Interceptor '{}' afterCompletion threw: {}", interceptors.get(i).name(), e.getMessage());
             }
         }
+    }
+
+    /** 按异常类型的继承链查找匹配的 ExceptionHandler。 */
+    private ExceptionHandler findExceptionHandler(Class<? extends Throwable> exceptionClass) {
+        for (Class<?> cls = exceptionClass; cls != null && cls != Throwable.class; cls = cls.getSuperclass()) {
+            ExceptionHandler handler = exceptionHandlers.get(cls);
+            if (handler != null) return handler;
+        }
+        return null;
     }
 }

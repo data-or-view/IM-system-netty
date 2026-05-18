@@ -30,8 +30,6 @@ class CallE2ETest extends BaseE2ETest {
     @BeforeAll
     static void setup() throws Exception {
         startServer(Map.of(
-                "im.redis.host", "127.0.0.1",
-                "im.redis.port", "6379",
                 "im.call.enabled", "true",
                 "im.call.api-key", "devkey",
                 "im.call.api-secret", "im-system-livekit-secret-2024",

@@ -1,5 +1,6 @@
 package com.im.bootstrap.http;
 
+import com.im.common.enums.ImErrorCode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.im.core.serialization.jackson.ObjectMapperProvider;
 import io.netty.buffer.ByteBuf;
@@ -30,10 +31,25 @@ public class JsonResponse {
 
     public static void error(ChannelHandlerContext ctx, HttpResponseStatus status, String message) {
         try {
-            String json = MAPPER.writeValueAsString(new ErrorBody(status.code(), message));
+            String json = MAPPER.writeValueAsString(new ErrorBody(status.code(), status.code(), message));
             writeRaw(ctx, status, json);
         } catch (Exception e) {
-            writeRaw(ctx, status, "{\"code\":" + status.code() + ",\"message\":\"" + message + "\"}");
+            writeRaw(ctx, status, "{\"code\":" + status.code() + ",\"imCode\":" + status.code() + ",\"message\":\"" + message + "\"}");
+        }
+    }
+
+    /**
+     * 写 IM 错误响应：将 IM 错误码映射为标准 HTTP 状态码，
+     * 并在 JSON body 中携带原始 IM 错误码。
+     */
+    public static void imError(ChannelHandlerContext ctx, ImErrorCode imCode, String detail) {
+        HttpResponseStatus httpStatus = toHttpStatus(imCode);
+        String msg = detail != null ? detail : imCode.getMessage();
+        try {
+            String json = MAPPER.writeValueAsString(new ErrorBody(httpStatus.code(), imCode.getCode(), msg));
+            writeRaw(ctx, httpStatus, json);
+        } catch (Exception e) {
+            writeRaw(ctx, httpStatus, "{\"code\":" + httpStatus.code() + ",\"imCode\":" + imCode.getCode() + ",\"message\":\"" + msg + "\"}");
         }
     }
 
@@ -47,6 +63,23 @@ public class JsonResponse {
 
     public static void serverError(ChannelHandlerContext ctx, String message) {
         error(ctx, HttpResponseStatus.INTERNAL_SERVER_ERROR, message);
+    }
+
+    /**
+     * 将 ImErrorCode 映射为标准 HTTP 状态码。
+     * IM 专用码（440/480/481/482/483）在 HTTP 传输时映射为合适的标准码。
+     */
+    static HttpResponseStatus toHttpStatus(ImErrorCode code) {
+        return switch (code) {
+            case INVALID_MESSAGE -> HttpResponseStatus.BAD_REQUEST;
+            case USER_OFFLINE -> HttpResponseStatus.BAD_REQUEST;
+            case DELIVERY_FAILED -> HttpResponseStatus.INTERNAL_SERVER_ERROR;
+            case MESSAGE_TOO_LARGE -> HttpResponseStatus.REQUEST_ENTITY_TOO_LARGE;
+            case DUPLICATE_MESSAGE -> HttpResponseStatus.CONFLICT;
+            case MQ_UNAVAILABLE -> HttpResponseStatus.SERVICE_UNAVAILABLE;
+            // 标准 HTTP 码直接映射
+            default -> HttpResponseStatus.valueOf(code.getCode());
+        };
     }
 
     private static void write(ChannelHandlerContext ctx, HttpResponseStatus status, Object data) {
@@ -74,5 +107,5 @@ public class JsonResponse {
         return MAPPER;
     }
 
-    private record ErrorBody(int code, String message) {}
+    private record ErrorBody(int code, int imCode, String message) {}
 }

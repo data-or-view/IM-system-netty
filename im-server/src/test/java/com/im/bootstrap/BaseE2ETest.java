@@ -83,16 +83,19 @@ public abstract class BaseE2ETest {
      * @param config 额外配置项（如 im.redis.host、im.login.multi-strategy 等）
      */
     protected static void startServer(Map<String, String> config) throws Exception {
+        IMServer.resetDatabaseFailed();
         ConfigLoader.clearCustomSources();
         SET_PROPS.clear();
 
         wsPort = PORT_COUNTER.getAndIncrement();
 
-        // 默认配置
+        // 默认配置（集群模式必须 Redis + DB）
         setProp("im.ws.port", String.valueOf(wsPort));
         setProp("im.ws.enabled", "true");
         setProp("im.http.enabled", "false");
-        setProp("im.db.enabled", "false");
+        setProp("im.db.enabled", "true");
+        setProp("im.redis.host", "127.0.0.1");
+        setProp("im.redis.port", "6379");
         setProp("im.server.use-epoll", "false");
         setProp("im.token.secret", "e2e-test-secret");
         setProp("im.node.id", "e2e-node-" + wsPort);

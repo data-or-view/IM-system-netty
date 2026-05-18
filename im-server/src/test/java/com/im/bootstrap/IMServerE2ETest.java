@@ -5,6 +5,8 @@ import com.im.config.Config;
 import com.im.config.ConfigLoader;
 import com.im.config.ConfigSource;
 import com.im.core.serialization.jackson.ObjectMapperProvider;
+import io.lettuce.core.RedisClient;
+import io.lettuce.core.api.StatefulRedisConnection;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -32,6 +34,7 @@ class IMServerE2ETest {
 
     @BeforeAll
     static void startServer() throws Exception {
+        IMServer.resetDatabaseFailed();
         ConfigLoader.register(new ConfigSource() {
             @Override
             public int order() {
@@ -44,7 +47,9 @@ class IMServerE2ETest {
                 map.put("im.ws.port", String.valueOf(WS_PORT));
                 map.put("im.ws.enabled", "true");
                 map.put("im.http.enabled", "false");
-                map.put("im.db.enabled", "false");
+                map.put("im.db.enabled", "true");
+                map.put("im.redis.host", "127.0.0.1");
+                map.put("im.redis.port", "6379");
                 map.put("im.node.id", "e2e-test-node");
                 map.put("im.server.use-epoll", "false");
                 map.put("im.token.secret", "e2e-test-secret");
@@ -60,6 +65,7 @@ class IMServerE2ETest {
     @AfterAll
     static void stopServer() {
         if (server != null) {
+            cleanupRedis("e2e_test_user");
             server.stop();
             log.info("E2E test server stopped");
         }
@@ -116,6 +122,20 @@ class IMServerE2ETest {
 
         } finally {
             ws.sendClose(1000, "done").get(3, TimeUnit.SECONDS);
+        }
+    }
+
+    private static void cleanupRedis(String... userIds) {
+        try {
+            RedisClient client = RedisClient.create("redis://127.0.0.1:6379");
+            try (StatefulRedisConnection<String, String> conn = client.connect()) {
+                for (String uid : userIds) {
+                    conn.sync().del("route:" + uid, "online:" + uid);
+                }
+            }
+            client.shutdown();
+        } catch (Exception e) {
+            log.warn("Redis cleanup failed: {}", e.getMessage());
         }
     }
 }

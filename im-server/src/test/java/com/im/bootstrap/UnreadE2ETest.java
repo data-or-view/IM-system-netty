@@ -32,10 +32,7 @@ class UnreadE2ETest extends BaseE2ETest {
 
     @BeforeAll
     static void setup() throws Exception {
-        startServer(Map.of(
-                "im.redis.host", "127.0.0.1",
-                "im.redis.port", "6379"
-        ));
+        startServer(Map.of());
     }
 
     @AfterAll

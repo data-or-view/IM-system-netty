@@ -6,6 +6,7 @@ import com.im.api.Operation;
 import com.im.api.RequestHandler;
 import com.im.api.ResponseWriter;
 import com.im.common.enums.ImErrorCode;
+import com.im.common.exception.ImException;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -162,6 +163,128 @@ class ApiDispatcherTest {
         assertEquals(1, captured.size());
         assertNotNull(captured.get(0));
         assertEquals("test error", captured.get(0).getMessage());
+        // 非 ImException 的 detail 不应泄露给客户端
+        assertNull(responseWriter.lastErrorDetail);
+    }
+
+    @Test
+    void imExceptionPreservesDetail() {
+        dispatcher.registerHandler(Operation.HEARTBEAT, req -> {
+            throw new ImException(ImErrorCode.BAD_REQUEST, "field userId is required");
+        });
+
+        dispatcher.dispatch(request(Operation.HEARTBEAT));
+
+        assertEquals(ImErrorCode.BAD_REQUEST, responseWriter.lastError);
+        assertEquals("field userId is required", responseWriter.lastErrorDetail);
+    }
+
+    @Test
+    void interceptorImExceptionPropagatesToClient() {
+        dispatcher.addInterceptor(new ApiInterceptor() {
+            @Override public String name() { return "Auth"; }
+            @Override public boolean preHandle(ApiRequest request) {
+                throw new ImException(ImErrorCode.UNAUTHORIZED, "token expired");
+            }
+            @Override public void afterCompletion(ApiRequest request, Object result, Exception error) {
+                log.add("afterComplete:" + error);
+            }
+        });
+        dispatcher.registerHandler(Operation.HEARTBEAT, req -> {
+            log.add("handler:" + req.operation());
+            return "ok";
+        });
+
+        dispatcher.dispatch(request(Operation.HEARTBEAT));
+
+        // 调度器应写出 UNAUTHORIZED 错误码和 detail
+        assertEquals(ImErrorCode.UNAUTHORIZED, responseWriter.lastError);
+        assertEquals("token expired", responseWriter.lastErrorDetail);
+        // 阻断的拦截器不触发自己的 afterComplete（同 return false 语义）
+        assertFalse(log.stream().anyMatch(s -> s.startsWith("afterComplete")),
+                "throwing interceptor's afterComplete should not be called");
+        // handler 不应执行
+        assertFalse(log.stream().anyMatch(s -> s.startsWith("handler:")),
+                "handler should not execute when interceptor throws");
+    }
+
+    @Test
+    void interceptorImExceptionAfterCompleteForPassed() {
+        // A 通过，B 抛 ImException
+        dispatcher.addInterceptor(new LoggingInterceptor("A"));
+        dispatcher.addInterceptor(new ApiInterceptor() {
+            @Override public String name() { return "Thrower"; }
+            @Override public boolean preHandle(ApiRequest request) {
+                throw new ImException(ImErrorCode.UNAUTHORIZED, "token expired");
+            }
+            @Override public void afterCompletion(ApiRequest request, Object result, Exception error) {
+                log.add("afterComplete:" + error);
+            }
+        });
+
+        dispatcher.registerHandler(Operation.HEARTBEAT, req -> {
+            log.add("handler:" + req.operation());
+            return "ok";
+        });
+
+        dispatcher.dispatch(request(Operation.HEARTBEAT));
+
+        // A 已通过，应被反向回调 afterComplete
+        assertEquals(2, log.size());
+        assertEquals("pre:A:heartbeat", log.get(0));
+        assertEquals("after:A:heartbeat", log.get(1));
+    }
+
+    // ── 自定义异常处理器 ──
+
+    @Test
+    void customExceptionHandlerCalled() {
+        dispatcher.registerExceptionHandler(IllegalArgumentException.class, (e, req) -> {
+            responseWriter.writeError(ImErrorCode.BAD_REQUEST, "custom: " + e.getMessage());
+        });
+
+        dispatcher.registerHandler(Operation.HEARTBEAT, req -> {
+            throw new IllegalArgumentException("negative id");
+        });
+
+        dispatcher.dispatch(request(Operation.HEARTBEAT));
+
+        assertEquals(ImErrorCode.BAD_REQUEST, responseWriter.lastError);
+        assertEquals("custom: negative id", responseWriter.lastErrorDetail);
+    }
+
+    @Test
+    void customExceptionHandlerBySuperclass() {
+        // 注册父类型 handler，子类异常应能匹配
+        dispatcher.registerExceptionHandler(RuntimeException.class, (e, req) -> {
+            responseWriter.writeError(ImErrorCode.INTERNAL_ERROR, "runtime: " + e.getMessage());
+        });
+
+        dispatcher.registerHandler(Operation.HEARTBEAT, req -> {
+            throw new IllegalArgumentException("bad arg");
+        });
+
+        dispatcher.dispatch(request(Operation.HEARTBEAT));
+
+        assertEquals(ImErrorCode.INTERNAL_ERROR, responseWriter.lastError);
+        assertEquals("runtime: bad arg", responseWriter.lastErrorDetail);
+    }
+
+    @Test
+    void customExceptionHandlerNotCalledForDifferentType() {
+        dispatcher.registerExceptionHandler(IllegalArgumentException.class, (e, req) -> {
+            responseWriter.writeError(ImErrorCode.BAD_REQUEST, "custom");
+        });
+
+        dispatcher.registerHandler(Operation.HEARTBEAT, req -> {
+            throw new IllegalStateException("state error");
+        });
+
+        dispatcher.dispatch(request(Operation.HEARTBEAT));
+
+        // IllegalStateException 不匹配 IllegalArgumentException handler → 走默认逻辑（detail = null）
+        assertEquals(ImErrorCode.INTERNAL_ERROR, responseWriter.lastError);
+        assertNull(responseWriter.lastErrorDetail);
     }
 
     // ── 辅助 ──

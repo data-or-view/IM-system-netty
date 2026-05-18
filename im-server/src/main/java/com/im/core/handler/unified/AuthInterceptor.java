@@ -4,6 +4,8 @@ import com.im.api.ApiInterceptor;
 import com.im.api.ApiRequest;
 import com.im.api.IAuthenticator;
 import com.im.api.Operation;
+import com.im.common.enums.ImErrorCode;
+import com.im.common.exception.ImException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -69,9 +71,12 @@ public class AuthInterceptor implements ApiInterceptor {
             request.setAttribute("_uid", userId);
             log.debug("AUTH OK: userId={}, op={}", userId, request.operation());
             return true;
+        } catch (ImException e) {
+            // ImException 抛给调度器，带上具体错误码和详情
+            throw e;
         } catch (Exception e) {
-            log.warn("Token validation failed: op={}, {}", request.operation(), e.getMessage());
-            return false;
+            // 非 ImException 包装为 UNAUTHORIZED，附带错误原因
+            throw new ImException(ImErrorCode.UNAUTHORIZED, e.getMessage());
         }
     }
 

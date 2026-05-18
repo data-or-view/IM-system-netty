@@ -29,8 +29,6 @@ class MultiLoginE2ETest extends BaseE2ETest {
     @BeforeAll
     static void setup() throws Exception {
         startServer(Map.of(
-                "im.redis.host", "127.0.0.1",
-                "im.redis.port", "6379",
                 "im.login.multi-strategy", MultiLoginStrategy.SAME_TERM_KICK.name()
         ));
     }

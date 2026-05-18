@@ -3,7 +3,6 @@ package com.im.bootstrap.http;
 import com.im.api.ResponseWriter;
 import com.im.common.enums.ImErrorCode;
 import io.netty.channel.ChannelHandlerContext;
-import io.netty.handler.codec.http.HttpResponseStatus;
 
 /**
  * HTTP REST 协议响应写回。
@@ -27,6 +26,6 @@ public class HttpResponseWriter implements ResponseWriter {
 
     @Override
     public void writeError(ImErrorCode code, String detail) {
-        JsonResponse.error(ctx, HttpResponseStatus.valueOf(code.getCode()), detail);
+        JsonResponse.imError(ctx, code, detail);
     }
 }
