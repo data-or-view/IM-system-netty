@@ -4,7 +4,7 @@ import com.im.api.*;
 import com.im.common.lifecycle.Lifecycle;
 import com.im.common.retry.RetryExecutor;
 import com.im.config.Config;
-import com.im.core.auth.HmacTokenAuthenticator;
+import com.im.core.auth.JwtAuthenticator;
 import com.im.core.call.CallStateManager;
 import com.im.core.call.LiveKitCallManager;
 import com.im.core.conversation.DbConversationManager;
@@ -122,7 +122,7 @@ public class IMServer implements Lifecycle {
         this.sequenceManager = new RedisSequenceManager(redisConfig);
 
         // 认证 + 重试
-        var authenticator = new HmacTokenAuthenticator(
+        var authenticator = new JwtAuthenticator(
                 config.getString("im.token.secret", "im-system-dev-secret-change-in-production"));
         this.retryExecutor = new FailsafeRetryExecutor();
 
@@ -208,7 +208,7 @@ public class IMServer implements Lifecycle {
 
         dispatcher.registerHandler(Operation.LOGIN, new LoginHandler(loginUseCase, sessionManager, routeTable, nodeId));
         dispatcher.registerHandler(Operation.REGISTER, new RegisterHandler(new RegisterUseCase(userManager)));
-        dispatcher.registerHandler(Operation.HEARTBEAT, new HeartbeatHandler(new HeartbeatUseCase(routeTable), sessionManager));
+        dispatcher.registerHandler(Operation.HEARTBEAT, new HeartbeatHandler(new HeartbeatUseCase(routeTable), sessionManager, authenticator));
         dispatcher.registerHandler(Operation.FILE_UPLOAD, new com.im.core.handler.unified.FileUploadHandler(
                 new FileUploadUseCase(fileStorage, config.getLong("im.minio.max-file-size", 100L * 1024 * 1024))));
         dispatcher.registerHandlers(new com.im.core.handler.unified.FileMultipartHandler(

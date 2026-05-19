@@ -33,6 +33,7 @@
         <minio.version>8.5.17</minio.version>
         <failsafe.version>3.3.2</failsafe.version>
         <snakeyaml.version>2.4</snakeyaml.version>
+        <jjwt.version>0.12.6</jjwt.version>
         <kafka.version>3.9.0</kafka.version>
         <opentelemetry.version>1.62.0</opentelemetry.version>
         <opentelemetry-javaagent.version>2.27.0</opentelemetry-javaagent.version>
@@ -226,6 +227,25 @@
                 <groupId>org.apache.kafka</groupId>
                 <artifactId>kafka-clients</artifactId>
                 <version>${kafka.version}</version>
+            </dependency>
+
+            <!-- JJWT -->
+            <dependency>
+                <groupId>io.jsonwebtoken</groupId>
+                <artifactId>jjwt-api</artifactId>
+                <version>${jjwt.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.jsonwebtoken</groupId>
+                <artifactId>jjwt-impl</artifactId>
+                <version>${jjwt.version}</version>
+                <scope>runtime</scope>
+            </dependency>
+            <dependency>
+                <groupId>io.jsonwebtoken</groupId>
+                <artifactId>jjwt-jackson</artifactId>
+                <version>${jjwt.version}</version>
+                <scope>runtime</scope>
             </dependency>
 
             <!-- OpenTelemetry -->

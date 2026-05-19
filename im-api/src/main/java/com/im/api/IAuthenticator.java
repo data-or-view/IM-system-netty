@@ -66,4 +66,42 @@ public interface IAuthenticator {
     default void revokeToken(String token) {
         // 无状态 JWT 需要黑名单机制，默认空实现
     }
+
+    // ── 双 token 续期 ──
+
+    /**
+     * Token 刷新结果。
+     *
+     * @param accessToken  新的 access token
+     * @param refreshToken 新的 refresh token（为 null 表示不轮换）
+     */
+    record TokenRefreshResult(String accessToken, String refreshToken) {
+        public boolean hasNewRefreshToken() {
+            return refreshToken != null && !refreshToken.isEmpty();
+        }
+    }
+
+    /**
+     * 签发 refresh token（用于双 token 续期）。
+     *
+     * <p>refresh token 的有效期通常远长于 access token（如 30 天），
+     * 需在 payload 中加入 {@code typ:"refresh"} 标记以区别于 access token。</p>
+     *
+     * @param userId          用户 ID
+     * @param ttl             有效期（如 30 天）
+     * @param appManagerLevel 管理权限等级
+     * @return refresh token 字符串
+     */
+    String issueRefreshToken(String userId, Duration ttl, int appManagerLevel);
+
+    /**
+     * 用 refresh token 换发新的 access token（必要时轮换 refresh token）。
+     *
+     * <p>验证 refresh token 的有效性和 {@code typ:"refresh"} 标记。
+     * 当剩余有效期不足一个阈值（如 7 天）时，轮换 refresh token。</p>
+     *
+     * @param refreshToken 客户端携带的 refresh token
+     * @return TokenRefreshResult，包含新的 access token 和（可选）新的 refresh token
+     */
+    TokenRefreshResult refreshAccessToken(String refreshToken);
 }

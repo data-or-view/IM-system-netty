@@ -15,7 +15,8 @@ import java.util.List;
  */
 public class LoginUseCase {
 
-    private static final Duration TOKEN_TTL = Duration.ofDays(30);
+    private static final Duration ACCESS_TOKEN_TTL = Duration.ofHours(2);
+    private static final Duration REFRESH_TOKEN_TTL = Duration.ofDays(30);
 
     private final IAuthenticator authenticator;
     private final IMessageStore messageStore;
@@ -25,12 +26,14 @@ public class LoginUseCase {
         this.messageStore = messageStore;
     }
 
-    public record LoginResult(String token, int platformId, List<Message> offlineMessages) {}
+    public record LoginResult(String token, String refreshToken, int platformId, List<Message> offlineMessages) {}
 
     public LoginResult execute(String userId, int platformId, int appManagerLevel) {
         String token = null;
+        String refreshToken = null;
         if (authenticator != null) {
-            token = authenticator.issueToken(userId, TOKEN_TTL, appManagerLevel);
+            token = authenticator.issueToken(userId, ACCESS_TOKEN_TTL, appManagerLevel);
+            refreshToken = authenticator.issueRefreshToken(userId, REFRESH_TOKEN_TTL, appManagerLevel);
         }
 
         List<Message> offline = List.of();
@@ -38,6 +41,6 @@ public class LoginUseCase {
             offline = messageStore.pullOffline(userId, 100);
         }
 
-        return new LoginResult(token, platformId, offline);
+        return new LoginResult(token, refreshToken, platformId, offline);
     }
 }

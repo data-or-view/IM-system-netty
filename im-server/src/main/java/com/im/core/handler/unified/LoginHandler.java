@@ -90,6 +90,8 @@ public class LoginHandler implements RequestHandler {
 
         return Map.of("status", "OK",
                 "token", result.token() != null ? result.token() : "",
+                "refreshToken", result.refreshToken() != null ? result.refreshToken() : "",
+                "expiresIn", 7200,
                 "platformId", platformId);
     }
 }
