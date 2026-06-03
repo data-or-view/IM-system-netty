@@ -1,11 +1,11 @@
 package com.im.core.session;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.im.api.ConnectionRef;
 import com.im.api.IConnectionSession;
 import com.im.api.ISessionManager;
 import com.im.api.MultiLoginStrategy;
 import com.im.core.serialization.jackson.ObjectMapperProvider;
-import io.netty.channel.Channel;
 import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -23,7 +23,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * 会话管理器实现，支持多端在线。
  *
  * 双索引映射：
- *   Channel → ConnectionSession（按对象引用区分）
+ *   connectionId → ConnectionSession
  *   userId  → List<ConnectionSession>（多端登录）
  *
  * 多端登录策略：
@@ -31,16 +31,14 @@ import java.util.concurrent.CopyOnWriteArrayList;
  *   · KICK_OLD：踢掉旧的
  *   · REJECT_NEW：返回 null，调用方自行决定是否断开连接
  *
- * 注意 key 用 Channel 对象引用而非 channel.id()：
- *   Netty 的 EmbeddedChannel 所有实例共享同一 ID（"0xembedded"），
- *   用 String key 会导致不同 Channel 在 map 中互相覆盖。
+ * Netty 连接由 {@link NettyConnectionRef} 适配，避免 API 层暴露 Channel。
  */
 public class SessionManager implements ISessionManager {
 
     private static final Logger log = LoggerFactory.getLogger(SessionManager.class);
 
-    /** Channel（对象引用）→ ConnectionSession */
-    private final ConcurrentMap<Channel, ConnectionSession> channelSessions = new ConcurrentHashMap<>();
+    /** connectionId → ConnectionSession */
+    private final ConcurrentMap<String, ConnectionSession> connectionSessions = new ConcurrentHashMap<>();
 
     /** userId → session 列表（多端在线） */
     private final ConcurrentMap<String, CopyOnWriteArrayList<ConnectionSession>> userSessions = new ConcurrentHashMap<>();
@@ -50,15 +48,15 @@ public class SessionManager implements ISessionManager {
     private volatile MultiLoginStrategy loginStrategy = MultiLoginStrategy.ALLOW_MULTIPLE;
 
     @Override
-    public IConnectionSession createSession(Channel channel) {
-        ConnectionSession session = new ConnectionSession(channel);
-        channelSessions.put(channel, session);
+    public IConnectionSession createSession(ConnectionRef connection) {
+        ConnectionSession session = new ConnectionSession(connection);
+        connectionSessions.put(connection.connectionId(), session);
         return session;
     }
 
     @Override
-    public IConnectionSession removeSession(Channel channel) {
-        ConnectionSession session = channelSessions.remove(channel);
+    public IConnectionSession removeSession(String connectionId) {
+        ConnectionSession session = connectionSessions.remove(connectionId);
         if (session != null && session.getUserId() != null) {
             CopyOnWriteArrayList<ConnectionSession> sessions = userSessions.get(session.getUserId());
             if (sessions != null) {
@@ -73,8 +71,8 @@ public class SessionManager implements ISessionManager {
     }
 
     @Override
-    public IConnectionSession getByChannel(Channel channel) {
-        return channelSessions.get(channel);
+    public IConnectionSession getByConnectionId(String connectionId) {
+        return connectionSessions.get(connectionId);
     }
 
     @Override
@@ -91,14 +89,14 @@ public class SessionManager implements ISessionManager {
     }
 
     @Override
-    public IConnectionSession bindUser(Channel channel, String userId) {
-        ConnectionSession session = (ConnectionSession) channelSessions.get(channel);
+    public IConnectionSession bindUser(String connectionId, String userId, int platformId) {
+        ConnectionSession session = connectionSessions.get(connectionId);
         if (session == null) {
-            session = new ConnectionSession(channel);
-            channelSessions.put(channel, session);
+            throw new IllegalArgumentException("connection not found: " + connectionId);
         }
 
         IConnectionSession kicked = null;
+        session.authenticate(userId, platformId);
 
         switch (loginStrategy) {
             case KICK_OLD -> {
@@ -108,8 +106,8 @@ public class SessionManager implements ISessionManager {
                     for (ConnectionSession old : oldSessions) {
                         if (old != session) {
                             sendKickedNotification(old, "KICK_OLD");
-                            old.getChannel().close();
-                            channelSessions.remove(old.getChannel(), old);
+                            old.getConnection().close();
+                            connectionSessions.remove(old.getConnection().connectionId(), old);
                             log.info("Kicked old session: userId={}, oldSessionId={}", userId, old.getSessionId());
                             kicked = old;
                         }
@@ -119,14 +117,14 @@ public class SessionManager implements ISessionManager {
             }
             case SAME_TERM_KICK -> {
                 // 仅踢同平台旧端
-                int newPlatformId = session.getPlatformId();
+                int newPlatformId = platformId;
                 CopyOnWriteArrayList<ConnectionSession> sessions = userSessions.get(userId);
                 if (sessions != null) {
                     for (ConnectionSession old : sessions) {
                         if (old != session && old.getPlatformId() == newPlatformId) {
                             sendKickedNotification(old, "SAME_TERM_KICK");
-                            old.getChannel().close();
-                            channelSessions.remove(old.getChannel(), old);
+                            old.getConnection().close();
+                            connectionSessions.remove(old.getConnection().connectionId(), old);
                             sessions.remove(old);
                             log.info("Kicked same-platform session: userId={}, platformId={}, oldSessionId={}",
                                     userId, newPlatformId, old.getSessionId());
@@ -148,7 +146,6 @@ public class SessionManager implements ISessionManager {
                     userSessions.computeIfAbsent(userId, k -> new CopyOnWriteArrayList<>()).add(session);
         }
 
-        session.authenticate(userId, session.getPlatformId());
         log.info("User bound: userId={}, sessionId={}, strategy={}",
                 userId, session.getSessionId(), loginStrategy);
         return kicked;
@@ -160,7 +157,7 @@ public class SessionManager implements ISessionManager {
         long timeoutMs = idleSeconds * 1000L;
         List<ConnectionSession> toClose = new ArrayList<>();
 
-        for (ConnectionSession session : channelSessions.values()) {
+        for (ConnectionSession session : connectionSessions.values()) {
             if (!session.isAuthenticated()
                     && (now - session.getCreationTime()) >= timeoutMs) {
                 toClose.add(session);
@@ -168,8 +165,8 @@ public class SessionManager implements ISessionManager {
         }
 
         for (ConnectionSession session : toClose) {
-            session.getChannel().close();
-            channelSessions.remove(session.getChannel(), session);
+            session.getConnection().close();
+            connectionSessions.remove(session.getConnection().connectionId(), session);
             log.info("Idle session closed: {}", session);
         }
 
@@ -178,13 +175,13 @@ public class SessionManager implements ISessionManager {
 
     @Override
     public List<IConnectionSession> allSessions() {
-        return Collections.unmodifiableList(new ArrayList<>(channelSessions.values()));
+        return Collections.unmodifiableList(new ArrayList<>(connectionSessions.values()));
     }
 
     @Override
     public void clear() {
-        channelSessions.values().forEach(s -> s.getChannel().close());
-        channelSessions.clear();
+        connectionSessions.values().forEach(s -> s.getConnection().close());
+        connectionSessions.clear();
         userSessions.clear();
         log.info("All sessions cleared");
     }
@@ -202,7 +199,7 @@ public class SessionManager implements ISessionManager {
             msg.put("code", 0);
             msg.put("data", data);
             String json = MAPPER.writeValueAsString(msg);
-            session.getChannel().writeAndFlush(new TextWebSocketFrame(json));
+            session.getConnection().write(new TextWebSocketFrame(json));
         } catch (Exception e) {
             log.warn("Failed to send kick notification to session {}", session.getSessionId(), e);
         }

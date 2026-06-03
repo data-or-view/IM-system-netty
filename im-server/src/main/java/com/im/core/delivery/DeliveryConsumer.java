@@ -3,7 +3,6 @@ package com.im.core.delivery;
 import com.im.api.*;
 import com.im.common.lifecycle.Lifecycle;
 import com.im.common.util.IMExecutors;
-import io.netty.channel.Channel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -18,13 +17,13 @@ import java.util.stream.Collectors;
  * 从 "deliver" topic 消费消息，并行推送到目标用户所在的所有在线节点。
  *
  * 单聊：
- *   routeTable.lookupAll(toUserId) → 并行推送到所有在线节点
+ *   routeTable.lookupAllBindings(toUserId) → 按 session 路由并行推送
  *
  * 群聊：
  *   groupManager.getMemberIds(groupId) → 展开每个成员 → 并行推送
  *
  * 设计参考 OpenIM 的 DefaultAllNode.GetConnsAndOnlinePush：
- *   通过 IRouteTable.lookupAll 精确路由，替代 OpenIM 的广播模式。
+ *   通过 IRouteTable.lookupAllBindings 精确路由，替代 OpenIM 的广播模式。
  */
 public class DeliveryConsumer implements Lifecycle {
 
@@ -94,20 +93,18 @@ public class DeliveryConsumer implements Lifecycle {
      * 单聊投递：查路由，并行推。
      */
     private void handleSingleDelivery(Message msg, String toUserId) {
-        List<RouteNode> routes = (routeTable != null)
-                ? routeTable.lookupAll(toUserId)
+        List<RouteBinding> bindings = (routeTable != null)
+                ? routeTable.lookupAllBindings(toUserId)
                 : List.of();
 
-        if (routes.isEmpty()) {
+        if (bindings.isEmpty()) {
             log.info("User {} offline, skip push for msg {}", toUserId, msg.getSequenceId());
             // TODO: 离线推送 — 用户不在线时通过 IOfflinePusher 推送通知栏消息
             // 类似微信/QQ 在手机通知栏弹出的消息提醒，需对接 FCM/APNs/Web Push 等三方服务
             return;
         }
 
-        for (RouteNode route : routes) {
-            pusher.execute(() -> pushToRoute(msg, toUserId, route));
-        }
+        pushToBindings(msg, toUserId, bindings);
     }
 
     /**
@@ -135,15 +132,13 @@ public class DeliveryConsumer implements Lifecycle {
         for (String memberId : memberIds) {
             Message copy = msg.copyForUser(memberId);
             pusher.execute(() -> {
-                List<RouteNode> routes = (routeTable != null)
-                        ? routeTable.lookupAll(memberId)
+                List<RouteBinding> bindings = (routeTable != null)
+                        ? routeTable.lookupAllBindings(memberId)
                         : List.of();
-                if (routes.isEmpty()) {
+                if (bindings.isEmpty()) {
                     log.info("Group member {} offline, skip push for msg {}", memberId, msg.getSequenceId());
                 }
-                for (RouteNode route : routes) {
-                    pushToRoute(copy, memberId, route);
-                }
+                pushToBindings(copy, memberId, bindings);
             });
         }
 
@@ -151,35 +146,49 @@ public class DeliveryConsumer implements Lifecycle {
     }
 
     /**
-     * 推送消息到指定路由节点。
-     * 多端在线时，本地节点推送到该用户的所有活跃 session。
+     * 推送消息到指定路由绑定。
+     * 本地节点按 session 精确投递；远端节点按 node 去重转发，避免同节点多个 binding 重复转发。
      */
-    private void pushToRoute(Message msg, String toUserId, RouteNode route) {
-        if (route.isLocal()) {
-            // 推送所有在线端（多端登录）
-            List<IConnectionSession> sessions = sessionManager.getSessionsByUserId(toUserId);
-            if (sessions.isEmpty()) {
-                log.warn("Local route found but no active session for user {}, msg {}",
-                        toUserId, msg.getSequenceId());
+    private void pushToBindings(Message msg, String toUserId, List<RouteBinding> bindings) {
+        Set<String> forwardedRemoteNodes = new java.util.HashSet<>();
+        for (RouteBinding binding : bindings) {
+            RouteNode route = binding.toRouteNode(localNodeId);
+            if (route.isLocal()) {
+                pusher.execute(() -> pushToLocalBinding(msg, toUserId, binding));
+            } else if (forwardedRemoteNodes.add(route.getNodeId())) {
+                pusher.execute(() -> forwardToRemoteNode(msg, toUserId, route.getNodeId()));
+            }
+        }
+    }
+
+    private void pushToLocalBinding(Message msg, String toUserId, RouteBinding binding) {
+        List<IConnectionSession> sessions = sessionManager.getSessionsByUserId(toUserId);
+        for (IConnectionSession session : sessions) {
+            if (matches(binding, session) && session.getConnection().isActive()) {
+                session.getConnection().write(msg);
+                log.info("Pushed msg {} to user {} (local session {})",
+                        msg.getSequenceId(), toUserId, session.getSessionId());
                 return;
             }
-            for (IConnectionSession session : sessions) {
-                Channel ch = session.getChannel();
-                if (ch != null && ch.isActive()) {
-                    ch.writeAndFlush(msg);
-                }
-            }
-            log.info("Pushed msg {} to user {} (local, {} sessions)", msg.getSequenceId(), toUserId, sessions.size());
+        }
+        log.warn("Local route found but no matching active session for user {}, platform={}, session={}, msg {}",
+                toUserId, binding.platformId(), binding.sessionId(), msg.getSequenceId());
+    }
+
+    private boolean matches(RouteBinding binding, IConnectionSession session) {
+        return binding.platformId() == session.getPlatformId()
+                && binding.sessionId().equals(session.getSessionId());
+    }
+
+    private void forwardToRemoteNode(Message msg, String toUserId, String nodeId) {
+        if (clusterMessageBus != null) {
+            ClusterMessage clusterMsg = ClusterMessage.fromMessage(localNodeId, msg);
+            clusterMessageBus.sendToNode(clusterMsg, nodeId);
+            log.info("Forwarded msg {} to remote node {} for user {}",
+                    msg.getSequenceId(), nodeId, toUserId);
         } else {
-            if (clusterMessageBus != null) {
-                ClusterMessage clusterMsg = ClusterMessage.fromMessage(localNodeId, msg);
-                clusterMessageBus.sendToNode(clusterMsg, route.getNodeId());
-                log.info("Forwarded msg {} to remote node {} for user {}",
-                        msg.getSequenceId(), route.getNodeId(), toUserId);
-            } else {
-                log.warn("Remote route {} but no ClusterMessageBus, msg {} dropped",
-                        route.getNodeId(), msg.getSequenceId());
-            }
+            log.warn("Remote route {} but no ClusterMessageBus, msg {} dropped",
+                    nodeId, msg.getSequenceId());
         }
     }
 

@@ -9,7 +9,6 @@ import com.im.common.enums.ImErrorCode;
 import com.im.common.exception.ImException;
 import com.im.core.serialization.jackson.ObjectMapperProvider;
 import com.im.core.usecase.RevokeUseCase;
-import io.netty.channel.Channel;
 import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 
 import java.util.LinkedHashMap;
@@ -80,9 +79,8 @@ public class RevokeHandler implements RequestHandler {
 
         for (String targetUserId : result.targetUserIds()) {
             for (IConnectionSession session : sessionManager.getSessionsByUserId(targetUserId)) {
-                Channel ch = session.getChannel();
-                if (ch != null && ch.isActive()) {
-                    ch.writeAndFlush(new TextWebSocketFrame(json));
+                if (session.getConnection().isActive()) {
+                    session.getConnection().write(new TextWebSocketFrame(json));
                 }
             }
         }

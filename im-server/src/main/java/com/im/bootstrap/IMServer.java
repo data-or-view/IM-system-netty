@@ -96,133 +96,86 @@ public class IMServer implements Lifecycle {
 
     public IMServer(Config config) {
         this.config = config;
-        this.redisConfig = buildRedisConfig(config);
-        if (this.redisConfig == null) {
-            throw new IllegalStateException(
-                    "Cluster mode requires Redis. Set im.redis.host (and im.db.enabled=true).");
-        }
-        if (!dbEnabled()) {
-            throw new IllegalStateException(
-                    "Cluster mode requires database. Set im.db.enabled=true and initialize schema.");
-        }
+        this.redisConfig = requireRedisConfig(config);
+        requireDatabaseEnabled();
         initDatabase();
-        this.sessionManager = new RedisSessionManager(redisConfig);
-        applyMultiLoginStrategy(config);
-        this.pendingAcknowledgementManager = new PendingAcknowledgementManager();
-        this.virtualExecutor = Executors.newVirtualThreadPerTaskExecutor();
+
         String nodeId = config.getString("im.node.id", "node-1");
 
-        // 集群基础设施
-        ClusterInfra infra = initClusterInfrastructure(config, redisConfig, nodeId);
+        RuntimeModule runtime = initRuntimeModule(config, redisConfig);
+        this.sessionManager = runtime.sessionManager;
+        this.pendingAcknowledgementManager = runtime.pendingAcknowledgementManager;
+        this.virtualExecutor = runtime.virtualExecutor;
+
+        ClusterInfra infra = initClusterInfrastructure(redisConfig, sessionManager, nodeId);
         this.routeTable = infra.routeTable;
         this.clusterMessageBus = infra.clusterMessageBus;
         this.nodeDiscovery = infra.nodeDiscovery;
 
-        // 消息序号
-        this.sequenceManager = new RedisSequenceManager(redisConfig);
+        BusinessModule business = initBusinessModule(config, routeTable);
+        this.retryExecutor = business.retryExecutor;
+        this.groupManager = business.groupManager;
+        this.conversationManager = business.conversationManager;
+        this.friendManager = business.friendManager;
+        this.userManager = business.userManager;
 
-        // 认证 + 重试
-        var authenticator = new JwtAuthenticator(
-                config.getString("im.token.secret", "im-system-dev-secret-change-in-production"));
-        this.retryExecutor = new FailsafeRetryExecutor();
+        StorageModule storage = initStorageModule(config, redisConfig, nodeId, business.retryExecutor);
+        this.sequenceManager = storage.sequenceManager;
+        this.messageStore = storage.messageStore;
+        this.messageQueue = storage.messageQueue;
+        this.fileStorage = storage.fileStorage;
 
-        // 业务 Manager（集群模式：必须 DB）
-        this.groupManager = new DbGroupManager(retryExecutor);
-        this.conversationManager = new DbConversationManager(retryExecutor);
-        this.friendManager = new DbFriendManager(retryExecutor);
-        this.userManager = new DbUserManager(retryExecutor, routeTable);
+        CallModule call = initCallModule(config, storage.messageQueue);
+        this.callStateManager = call.callStateManager;
 
-        // 文件存储
-        this.fileStorage = new MinioFileStorageService(
-                config.getString("im.minio.endpoint").orElse("http://127.0.0.1:9000"),
-                config.getString("im.minio.access-key").orElse("minioadmin"),
-                config.getString("im.minio.secret-key").orElse("minioadmin"));
+        ConsumerModule consumers = initConsumers(
+                nodeId, sessionManager, routeTable, clusterMessageBus, storage.messageQueue,
+                storage.messageStore, business.conversationManager, business.groupManager);
+        this.persistenceConsumer = consumers.persistenceConsumer;
+        this.deliveryConsumer = consumers.deliveryConsumer;
 
-        // RTC 通话（LiveKit）
-        ICallManager callManager = null;
-        if (config.getBoolean("im.call.enabled", false)) {
-            callManager = new LiveKitCallManager(
-                    config.getString("im.call.api-key", "devkey"),
-                    config.getString("im.call.api-secret", ""),
-                    config.getString("im.call.sfu-endpoint", "ws://localhost:7880"));
-            log.info("LiveKitCallManager enabled: endpoint={}", config.getString("im.call.sfu-endpoint"));
-        }
-
-        // 消息存储 + 队列（集群模式：必须 DB + Redis）
-        this.messageStore = new DbMessageStore(retryExecutor);
-        this.messageQueue = new RedisMessageQueue(redisConfig, nodeId);
-
-        // 通话超时管理（依赖 messageQueue，需在其之后初始化）
-        this.callStateManager = (callManager != null)
-                ? new CallStateManager(messageQueue, config.getLong("im.call.timeout-seconds", 30))
-                : null;
-
-        // 消费者
-        this.persistenceConsumer = new PersistenceConsumer(messageQueue, messageStore, conversationManager, groupManager);
-        this.deliveryConsumer = new DeliveryConsumer(
-                messageQueue, sessionManager, routeTable, clusterMessageBus, nodeId, groupManager);
-
-        // 注册集群消息处理器（接收远端节点转发来的消息，投递到本地 session）
-        ClusterDeliveryHandler clusterDeliveryHandler = new ClusterDeliveryHandler(sessionManager);
-        clusterMessageBus.subscribe("SINGLE_CHAT", clusterDeliveryHandler);
-        clusterMessageBus.subscribe("GROUP_CHAT", clusterDeliveryHandler);
-
-        // 连接事件
         this.connectionEventHandler = new ConnectionEventHandler(
                 sessionManager, pendingAcknowledgementManager, routeTable, nodeId);
 
-        // Use Cases
-        LoginUseCase loginUseCase = new LoginUseCase(authenticator, messageStore);
-        WebhookService webhookService = new WebhookService(new LocalWebhookManager(
-                config.getString("im.webhook.url").orElse("")));
-        SendMessageUseCase sendMessageUseCase = new SendMessageUseCase(
-                messageQueue, sequenceManager, groupManager, webhookService);
-
-        // ── 统一 ApiDispatcher ──
-        this.dispatcher = new ApiDispatcher();
-        dispatcher.addInterceptor(new com.im.core.handler.unified.TelemetryInterceptor());
-        dispatcher.addInterceptor(new AuthInterceptor(authenticator));
-
-        // 注册 handler（使用 Operation 枚举，路由+认证元数据由枚举统一管理）
-        dispatcher.registerHandlers(new com.im.core.handler.unified.UserHandler(userManager),
-                Operation.USER_REGISTER, Operation.USER_INFO, Operation.USER_SEARCH, Operation.USER_UPDATE);
-        dispatcher.registerHandlers(new com.im.core.handler.unified.FriendHandler(friendManager),
-                Operation.FRIEND_APPLY, Operation.FRIEND_APPROVE, Operation.FRIEND_REMOVE, Operation.FRIEND_LIST,
-                Operation.FRIEND_BLACK, Operation.FRIEND_UNBLACK, Operation.FRIEND_BLACKLIST,
-                Operation.FRIEND_APPLY_SENT, Operation.FRIEND_APPLY_DETAIL, Operation.FRIEND_APPLY_UNHANDLED_COUNT);
-        dispatcher.registerHandlers(new com.im.core.handler.unified.GroupHandler(groupManager),
-                Operation.GROUP_CREATE, Operation.GROUP_JOIN, Operation.GROUP_QUIT, Operation.GROUP_KICK,
-                Operation.GROUP_DISBAND, Operation.GROUP_INFO_UPDATE, Operation.GROUP_INFO,
-                Operation.GROUP_SEARCH, Operation.GROUP_MEMBERS, Operation.GROUP_MUTE_ALL);
-        dispatcher.registerHandlers(new com.im.core.handler.unified.ConversationHandler(conversationManager),
-                Operation.CONVERSATION_LIST, Operation.CONVERSATION_SET, Operation.CONVERSATION_READ);
-        dispatcher.registerHandlers(new com.im.core.handler.unified.MessageHandler(messageStore, sequenceManager),
-                Operation.CHAT_PULL, Operation.CHAT_SEQ, Operation.CHAT_SYNC, Operation.CHAT_SEARCH);
-        var chatHandler = new com.im.core.handler.unified.ChatHandler(sendMessageUseCase, callManager, this.callStateManager);
-        dispatcher.registerHandler(Operation.CHAT_SEND, chatHandler);
-        dispatcher.registerHandler(Operation.CHAT_SEND_GROUP, chatHandler);
-
-        // 撤回
-        RevokeUseCase revokeUseCase = new RevokeUseCase(messageStore, groupManager);
-        dispatcher.registerHandler(Operation.CHAT_REVOKE, new com.im.core.handler.unified.RevokeHandler(revokeUseCase, sessionManager));
-
-        dispatcher.registerHandler(Operation.LOGIN, new LoginHandler(loginUseCase, sessionManager, routeTable, nodeId));
-        dispatcher.registerHandler(Operation.REGISTER, new RegisterHandler(new RegisterUseCase(userManager)));
-        dispatcher.registerHandler(Operation.HEARTBEAT, new HeartbeatHandler(new HeartbeatUseCase(routeTable), sessionManager, authenticator));
-        dispatcher.registerHandler(Operation.FILE_UPLOAD, new com.im.core.handler.unified.FileUploadHandler(
-                new FileUploadUseCase(fileStorage, config.getLong("im.minio.max-file-size", 100L * 1024 * 1024))));
-        dispatcher.registerHandlers(new com.im.core.handler.unified.FileMultipartHandler(
-                        new MultipartUploadUseCase(fileStorage)),
-                Operation.FILE_MULTIPART_INIT, Operation.FILE_MULTIPART_UPLOAD,
-                Operation.FILE_MULTIPART_COMPLETE, Operation.FILE_MULTIPART_ABORT);
+        this.dispatcher = initDispatcher(
+                config, nodeId, sessionManager, routeTable, business, storage, call);
     }
 
     // ── Cluster infrastructure setup ──
 
+    private record RuntimeModule(SessionManager sessionManager,
+                                 PendingAcknowledgementManager pendingAcknowledgementManager,
+                                 ExecutorService virtualExecutor) {}
+
     private record ClusterInfra(IRouteTable routeTable,
                                  IClusterMessageBus clusterMessageBus, INodeDiscovery nodeDiscovery) {}
 
-    private void applyMultiLoginStrategy(Config config) {
+    private record BusinessModule(JwtAuthenticator authenticator,
+                                  RetryExecutor retryExecutor,
+                                  IGroupManager groupManager,
+                                  IConversationManager conversationManager,
+                                  IFriendManager friendManager,
+                                  IUserManager userManager) {}
+
+    private record StorageModule(ISequenceManager sequenceManager,
+                                 IMessageStore messageStore,
+                                 IMessageQueue messageQueue,
+                                 IFileStorageService fileStorage) {}
+
+    private record CallModule(ICallManager callManager, CallStateManager callStateManager) {}
+
+    private record ConsumerModule(PersistenceConsumer persistenceConsumer, DeliveryConsumer deliveryConsumer) {}
+
+    private RuntimeModule initRuntimeModule(Config config, RedisConfiguration redisConfig) {
+        SessionManager sessionManager = new RedisSessionManager(redisConfig);
+        applyMultiLoginStrategy(config, sessionManager);
+        return new RuntimeModule(
+                sessionManager,
+                new PendingAcknowledgementManager(),
+                Executors.newVirtualThreadPerTaskExecutor());
+    }
+
+    private void applyMultiLoginStrategy(Config config, SessionManager sessionManager) {
         String strategyName = config.getString("im.login.multi-strategy", "ALLOW_MULTIPLE");
         try {
             MultiLoginStrategy strategy = MultiLoginStrategy.valueOf(strategyName);
@@ -233,11 +186,143 @@ public class IMServer implements Lifecycle {
         }
     }
 
-    private ClusterInfra initClusterInfrastructure(Config config, RedisConfiguration rc, String nodeId) {
+    private ClusterInfra initClusterInfrastructure(RedisConfiguration rc, SessionManager sessionManager, String nodeId) {
         return new ClusterInfra(
                 new RedisRouteTable(rc, sessionManager, nodeId),
                 new RedisClusterMessageBus(rc, nodeId),
                 new RedisNodeDiscovery(rc));
+    }
+
+    private BusinessModule initBusinessModule(Config config, IRouteTable routeTable) {
+        JwtAuthenticator authenticator = new JwtAuthenticator(
+                config.getString("im.token.secret", "im-system-dev-secret-change-in-production"));
+        RetryExecutor retryExecutor = new FailsafeRetryExecutor();
+        IGroupManager groupManager = new DbGroupManager(retryExecutor);
+        IConversationManager conversationManager = new DbConversationManager(retryExecutor);
+        IFriendManager friendManager = new DbFriendManager(retryExecutor);
+        IUserManager userManager = new DbUserManager(retryExecutor, routeTable);
+        return new BusinessModule(
+                authenticator, retryExecutor, groupManager, conversationManager, friendManager, userManager);
+    }
+
+    private StorageModule initStorageModule(Config config, RedisConfiguration redisConfig,
+                                            String nodeId, RetryExecutor retryExecutor) {
+        ISequenceManager sequenceManager = new RedisSequenceManager(redisConfig);
+        IMessageStore messageStore = new DbMessageStore(retryExecutor);
+        IMessageQueue messageQueue = new RedisMessageQueue(redisConfig, nodeId);
+        IFileStorageService fileStorage = new MinioFileStorageService(
+                config.getString("im.minio.endpoint").orElse("http://127.0.0.1:9000"),
+                config.getString("im.minio.access-key").orElse("minioadmin"),
+                config.getString("im.minio.secret-key").orElse("minioadmin"));
+        return new StorageModule(sequenceManager, messageStore, messageQueue, fileStorage);
+    }
+
+    private CallModule initCallModule(Config config, IMessageQueue messageQueue) {
+        ICallManager callManager = null;
+        if (config.getBoolean("im.call.enabled", false)) {
+            callManager = new LiveKitCallManager(
+                    config.getString("im.call.api-key", "devkey"),
+                    config.getString("im.call.api-secret", ""),
+                    config.getString("im.call.sfu-endpoint", "ws://localhost:7880"));
+            log.info("LiveKitCallManager enabled: endpoint={}", config.getString("im.call.sfu-endpoint"));
+        }
+
+        CallStateManager callStateManager = (callManager != null)
+                ? new CallStateManager(messageQueue, config.getLong("im.call.timeout-seconds", 30))
+                : null;
+        return new CallModule(callManager, callStateManager);
+    }
+
+    private ConsumerModule initConsumers(String nodeId,
+                                         SessionManager sessionManager,
+                                         IRouteTable routeTable,
+                                         IClusterMessageBus clusterMessageBus,
+                                         IMessageQueue messageQueue,
+                                         IMessageStore messageStore,
+                                         IConversationManager conversationManager,
+                                         IGroupManager groupManager) {
+        PersistenceConsumer persistenceConsumer = new PersistenceConsumer(
+                messageQueue, messageStore, conversationManager, groupManager);
+        DeliveryConsumer deliveryConsumer = new DeliveryConsumer(
+                messageQueue, sessionManager, routeTable, clusterMessageBus, nodeId, groupManager);
+
+        ClusterDeliveryHandler clusterDeliveryHandler = new ClusterDeliveryHandler(sessionManager);
+        clusterMessageBus.subscribe("SINGLE_CHAT", clusterDeliveryHandler);
+        clusterMessageBus.subscribe("GROUP_CHAT", clusterDeliveryHandler);
+        return new ConsumerModule(persistenceConsumer, deliveryConsumer);
+    }
+
+    private ApiDispatcher initDispatcher(Config config,
+                                         String nodeId,
+                                         SessionManager sessionManager,
+                                         IRouteTable routeTable,
+                                         BusinessModule business,
+                                         StorageModule storage,
+                                         CallModule call) {
+        LoginUseCase loginUseCase = new LoginUseCase(business.authenticator, storage.messageStore);
+        WebhookService webhookService = new WebhookService(new LocalWebhookManager(
+                config.getString("im.webhook.url").orElse("")));
+        SendMessageUseCase sendMessageUseCase = new SendMessageUseCase(
+                storage.messageQueue, storage.sequenceManager, business.groupManager, webhookService);
+        RevokeUseCase revokeUseCase = new RevokeUseCase(storage.messageStore, business.groupManager);
+
+        ApiDispatcher dispatcher = new ApiDispatcher();
+        dispatcher.addInterceptor(new com.im.core.handler.unified.TelemetryInterceptor());
+        dispatcher.addInterceptor(new AuthInterceptor(business.authenticator));
+
+        dispatcher.registerHandlers(new com.im.core.handler.unified.UserHandler(business.userManager),
+                Operation.USER_REGISTER, Operation.USER_INFO, Operation.USER_SEARCH, Operation.USER_UPDATE);
+        dispatcher.registerHandlers(new com.im.core.handler.unified.FriendHandler(business.friendManager),
+                Operation.FRIEND_APPLY, Operation.FRIEND_APPROVE, Operation.FRIEND_REMOVE, Operation.FRIEND_LIST,
+                Operation.FRIEND_BLACK, Operation.FRIEND_UNBLACK, Operation.FRIEND_BLACKLIST,
+                Operation.FRIEND_APPLY_SENT, Operation.FRIEND_APPLY_DETAIL, Operation.FRIEND_APPLY_UNHANDLED_COUNT);
+        dispatcher.registerHandlers(new com.im.core.handler.unified.GroupHandler(business.groupManager),
+                Operation.GROUP_CREATE, Operation.GROUP_JOIN, Operation.GROUP_QUIT, Operation.GROUP_KICK,
+                Operation.GROUP_DISBAND, Operation.GROUP_INFO_UPDATE, Operation.GROUP_INFO,
+                Operation.GROUP_SEARCH, Operation.GROUP_MEMBERS, Operation.GROUP_MUTE_ALL);
+        dispatcher.registerHandlers(new com.im.core.handler.unified.ConversationHandler(business.conversationManager),
+                Operation.CONVERSATION_LIST, Operation.CONVERSATION_SET, Operation.CONVERSATION_READ);
+        dispatcher.registerHandlers(new com.im.core.handler.unified.MessageHandler(
+                        storage.messageStore, storage.sequenceManager),
+                Operation.CHAT_PULL, Operation.CHAT_SEQ, Operation.CHAT_SYNC, Operation.CHAT_SEARCH);
+
+        var chatHandler = new com.im.core.handler.unified.ChatHandler(
+                sendMessageUseCase, call.callManager, call.callStateManager);
+        dispatcher.registerHandler(Operation.CHAT_SEND, chatHandler);
+        dispatcher.registerHandler(Operation.CHAT_SEND_GROUP, chatHandler);
+        dispatcher.registerHandler(Operation.CHAT_REVOKE,
+                new com.im.core.handler.unified.RevokeHandler(revokeUseCase, sessionManager));
+        dispatcher.registerHandler(Operation.LOGIN,
+                new LoginHandler(loginUseCase, sessionManager, routeTable, nodeId));
+        dispatcher.registerHandler(Operation.REGISTER,
+                new RegisterHandler(new RegisterUseCase(business.userManager)));
+        dispatcher.registerHandler(Operation.HEARTBEAT,
+                new HeartbeatHandler(new HeartbeatUseCase(routeTable), sessionManager, business.authenticator));
+        dispatcher.registerHandler(Operation.FILE_UPLOAD,
+                new com.im.core.handler.unified.FileUploadHandler(
+                        new FileUploadUseCase(storage.fileStorage,
+                                config.getLong("im.minio.max-file-size", 100L * 1024 * 1024))));
+        dispatcher.registerHandlers(new com.im.core.handler.unified.FileMultipartHandler(
+                        new MultipartUploadUseCase(storage.fileStorage)),
+                Operation.FILE_MULTIPART_INIT, Operation.FILE_MULTIPART_UPLOAD,
+                Operation.FILE_MULTIPART_COMPLETE, Operation.FILE_MULTIPART_ABORT);
+        return dispatcher;
+    }
+
+    private RedisConfiguration requireRedisConfig(Config config) {
+        RedisConfiguration redisConfig = buildRedisConfig(config);
+        if (redisConfig == null) {
+            throw new IllegalStateException(
+                    "Cluster mode requires Redis. Set im.redis.host (and im.db.enabled=true).");
+        }
+        return redisConfig;
+    }
+
+    private void requireDatabaseEnabled() {
+        if (!dbEnabled()) {
+            throw new IllegalStateException(
+                    "Cluster mode requires database. Set im.db.enabled=true and initialize schema.");
+        }
     }
 
     private RedisConfiguration buildRedisConfig(Config config) {

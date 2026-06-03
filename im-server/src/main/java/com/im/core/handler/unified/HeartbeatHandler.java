@@ -6,7 +6,6 @@ import com.im.api.IConnectionSession;
 import com.im.api.ISessionManager;
 import com.im.api.RequestHandler;
 import com.im.core.usecase.HeartbeatUseCase;
-import io.netty.channel.Channel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -41,9 +40,9 @@ public class HeartbeatHandler implements RequestHandler {
 
     @Override
     public Object handle(ApiRequest req) {
-        Channel channel = req.attribute("_channel");
-        if (channel != null) {
-            IConnectionSession session = sessionManager.getByChannel(channel);
+        String connectionId = req.attribute("_connectionId");
+        if (connectionId != null) {
+            IConnectionSession session = sessionManager.getByConnectionId(connectionId);
             if (session != null) {
                 session.touch();
                 if (session.isAuthenticated()) {

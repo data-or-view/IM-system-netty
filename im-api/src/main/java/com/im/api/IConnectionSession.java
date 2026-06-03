@@ -1,14 +1,10 @@
 package com.im.api;
 
-import io.netty.channel.Channel;
-
-import java.net.SocketAddress;
-
 /**
- * 连接会话接口，封装一条 Channel 及其关联的用户身份。
+ * 连接会话接口，封装一条传输无关连接及其关联的用户身份。
  *
  * 参考 RocketMQ 的 ClientChannelInfo：
- *   - Channel channel       ← 对应 Netty Channel
+ *   - ConnectionRef connection ← 传输连接引用
  *   - String clientId       ← 对应 userId
  *   - long lastUpdateTimestamp ← 对应 lastActiveTime
  *
@@ -27,14 +23,14 @@ public interface IConnectionSession {
     String getUserId();
 
     /**
-     * 底层 Netty Channel。
+     * 底层连接引用。
      */
-    Channel getChannel();
+    ConnectionRef getConnection();
 
     /**
      * 远程地址。
      */
-    SocketAddress getRemoteAddress();
+    String getRemoteAddress();
 
     /**
      * 是否已验证（登录成功）。

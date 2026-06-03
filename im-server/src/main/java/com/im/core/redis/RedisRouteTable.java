@@ -2,6 +2,8 @@ package com.im.core.redis;
 
 import com.im.api.IRouteTable;
 import com.im.api.ISessionManager;
+import com.im.api.PlatformID;
+import com.im.api.RouteBinding;
 import com.im.api.RouteNode;
 import io.lettuce.core.ScriptOutputType;
 import io.lettuce.core.cluster.api.async.RedisClusterAsyncCommands;
@@ -21,7 +23,7 @@ import java.util.stream.Collectors;
  *
  * 数据模型（Redis）：
  * <pre>
- *   route:{userId}     → nodeId        (String, TTL=180s)  ← 节点路由
+ *   route:{userId}     → {platformId:sessionId: nodeId} (Hash, TTL=180s) ← 节点路由
  *   online:{userId}    → {platform: timestamp} (ZSet, TTL=180s) ← 在线状态
  * </pre>
  *
@@ -112,17 +114,20 @@ public class RedisRouteTable implements IRouteTable {
     // ========== 节点路由 ==========
 
     @Override
-    public void online(String userId, String nodeId) {
+    public void online(String userId, String nodeId, int platformId, String sessionId) {
         String key = KEY_ROUTE_PREFIX + userId;
-        async.setex(key, ROUTE_TTL_SECONDS, nodeId);
-        log.info("Route online: userId={}, node={}", userId, nodeId);
+        async.hset(key, routeField(platformId, sessionId), nodeId);
+        async.expire(key, ROUTE_TTL_SECONDS);
+        log.info("Route online: userId={}, node={}, platform={}, session={}",
+                userId, nodeId, platformId, sessionId);
     }
 
     @Override
-    public void offline(String userId, String nodeId) {
+    public void offline(String userId, String nodeId, int platformId, String sessionId) {
         String key = KEY_ROUTE_PREFIX + userId;
-        async.del(key);
-        log.info("Route offline: userId={}, node={}", userId, nodeId);
+        async.hdel(key, routeField(platformId, sessionId));
+        log.info("Route offline: userId={}, node={}, platform={}, session={}",
+                userId, nodeId, platformId, sessionId);
     }
 
     @Override
@@ -131,21 +136,47 @@ public class RedisRouteTable implements IRouteTable {
         if (sessionManager.getByUserId(userId) != null) {
             return RouteNode.local(localNodeId);
         }
-        // 查 Redis（集群模式下，用户可能在别的节点）
-        String nodeId = async.get(KEY_ROUTE_PREFIX + userId).toCompletableFuture().join();
-        if (nodeId != null) {
-            return RouteNode.remote(nodeId, null, 0);
-        }
-        return null;
+        List<RouteNode> routes = lookupAll(userId);
+        return routes.isEmpty() ? null : routes.get(0);
     }
 
     @Override
     public List<RouteNode> lookupAll(String userId) {
-        RouteNode rn = lookup(userId);
-        if (rn != null) {
-            return List.of(rn);
+        boolean hasLocalSession = sessionManager.getByUserId(userId) != null;
+        Map<String, String> routes = async.hgetall(KEY_ROUTE_PREFIX + userId)
+                .toCompletableFuture()
+                .join();
+
+        if ((routes == null || routes.isEmpty()) && !hasLocalSession) {
+            return Collections.emptyList();
         }
-        return Collections.emptyList();
+
+        Set<String> nodeIds = routes != null
+                ? routes.values().stream().collect(Collectors.toSet())
+                : Set.of();
+        java.util.ArrayList<RouteNode> result = new java.util.ArrayList<>();
+        if (hasLocalSession) {
+            result.add(RouteNode.local(localNodeId));
+        }
+        for (String nodeId : nodeIds) {
+            if (nodeId != null && !nodeId.equals(localNodeId)) {
+                result.add(RouteNode.remote(nodeId, null, 0));
+            }
+        }
+        return result;
+    }
+
+    @Override
+    public List<RouteBinding> lookupAllBindings(String userId) {
+        Map<String, String> routes = async.hgetall(KEY_ROUTE_PREFIX + userId)
+                .toCompletableFuture()
+                .join();
+        if (routes == null || routes.isEmpty()) {
+            return Collections.emptyList();
+        }
+        return routes.entrySet().stream()
+                .map(entry -> toRouteBinding(userId, entry.getKey(), entry.getValue()))
+                .toList();
     }
 
     // ========== 在线状态（Platform 级别） ==========
@@ -240,6 +271,26 @@ public class RedisRouteTable implements IRouteTable {
 
         async.zadd(key, expireAt, String.valueOf(platformId));
         async.expire(key, ONLINE_TTL_SECONDS);
+        async.expire(KEY_ROUTE_PREFIX + userId, ROUTE_TTL_SECONDS);
         log.trace("Online renewed: userId={}, platform={}", userId, platformId);
+    }
+
+    private static String routeField(int platformId, String sessionId) {
+        String sid = (sessionId == null || sessionId.isBlank()) ? "default" : sessionId;
+        return platformId + ":" + sid;
+    }
+
+    private static RouteBinding toRouteBinding(String userId, String routeField, String nodeId) {
+        String[] parts = routeField.split(":", 2);
+        int platformId = PlatformID.DEFAULT;
+        if (parts.length > 0) {
+            try {
+                platformId = Integer.parseInt(parts[0]);
+            } catch (NumberFormatException ignored) {
+                platformId = PlatformID.DEFAULT;
+            }
+        }
+        String sessionId = parts.length > 1 ? parts[1] : "default";
+        return new RouteBinding(userId, nodeId, platformId, sessionId, 0);
     }
 }

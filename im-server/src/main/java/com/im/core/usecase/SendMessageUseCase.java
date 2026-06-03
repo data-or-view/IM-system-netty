@@ -3,6 +3,7 @@ package com.im.core.usecase;
 import com.im.api.IGroupManager;
 import com.im.api.IMessageQueue;
 import com.im.api.ISequenceManager;
+import com.im.api.ConversationIds;
 import com.im.api.Message;
 import com.im.api.MessageQueueTopics;
 import com.im.api.content.IMessageContent;
@@ -63,7 +64,7 @@ public class SendMessageUseCase {
 
         if (!webhookService.beforeSendSingle(params, fromUserId, toUserId, content)) return null;
 
-        String conversationId = buildConversationId(fromUserId, toUserId);
+        String conversationId = ConversationIds.single(fromUserId, toUserId);
         long seq = 0;
         if (conversationId != null && sequenceManager != null) {
             seq = sequenceManager.nextSequence(conversationId);
@@ -88,7 +89,7 @@ public class SendMessageUseCase {
 
         if (!webhookService.beforeSendGroup(params, fromUserId, groupId, content)) return null;
 
-        String conversationId = "group_" + groupId;
+        String conversationId = ConversationIds.group(groupId);
         long seq = 0;
         if (sequenceManager != null) {
             seq = sequenceManager.nextSequence(conversationId);
@@ -134,14 +135,4 @@ public class SendMessageUseCase {
         return msg;
     }
 
-    // 字典序拼接保证 Alice→Bob 和 Bob→Alice 共享同一 conversationId。
-    // 与 PersistenceConsumer.buildConversationId 保持同步，修改须两处一起改。
-    private static String buildConversationId(String a, String b) {
-        if (a == null || b == null) return null;
-        if (a.compareTo(b) <= 0) {
-            return "single_" + a + "_" + b;
-        } else {
-            return "single_" + b + "_" + a;
-        }
-    }
 }

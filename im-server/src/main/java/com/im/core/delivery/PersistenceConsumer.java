@@ -82,7 +82,7 @@ public class PersistenceConsumer implements Lifecycle {
 
                 if (groupId != null) {
                     // 群聊：更新每个成员的会话
-                    String conversationId = "group_" + groupId;
+                    String conversationId = ConversationIds.group(groupId);
 
                     // 发送者：不加未读数
                     if (fromUserId != null) {
@@ -103,7 +103,7 @@ public class PersistenceConsumer implements Lifecycle {
 
                 } else if (toUserId != null) {
                     // 单聊：两方的会话都要更新
-                    String conversationId = buildConversationId(fromUserId, toUserId);
+                    String conversationId = ConversationIds.single(fromUserId, toUserId);
 
                     // 发送方：不加未读数
                     if (fromUserId != null) {
@@ -129,14 +129,4 @@ public class PersistenceConsumer implements Lifecycle {
         log.info("PersistenceConsumer stopped");
     }
 
-    // 与 SendMessageUseCase.buildConversationId 保持一致。Alice→Bob 和 Bob→Alice 必须映射到同一个
-    // conversationId，否则双方看到两个独立会话，未读数也无法合并。
-    private String buildConversationId(String userA, String userB) {
-        if (userA == null || userB == null) return null;
-        if (userA.compareTo(userB) <= 0) {
-            return "single_" + userA + "_" + userB;
-        } else {
-            return "single_" + userB + "_" + userA;
-        }
-    }
 }

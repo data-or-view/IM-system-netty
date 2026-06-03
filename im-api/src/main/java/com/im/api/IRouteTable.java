@@ -29,13 +29,28 @@ public interface IRouteTable {
      * 用户上线：注册 userId → nodeId 映射。
      * 同一用户可以在多个节点登录（多端），会新增一条记录。
      */
-    void online(String userId, String nodeId);
+    default void online(String userId, String nodeId) {
+        online(userId, nodeId, PlatformID.DEFAULT, "default");
+    }
+
+    /**
+     * 用户指定端上线。
+     * platformId + sessionId 用于区分同一用户在多个节点/多个端的路由。
+     */
+    void online(String userId, String nodeId, int platformId, String sessionId);
 
     /**
      * 用户下线：移除该用户在该节点的映射。
      * 如果用户只在该节点登录，该用户从路由表中消失。
      */
-    void offline(String userId, String nodeId);
+    default void offline(String userId, String nodeId) {
+        offline(userId, nodeId, PlatformID.DEFAULT, "default");
+    }
+
+    /**
+     * 用户指定端下线，只移除当前 session 的路由。
+     */
+    void offline(String userId, String nodeId, int platformId, String sessionId);
 
     /**
      * 查找用户所在节点（第一条匹配记录）。
@@ -48,6 +63,15 @@ public interface IRouteTable {
      * 例如：手机在 nodeA，电脑在 nodeB → 返回 2 条。
      */
     List<RouteNode> lookupAll(String userId);
+
+    /**
+     * 查找用户的所有在线 session 路由。
+     */
+    default List<RouteBinding> lookupAllBindings(String userId) {
+        return lookupAll(userId).stream()
+                .map(route -> new RouteBinding(userId, route.getNodeId(), PlatformID.DEFAULT, "default", 0))
+                .toList();
+    }
 
     /**
      * 判断用户是否在线（任意节点）。

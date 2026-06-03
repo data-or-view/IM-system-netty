@@ -29,21 +29,23 @@ class SessionManagerTest {
     @Test
     void createSession() {
         EmbeddedChannel ch = new EmbeddedChannel();
-        IConnectionSession session = manager.createSession(ch);
+        NettyConnectionRef ref = ref(ch);
+        IConnectionSession session = manager.createSession(ref);
 
         assertNotNull(session);
         assertNotNull(session.getSessionId());
         assertFalse(session.isAuthenticated());
-        assertEquals(ch, session.getChannel());
+        assertEquals(ref, session.getConnection());
         ch.close();
     }
 
     @Test
-    void getByChannel() {
+    void getByConnectionId() {
         EmbeddedChannel ch = new EmbeddedChannel();
-        IConnectionSession created = manager.createSession(ch);
+        NettyConnectionRef ref = ref(ch);
+        IConnectionSession created = manager.createSession(ref);
 
-        IConnectionSession found = manager.getByChannel(ch);
+        IConnectionSession found = manager.getByConnectionId(ref.connectionId());
         assertNotNull(found);
         assertEquals(created.getSessionId(), found.getSessionId());
         ch.close();
@@ -52,19 +54,21 @@ class SessionManagerTest {
     @Test
     void removeSession() {
         EmbeddedChannel ch = new EmbeddedChannel();
-        manager.createSession(ch);
-        assertNotNull(manager.getByChannel(ch));
+        NettyConnectionRef ref = ref(ch);
+        manager.createSession(ref);
+        assertNotNull(manager.getByConnectionId(ref.connectionId()));
 
-        manager.removeSession(ch);
-        assertNull(manager.getByChannel(ch));
+        manager.removeSession(ref.connectionId());
+        assertNull(manager.getByConnectionId(ref.connectionId()));
         ch.close();
     }
 
     @Test
     void bindUserThenGetByUserId() {
         EmbeddedChannel ch = new EmbeddedChannel();
-        manager.createSession(ch);
-        manager.bindUser(ch, "user001");
+        NettyConnectionRef ref = ref(ch);
+        manager.createSession(ref);
+        manager.bindUser(ref.connectionId(), "user001");
 
         IConnectionSession found = manager.getByUserId("user001");
         assertNotNull(found);
@@ -74,40 +78,33 @@ class SessionManagerTest {
     }
 
     @Test
-    void bindUserCreatesSessionIfNotExists() {
-        EmbeddedChannel ch = new EmbeddedChannel();
-        manager.bindUser(ch, "user002");
-
-        IConnectionSession found = manager.getByUserId("user002");
-        assertNotNull(found);
-        assertEquals(ch, found.getChannel());
-        ch.close();
+    void bindUserRequiresExistingConnection() {
+        assertThrows(IllegalArgumentException.class,
+                () -> manager.bindUser("missing-connection", "user002"));
     }
 
     @Test
     void rebindKicksOldSession() {
-        // 设置 KICK_OLD 策略（测试踢旧逻辑）
         manager.setLoginStrategy(MultiLoginStrategy.KICK_OLD);
 
         EmbeddedChannel oldCh = new EmbeddedChannel();
-        IConnectionSession oldSession = manager.bindUser(oldCh, "user003");
-        // First bind returns null since no previous binding
+        NettyConnectionRef oldRef = ref(oldCh);
+        manager.createSession(oldRef);
+        IConnectionSession oldSession = manager.bindUser(oldRef.connectionId(), "user003");
         assertNull(oldSession);
         assertEquals(1, manager.allSessions().size());
 
         EmbeddedChannel newCh = new EmbeddedChannel();
-        IConnectionSession kicked = manager.bindUser(newCh, "user003");
+        NettyConnectionRef newRef = ref(newCh);
+        manager.createSession(newRef);
+        IConnectionSession kicked = manager.bindUser(newRef.connectionId(), "user003");
 
         assertNotNull(kicked);
-        assertEquals(oldCh, kicked.getChannel());
+        assertEquals(oldRef, kicked.getConnection());
+        assertEquals(1, manager.allSessions().size(), "only the new session should remain");
 
-        // 旧 session 从 manager 中移除（只有新 session 保留）
-        assertEquals(1, manager.allSessions().size(),
-                "only the new session should remain");
-
-        // 新 session 可用
         IConnectionSession found = manager.getByUserId("user003");
-        assertEquals(newCh, found.getChannel());
+        assertEquals(newRef, found.getConnection());
         assertEquals("user003", found.getUserId());
 
         oldCh.close();
@@ -117,13 +114,14 @@ class SessionManagerTest {
     @Test
     void scanIdleClosesUnauthenticatedSessions() {
         EmbeddedChannel ch1 = new EmbeddedChannel();
-        manager.createSession(ch1); // 未认证
+        manager.createSession(ref(ch1));
 
         EmbeddedChannel ch2 = new EmbeddedChannel();
-        manager.createSession(ch2);
-        manager.bindUser(ch2, "user004"); // 已认证
+        NettyConnectionRef ref2 = ref(ch2);
+        manager.createSession(ref2);
+        manager.bindUser(ref2.connectionId(), "user004");
 
-        int closed = manager.scanIdleSessions(0); // 0 秒 = 立即超时
+        int closed = manager.scanIdleSessions(0);
         assertEquals(1, closed);
         assertFalse(ch1.isActive());
         assertTrue(ch2.isActive());
@@ -137,12 +135,12 @@ class SessionManagerTest {
         assertEquals(0, manager.allSessions().size(), "should start empty");
 
         EmbeddedChannel ch1 = new EmbeddedChannel();
-        IConnectionSession s1 = manager.createSession(ch1);
+        IConnectionSession s1 = manager.createSession(ref(ch1));
         assertNotNull(s1);
         assertEquals(1, manager.allSessions().size(), "after first session");
 
         EmbeddedChannel ch2 = new EmbeddedChannel();
-        IConnectionSession s2 = manager.createSession(ch2);
+        IConnectionSession s2 = manager.createSession(ref(ch2));
         assertNotNull(s2);
         assertEquals(2, manager.allSessions().size(), "after second session");
 
@@ -154,14 +152,16 @@ class SessionManagerTest {
     void clearClosesAllSessions() {
         EmbeddedChannel ch1 = new EmbeddedChannel();
         EmbeddedChannel ch2 = new EmbeddedChannel();
-        manager.createSession(ch1);
-        manager.createSession(ch2);
+        NettyConnectionRef ref1 = ref(ch1);
+        NettyConnectionRef ref2 = ref(ch2);
+        manager.createSession(ref1);
+        manager.createSession(ref2);
 
         manager.clear();
 
         assertEquals(0, manager.allSessions().size());
-        assertNull(manager.getByChannel(ch1));
-        assertNull(manager.getByChannel(ch2));
+        assertNull(manager.getByConnectionId(ref1.connectionId()));
+        assertNull(manager.getByConnectionId(ref2.connectionId()));
         ch1.close();
         ch2.close();
     }
@@ -169,5 +169,9 @@ class SessionManagerTest {
     @Test
     void getByUserIdReturnsNullForUnknown() {
         assertNull(manager.getByUserId("nonexistent"));
+    }
+
+    private static NettyConnectionRef ref(EmbeddedChannel channel) {
+        return new NettyConnectionRef(channel);
     }
 }

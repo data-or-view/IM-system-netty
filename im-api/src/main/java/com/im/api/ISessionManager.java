@@ -1,39 +1,37 @@
 package com.im.api;
 
-import io.netty.channel.Channel;
-
 import java.util.List;
 
 /**
- * 会话管理器接口，负责 Channel 与用户会话的映射管理。
+ * 会话管理器接口，负责连接与用户会话的映射管理。
  *
  * 提供两个索引方向的查询：
- *   Channel → ConnectionSession（用于事件驱动，如 channelInactive）
+ *   connectionId → ConnectionSession（用于事件驱动，如 channelInactive）
  *   userId  → ConnectionSession（用于消息投递，如 DeliveryConsumer）
  *
- * 支持多端在线：同一 userId 可关联多个 Channel/session。
+ * 支持多端在线：同一 userId 可关联多个 connection/session。
  * 参考 OpenIM 的多端登录策略：手机+PC+Web 同时在线。
  */
 public interface ISessionManager {
 
     /**
-     * 为 Channel 创建新会话。
+     * 为连接创建新会话。
      * 会话初始状态：unauthenticated。
      */
-    IConnectionSession createSession(Channel channel);
+    IConnectionSession createSession(ConnectionRef connection);
 
     /**
-     * 移除 Channel 对应的会话。
+     * 移除连接对应的会话。
      * 如果频道关联了 userId，同时清理 userId→session 映射。
      *
      * @return 被移除的会话，如果不存在返回 null
      */
-    IConnectionSession removeSession(Channel channel);
+    IConnectionSession removeSession(String connectionId);
 
     /**
-     * 通过 Channel 获取会话。
+     * 通过 connectionId 获取会话。
      */
-    IConnectionSession getByChannel(Channel channel);
+    IConnectionSession getByConnectionId(String connectionId);
 
     /**
      * 通过 userId 获取主会话。
@@ -53,7 +51,11 @@ public interface ISessionManager {
      *
      * @return 如果踢掉了旧端的 session 则返回（策略 1），否则返回 null
      */
-    IConnectionSession bindUser(Channel channel, String userId);
+    IConnectionSession bindUser(String connectionId, String userId, int platformId);
+
+    default IConnectionSession bindUser(String connectionId, String userId) {
+        return bindUser(connectionId, userId, PlatformID.DEFAULT);
+    }
 
     /**
      * 扫描并关停空闲超时的未认证会话（登录超时）。

@@ -1,10 +1,9 @@
 package com.im.core.session;
 
 import com.im.api.IConnectionSession;
+import com.im.api.ConnectionRef;
 import com.im.api.PlatformID;
-import io.netty.channel.Channel;
 
-import java.net.SocketAddress;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
@@ -12,9 +11,9 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * 连接会话实现。
  *
- * —— Channel 级别的会话，关联 Channel ⇔ userId
+ * —— 连接级别的会话，关联 ConnectionRef ⇔ userId
  * —— 参考 RocketMQ 的 ClientChannelInfo：
- *    Channel channel ← 构造入参
+ *    ConnectionRef connection ← 构造入参
  *    String clientId ← userId（authenticate 时设置）
  *    long lastUpdateTimestamp ← lastActiveTime（touch 时更新）
  *
@@ -24,8 +23,8 @@ import java.util.concurrent.atomic.AtomicLong;
 public class ConnectionSession implements IConnectionSession {
 
     private final String sessionId;
-    private final Channel channel;
-    private final SocketAddress remoteAddress;
+    private final ConnectionRef connection;
+    private final String remoteAddress;
     private final long creationTime;
 
     private volatile String userId;
@@ -33,10 +32,10 @@ public class ConnectionSession implements IConnectionSession {
     private volatile boolean authenticated;
     private final AtomicLong lastActiveTime;
 
-    public ConnectionSession(Channel channel) {
+    public ConnectionSession(ConnectionRef connection) {
         this.sessionId = UUID.randomUUID().toString();
-        this.channel = Objects.requireNonNull(channel, "channel must not be null");
-        this.remoteAddress = channel.remoteAddress();
+        this.connection = Objects.requireNonNull(connection, "connection must not be null");
+        this.remoteAddress = connection.remoteAddress();
         this.creationTime = System.currentTimeMillis();
         this.lastActiveTime = new AtomicLong(this.creationTime);
     }
@@ -51,10 +50,10 @@ public class ConnectionSession implements IConnectionSession {
     public int getPlatformId() { return platformId; }
 
     @Override
-    public Channel getChannel() { return channel; }
+    public ConnectionRef getConnection() { return connection; }
 
     @Override
-    public SocketAddress getRemoteAddress() { return remoteAddress; }
+    public String getRemoteAddress() { return remoteAddress; }
 
     @Override
     public boolean isAuthenticated() { return authenticated; }

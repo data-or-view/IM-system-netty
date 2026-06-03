@@ -7,6 +7,7 @@ import com.im.api.Operation;
 import com.im.api.ResponseWriter;
 import com.im.core.dispatcher.ApiDispatcher;
 import com.im.core.serialization.jackson.ObjectMapperProvider;
+import com.im.core.session.NettyConnectionRef;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
@@ -110,7 +111,7 @@ public class WsRequestAdapter extends SimpleChannelInboundHandler<WebSocketFrame
         // 创建 ResponseWriter + ApiRequest 并提交到虚拟线程
         ResponseWriter responseWriter = new WsResponseWriter(ctx, seq, operation.opName());
         ApiRequest request = new ApiRequest(operation, params, headers, responseWriter, null);
-        request.setAttribute("_channel", ctx.channel());
+        request.setAttribute("_connectionId", NettyConnectionRef.connectionId(ctx.channel()));
         virtualExecutor.execute(() -> dispatcher.dispatch(request));
     }
 }

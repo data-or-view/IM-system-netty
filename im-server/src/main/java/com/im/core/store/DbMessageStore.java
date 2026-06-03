@@ -2,6 +2,7 @@ package com.im.core.store;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.im.api.ConversationIds;
 import com.im.api.Message;
 import com.im.api.SearchMessagesParam;
 import com.im.api.SearchMessagesResult;
@@ -232,7 +233,8 @@ public class DbMessageStore implements IMessageStore {
         // conversationId
         String convId = msg.getConversationId();
         if (convId == null) {
-            convId = buildConversationId(msg.getFromUserId(), msg.getToUserId(), msg.getGroupId());
+            convId = ConversationIds.fromMessageParties(
+                    msg.getFromUserId(), msg.getToUserId(), msg.getGroupId());
         }
         e.setConversationId(convId);
 
@@ -274,16 +276,6 @@ public class DbMessageStore implements IMessageStore {
         if (e.getSenderFaceUrl() != null) msg.putMeta("senderFaceUrl", e.getSenderFaceUrl());
         if (e.getAtUserIds() != null) msg.putMeta("atUserIds", e.getAtUserIds());
         return msg;
-    }
-
-    private static String buildConversationId(String fromUserId, String toUserId, String groupId) {
-        if (groupId != null) return "group_" + groupId;
-        if (fromUserId != null && toUserId != null) {
-            String u1 = fromUserId.compareTo(toUserId) <= 0 ? fromUserId : toUserId;
-            String u2 = fromUserId.compareTo(toUserId) <= 0 ? toUserId : fromUserId;
-            return "single_" + u1 + "_" + u2;
-        }
-        return null;
     }
 
     private static int parseInt(String s, int def) {

@@ -5,7 +5,6 @@ import com.im.api.ClusterMessageHandler;
 import com.im.api.IConnectionSession;
 import com.im.api.ISessionManager;
 import com.im.api.Message;
-import io.netty.channel.Channel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -61,9 +60,8 @@ public class ClusterDeliveryHandler implements ClusterMessageHandler {
         }
 
         for (IConnectionSession session : sessions) {
-            Channel ch = session.getChannel();
-            if (ch != null && ch.isActive()) {
-                ch.writeAndFlush(message);
+            if (session.getConnection().isActive()) {
+                session.getConnection().write(message);
                 log.debug("Cluster-delivered msg {} to user {} session {}",
                         message.getSequenceId(), toUserId, session.getSessionId());
             }

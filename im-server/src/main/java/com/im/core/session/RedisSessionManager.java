@@ -71,7 +71,7 @@ public class RedisSessionManager extends SessionManager implements ISessionManag
     public void forceLogout(String userId) {
         log.info("Force logout user={} on local node", userId);
         List<IConnectionSession> sessions = getSessionsByUserId(userId);
-        sessions.forEach(s -> s.getChannel().close());
+        sessions.forEach(s -> s.getConnection().close());
     }
 
     @Override
@@ -80,6 +80,6 @@ public class RedisSessionManager extends SessionManager implements ISessionManag
         List<IConnectionSession> sessions = getSessionsByUserId(userId);
         sessions.stream()
                 .filter(s -> platformId == -1 || s.getPlatformId() == platformId)
-                .forEach(s -> s.getChannel().close());
+                .forEach(s -> s.getConnection().close());
     }
 }

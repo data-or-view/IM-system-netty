@@ -5,6 +5,7 @@ import com.im.api.IRouteTable;
 import com.im.api.ISessionManager;
 import com.im.core.dispatcher.PendingAcknowledgementManager;
 import com.im.common.util.IMExecutors;
+import com.im.core.session.NettyConnectionRef;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
@@ -54,7 +55,7 @@ public class ConnectionEventHandler extends ChannelInboundHandlerAdapter {
 
     @Override
     public void channelActive(ChannelHandlerContext ctx) {
-        sessionManager.createSession(ctx.channel());
+        sessionManager.createSession(new NettyConnectionRef(ctx.channel()));
         log.info("Channel active: remote={}", ctx.channel().remoteAddress());
         ctx.fireChannelActive();
     }
@@ -88,11 +89,11 @@ public class ConnectionEventHandler extends ChannelInboundHandlerAdapter {
 
     /** 提取 session 清理逻辑，channelInactive / exceptionCaught / idle 三处复用。 */
     private void cleanupSession(ChannelHandlerContext ctx) {
-        IConnectionSession session = sessionManager.removeSession(ctx.channel());
+        IConnectionSession session = sessionManager.removeSession(NettyConnectionRef.connectionId(ctx.channel()));
         if (session != null && session.getUserId() != null && routeTable != null) {
             String userId = session.getUserId();
             int platformId = session.getPlatformId();
-            routeTable.offline(userId, localNodeId);
+            routeTable.offline(userId, localNodeId, platformId, session.getSessionId());
             routeTable.setOffline(userId, platformId);
             log.info("Session cleaned: userId={}, node={}", userId, localNodeId);
         }

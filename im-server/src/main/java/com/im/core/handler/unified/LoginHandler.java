@@ -11,7 +11,6 @@ import com.im.common.enums.ImErrorCode;
 import com.im.common.exception.ImException;
 import com.im.core.serialization.jackson.ObjectMapperProvider;
 import com.im.core.usecase.LoginUseCase;
-import io.netty.channel.Channel;
 import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,8 +20,8 @@ import java.util.Map;
 /**
  * 登录 handler（仅 WS）。
  *
- * <p>需要访问 Netty Channel 进行 session 绑定和离线消息投递，
- * Channel 由 {@code WsRequestAdapter} 注入到 request attributes 的 {@code _channel} 键。</p>
+ * <p>WS 接入层通过 {@code _connectionId} 传递连接引用，handler 只依赖会话接口，
+ * 避免业务入口感知 Netty Channel。</p>
  */
 public class LoginHandler implements RequestHandler {
 
@@ -55,29 +54,33 @@ public class LoginHandler implements RequestHandler {
         LoginUseCase.LoginResult result = loginUseCase.execute(userId, platformId, 0);
 
         // ② 绑定 session（会触发多端登录策略检查，可能踢旧 session）
-        //    _channel 由 WsRequestAdapter 注入，HTTP 场景没有 channel 跳过 session 绑定
-        Channel channel = req.attribute("_channel");
-        if (channel != null) {
-            IConnectionSession session = sessionManager.getByChannel(channel);
+        //    HTTP 场景没有连接态，跳过 WS session 绑定。
+        String connectionId = req.attribute("_connectionId");
+        IConnectionSession session = null;
+        if (connectionId != null) {
+            session = sessionManager.getByConnectionId(connectionId);
             if (session != null) {
                 session.authenticate(userId, platformId);
             }
-            sessionManager.bindUser(channel, userId);
+            sessionManager.bindUser(connectionId, userId, platformId);
 
             // ③ 绑定成功后注册路由（先 bindUser 后注册，
             //    避免被踢旧 session 的 channelInactive 清理逻辑误删新路由）
             if (routeTable != null) {
-                routeTable.online(userId, localNodeId);
-                routeTable.setOnline(userId, platformId);
+                IConnectionSession boundSession = sessionManager.getByConnectionId(connectionId);
+                String sessionId = boundSession != null ? boundSession.getSessionId() : "default";
+                int boundPlatformId = boundSession != null ? boundSession.getPlatformId() : platformId;
+                routeTable.online(userId, localNodeId, boundPlatformId, sessionId);
+                routeTable.setOnline(userId, boundPlatformId);
             }
         }
 
-        // 投递离线消息（仅 WS 场景有 channel）
-        if (channel != null && result.offlineMessages() != null && !result.offlineMessages().isEmpty()) {
+        // 投递离线消息（仅 WS 场景有连接态）
+        if (session != null && result.offlineMessages() != null && !result.offlineMessages().isEmpty()) {
             for (Message offlineMsg : result.offlineMessages()) {
                 try {
                     String json = MAPPER.writeValueAsString(offlineMsg.toJsonMap());
-                    channel.writeAndFlush(new TextWebSocketFrame(json));
+                    session.getConnection().write(new TextWebSocketFrame(json));
                 } catch (Exception e) {
                     log.warn("Failed to serialize offline message for user {}", userId, e);
                 }
