@@ -30,6 +30,7 @@ export const OP = {
   GROUP_DISBAND: "group.disband",
   GROUP_INFO_UPDATE: "group.info.update",
   GROUP_INFO: "group.info",
+  GROUP_LIST: "group.list",
   GROUP_SEARCH: "group.search",
   GROUP_MEMBERS: "group.members",
   GROUP_MUTE_ALL: "group.mute_all",
@@ -63,6 +64,7 @@ export type OpValue = (typeof OP)[keyof typeof OP];
 export const PUSH_OP = {
   MESSAGE: "message",
   FRIEND_APPLY: "friend.apply",
+  MESSAGE_REVOKED: "msg_revoke",
 } as const;
 
 // ── Request / Response ──
@@ -89,6 +91,14 @@ export interface WSResponse {
 export interface WSPush {
   op: string;
   data: unknown;
+  code?: number;
+  msg?: string;
+}
+
+export interface MessageRevoked {
+  conversationId: string;
+  seq: number;
+  revokerId?: string;
 }
 
 // ── User ──
@@ -199,6 +209,12 @@ export interface SendMessageParam {
   content: string;
 }
 
+export interface RevokeMessageParam {
+  conversationId: string;
+  messageSeq: number;
+  groupId?: string;
+}
+
 // ── 事件类型 ──
 
 export interface IMEvents {
@@ -208,6 +224,12 @@ export interface IMEvents {
   message: (msg: Message) => void;
   /** 收到好友申请 */
   friendRequest: (apply: FriendApply) => void;
+  /** 收到消息撤回通知 */
+  messageRevoked: (event: MessageRevoked) => void;
+  /** 所有服务端推送的兜底事件 */
+  push: (event: WSPush) => void;
+  /** 登录或心跳续期后 token 发生变化 */
+  tokenChanged: (tokens: TokenPair) => void;
   /** 错误 */
   error: (err: IMError) => void;
 }
@@ -218,13 +240,30 @@ export type IMListener<K extends keyof IMEvents> = IMEvents[K];
 
 export interface IMOptions {
   wsUrl: string;
+  httpUrl?: string;
   getToken?: () => string | null;
+  getRefreshToken?: () => string | null;
+  onTokenChanged?: (tokens: TokenPair) => void;
   /** 自动重连次数上限（默认 10） */
   maxReconnect?: number;
   /** 心跳间隔 ms（默认 7000） */
   heartbeatInterval?: number;
   /** 请求超时 ms（默认 30000） */
   requestTimeout?: number;
+}
+
+export interface TokenPair {
+  token?: string;
+  refreshToken?: string;
+  expiresIn?: number;
+}
+
+export interface FileUploadResult {
+  fileUrl: string;
+  fileId: string;
+  fileName: string;
+  mimeType: string;
+  fileSize?: string | number;
 }
 
 // ── Error ──

@@ -54,9 +54,20 @@ export class RequestManager {
     return true;
   }
 
+  /** 标记指定 pending 请求为失败（如发送前发现连接不可用） */
+  reject(seq: number, err: IMError): boolean {
+    const pending = this.pending.get(seq);
+    if (!pending) return false;
+
+    clearTimeout(pending.timer);
+    this.pending.delete(seq);
+    pending.reject(err);
+    return true;
+  }
+
   /** 标记所有 pending 请求为失败（如断开连接） */
   rejectAll(reason: string): void {
-    for (const [seq, pending] of this.pending) {
+    for (const pending of this.pending.values()) {
       clearTimeout(pending.timer);
       pending.reject(new IMError(-1, reason));
     }

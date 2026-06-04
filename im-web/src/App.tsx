@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
+import { Toaster } from "sonner";
 import { StoreProvider, useStore } from "@/store/store";
 import { im } from "@/sdk/im-sdk";
 import LoginPage from "@/pages/LoginPage";
@@ -10,7 +11,7 @@ import GroupInfoPage from "@/pages/GroupInfoPage";
 import UserProfilePage from "@/pages/UserProfilePage";
 
 function AuthGate() {
-  const { state, login: storeLogin } = useStore();
+  const { state, login: storeLogin, register: storeRegister } = useStore();
   const [connecting, setConnecting] = useState(false);
   const [statusMsg, setStatusMsg] = useState("");
   const connectingRef = useRef(false);
@@ -67,9 +68,7 @@ function AuthGate() {
       try {
         await Promise.race([waitConnected(), timeoutPromise]);
         setStatusMsg("注册中...");
-        await im.user.register(userId, password);
-        setStatusMsg("注册成功，正在登录...");
-        await storeLogin(userId, password);
+        await storeRegister(userId, password);
         setStatusMsg("");
       } catch {
         setStatusMsg("注册失败");
@@ -78,7 +77,7 @@ function AuthGate() {
         connectingRef.current = false;
       }
     },
-    [storeLogin]
+    [storeRegister]
   );
 
   if (!state.token || !state.userId) {
@@ -111,6 +110,7 @@ export default function App() {
       <Routes>
         <Route path="*" element={<AuthGate />} />
       </Routes>
+      <Toaster richColors position="top-center" />
     </StoreProvider>
   );
 }

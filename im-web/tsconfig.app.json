@@ -18,7 +18,8 @@
     /* Path alias */
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "im-sdk": ["../im-sdk/src/index.ts"]
     },
 
     /* Linting */

@@ -4,7 +4,7 @@ import { im } from "@/sdk/im-sdk";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Check, X, Loader2, UserPlus } from "lucide-react";
+import { Check, X, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 interface Props {
@@ -21,7 +21,7 @@ interface ApplyItem {
 }
 
 export default function FriendRequestDialog({ open, onOpenChange }: Props) {
-  const { state, approveFriend, fetchUnhandledApplyCount } = useStore();
+  const { state, approveFriend } = useStore();
   const [applies, setApplies] = useState<ApplyItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [processing, setProcessing] = useState<Record<string, boolean>>({});

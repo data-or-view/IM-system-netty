@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useStore, type Conversation } from "@/store/store";
+import { useStore, type Conversation, type FriendInfo, type GroupInfo } from "@/store/store";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -23,13 +23,14 @@ import {
   Plus,
   MoreHorizontal,
   UserMinus,
+  Contact,
 } from "lucide-react";
 import UserSearchDialog from "./sidebar/UserSearchDialog";
 import GroupSearchDialog from "./sidebar/GroupSearchDialog";
 import FriendRequestDialog from "./sidebar/FriendRequestDialog";
 import { toast } from "sonner";
 
-type Tab = "chats" | "contacts";
+type Tab = "chats" | "friends" | "groups";
 
 export default function Sidebar() {
   const { state } = useStore();
@@ -41,33 +42,52 @@ export default function Sidebar() {
 
   return (
     <TooltipProvider>
-      <div className="flex h-full w-72 flex-col border-r bg-card">
-        {/* Header with tabs */}
-        <div className="flex items-center justify-between border-b px-3 py-2.5">
-          <span className="truncate text-sm font-semibold">{state.userId}</span>
-          <div className="flex gap-0.5">
-            <TabButton active={tab === "chats"} onClick={() => setTab("chats")} tip="聊天">
-              <MessageCircle className="h-4 w-4" />
+      <div className="flex h-full w-80 flex-col border-r bg-card">
+        <div className="border-b px-3 py-3">
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <div className="truncate text-sm font-semibold">{state.userId}</div>
+              <div className="text-xs text-muted-foreground">
+                {state.connected ? "已连接" : "未连接"}
+              </div>
+            </div>
+            <div className="flex gap-1">
+              <IconAction tip="添加好友" onClick={() => setSearchUserOpen(true)}>
+                <UserPlus className="h-4 w-4" />
+              </IconAction>
+              <IconAction tip="创建群" onClick={() => navigate("/chat/create-group")}>
+                <Plus className="h-4 w-4" />
+              </IconAction>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 rounded-lg bg-muted p-1">
+            <TabButton active={tab === "chats"} onClick={() => setTab("chats")} label="聊天" count={state.conversations.length}>
+              <MessageCircle className="h-3.5 w-3.5" />
             </TabButton>
-            <TabButton active={tab === "contacts"} onClick={() => setTab("contacts")} tip="通讯录">
-              <Users className="h-4 w-4" />
+            <TabButton active={tab === "friends"} onClick={() => setTab("friends")} label="好友" count={state.friends.length}>
+              <Contact className="h-3.5 w-3.5" />
+            </TabButton>
+            <TabButton active={tab === "groups"} onClick={() => setTab("groups")} label="群组" count={state.myGroups.length}>
+              <Users className="h-3.5 w-3.5" />
             </TabButton>
           </div>
         </div>
 
-        {/* Tab content */}
-        {tab === "chats" && (
-          <ChatList
+        {tab === "chats" && <ChatList />}
+        {tab === "friends" && (
+          <FriendList
             onSearchUser={() => setSearchUserOpen(true)}
+            onFriendRequests={() => setFriendRequestOpen(true)}
+          />
+        )}
+        {tab === "groups" && (
+          <GroupList
             onSearchGroup={() => setSearchGroupOpen(true)}
             onCreateGroup={() => navigate("/chat/create-group")}
           />
         )}
-        {tab === "contacts" && (
-          <ContactList onSearchUser={() => setSearchUserOpen(true)} />
-        )}
 
-        {/* Dialogs */}
         <UserSearchDialog open={searchUserOpen} onOpenChange={setSearchUserOpen} />
         <GroupSearchDialog open={searchGroupOpen} onOpenChange={setSearchGroupOpen} />
         <FriendRequestDialog open={friendRequestOpen} onOpenChange={setFriendRequestOpen} />
@@ -76,17 +96,13 @@ export default function Sidebar() {
   );
 }
 
-// ====== Tab button ======
-
-function TabButton({
-  active,
-  onClick,
+function IconAction({
   tip,
+  onClick,
   children,
 }: {
-  active: boolean;
-  onClick: () => void;
   tip: string;
+  onClick: () => void;
   children: React.ReactNode;
 }) {
   return (
@@ -94,12 +110,7 @@ function TabButton({
       <TooltipTrigger asChild>
         <button
           onClick={onClick}
-          className={cn(
-            "rounded-md p-1.5 transition-colors",
-            active
-              ? "bg-accent text-accent-foreground"
-              : "text-muted-foreground hover:bg-accent/50"
-          )}
+          className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
         >
           {children}
         </button>
@@ -109,71 +120,164 @@ function TabButton({
   );
 }
 
-// ====== Chat List ======
+function TabButton({
+  active,
+  onClick,
+  label,
+  count,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+  count: number;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        "flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium transition-colors",
+        active ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+      )}
+    >
+      {children}
+      <span>{label}</span>
+      <span className="text-[10px] text-muted-foreground">{count}</span>
+    </button>
+  );
+}
 
-function ChatList({
+function ChatList() {
+  const { state } = useStore();
+
+  return (
+    <ListShell
+      title="正在聊天"
+      description="最近会话和未读消息"
+      empty={state.connected ? "暂无正在聊天的会话" : "未连接到服务器"}
+      isEmpty={state.conversations.length === 0}
+    >
+      {state.conversations.map((conv) => (
+        <ConversationItem key={conv.conversationId} conv={conv} />
+      ))}
+    </ListShell>
+  );
+}
+
+function FriendList({
   onSearchUser,
+  onFriendRequests,
+}: {
+  onSearchUser: () => void;
+  onFriendRequests: () => void;
+}) {
+  const { state, fetchUnhandledApplyCount } = useStore();
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex gap-2 border-b px-3 py-2">
+        <button
+          onClick={onSearchUser}
+          className="flex-1 rounded-md bg-secondary px-2 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:bg-secondary/80"
+        >
+          <UserPlus className="mr-1 inline h-3 w-3" /> 添加好友
+        </button>
+        <button
+          onClick={() => {
+            void fetchUnhandledApplyCount();
+            onFriendRequests();
+          }}
+          className="relative rounded-md bg-secondary px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary/80"
+        >
+          申请
+          {state.unhandledApplyCount > 0 && (
+            <span className="absolute -right-1.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] text-destructive-foreground">
+              {state.unhandledApplyCount > 99 ? "99+" : state.unhandledApplyCount}
+            </span>
+          )}
+        </button>
+      </div>
+
+      <ListShell
+        title="我的好友"
+        description="选择好友开始单聊"
+        empty="暂无好友"
+        isEmpty={state.friends.length === 0}
+      >
+        {state.friends.map((friend) => (
+          <FriendItem key={friend.friendUserId} friend={friend} />
+        ))}
+      </ListShell>
+    </div>
+  );
+}
+
+function GroupList({
   onSearchGroup,
   onCreateGroup,
 }: {
-  onSearchUser: () => void;
   onSearchGroup: () => void;
   onCreateGroup: () => void;
 }) {
   const { state } = useStore();
 
   return (
-    <div className="flex flex-1 flex-col">
-      {/* Quick actions */}
-      <div className="flex gap-1 border-b px-3 py-2">
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={onSearchUser}
-                className="flex-1 rounded-md bg-secondary px-2 py-1.5 text-left text-xs text-muted-foreground hover:bg-secondary/80"
-              >
-                <UserPlus className="mr-1 inline h-3 w-3" /> 加好友
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>搜索并添加好友</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={onSearchGroup}
-                className="flex-1 rounded-md bg-secondary px-2 py-1.5 text-left text-xs text-muted-foreground hover:bg-secondary/80"
-              >
-                <Users className="mr-1 inline h-3 w-3" /> 加群
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>搜索并加入群组</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={onCreateGroup}
-                className="flex-1 rounded-md bg-secondary px-2 py-1.5 text-left text-xs text-muted-foreground hover:bg-secondary/80"
-              >
-                <Plus className="mr-1 inline h-3 w-3" /> 创建群
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>创建一个新群</TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex gap-2 border-b px-3 py-2">
+        <button
+          onClick={onSearchGroup}
+          className="flex-1 rounded-md bg-secondary px-2 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:bg-secondary/80"
+        >
+          <Users className="mr-1 inline h-3 w-3" /> 加入群组
+        </button>
+        <button
+          onClick={onCreateGroup}
+          className="flex-1 rounded-md bg-secondary px-2 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:bg-secondary/80"
+        >
+          <Plus className="mr-1 inline h-3 w-3" /> 创建群
+        </button>
       </div>
 
-      {!state.connected && (
-        <div className="px-4 py-2 text-center text-xs text-muted-foreground">未连接</div>
-      )}
-
-      <ScrollArea className="flex-1">
-        {state.conversations.length === 0 && state.connected && (
-          <div className="p-4 text-center text-sm text-muted-foreground">暂无会话</div>
-        )}
-        {state.conversations.map((conv) => (
-          <ConversationItem key={conv.conversationId} conv={conv} />
+      <ListShell
+        title="我的群组"
+        description="选择群组进入群聊"
+        empty="暂无群组"
+        isEmpty={state.myGroups.length === 0}
+      >
+        {state.myGroups.map((group) => (
+          <GroupItem key={group.groupId} group={group} />
         ))}
+      </ListShell>
+    </div>
+  );
+}
+
+function ListShell({
+  title,
+  description,
+  empty,
+  isEmpty,
+  children,
+}: {
+  title: string;
+  description: string;
+  empty: string;
+  isEmpty: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="px-4 py-3">
+        <div className="text-sm font-medium">{title}</div>
+        <div className="text-xs text-muted-foreground">{description}</div>
+      </div>
+      <ScrollArea className="flex-1">
+        {isEmpty ? (
+          <div className="px-4 py-8 text-center text-sm text-muted-foreground">{empty}</div>
+        ) : (
+          <div className="pb-2">{children}</div>
+        )}
       </ScrollArea>
     </div>
   );
@@ -182,12 +286,11 @@ function ChatList({
 function ConversationItem({ conv }: { conv: Conversation }) {
   const { state, dispatch } = useStore();
   const isActive = state.activeConversationId === conv.conversationId;
+  const subtitle = conv.latestMsg || (conv.conversationType === 2 ? `[群聊] ${conv.groupName || conv.showName}` : "暂无消息");
 
   return (
     <button
-      onClick={() =>
-        dispatch({ type: "SET_ACTIVE_CONVERSATION", conversationId: conv.conversationId })
-      }
+      onClick={() => dispatch({ type: "SET_ACTIVE_CONVERSATION", conversationId: conv.conversationId })}
       className={cn(
         "flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-accent/50",
         isActive && "bg-accent"
@@ -195,23 +298,19 @@ function ConversationItem({ conv }: { conv: Conversation }) {
     >
       <Avatar className="h-10 w-10">
         <AvatarImage src={conv.faceUrl} />
-        <AvatarFallback>{conv.showName.charAt(0).toUpperCase()}</AvatarFallback>
+        <AvatarFallback>{fallbackName(conv.showName)}</AvatarFallback>
       </Avatar>
       <div className="min-w-0 flex-1">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-2">
           <span className="truncate text-sm font-medium">{conv.showName}</span>
           {conv.latestMsgSendTime && (
-            <span className="shrink-0 text-xs text-muted-foreground">
-              {formatTime(conv.latestMsgSendTime)}
-            </span>
+            <span className="shrink-0 text-xs text-muted-foreground">{formatTime(conv.latestMsgSendTime)}</span>
           )}
         </div>
-        <div className="flex items-center justify-between">
-          <span className="truncate text-xs text-muted-foreground">
-            {conv.latestMsg || conv.conversationType === 2 ? `[群聊] ${conv.groupName || ""}` : ""}
-          </span>
+        <div className="flex items-center justify-between gap-2">
+          <span className="truncate text-xs text-muted-foreground">{subtitle}</span>
           {conv.unreadCount > 0 && (
-            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary text-[10px] text-primary-foreground">
+            <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-primary px-1 text-[10px] text-primary-foreground">
               {conv.unreadCount > 99 ? "99+" : conv.unreadCount}
             </span>
           )}
@@ -221,92 +320,130 @@ function ConversationItem({ conv }: { conv: Conversation }) {
   );
 }
 
-// ====== Contact List ======
+function FriendItem({ friend }: { friend: FriendInfo }) {
+  const { state, dispatch, removeFriend } = useStore();
+  const navigate = useNavigate();
+  const displayName = friend.remark || friend.nickname || friend.friendUserId;
 
-function ContactList({ onSearchUser }: { onSearchUser: () => void }) {
-  const { state, removeFriend, fetchUnhandledApplyCount } = useStore();
-  const [friendRequestOpen, setFriendRequestOpen] = useState(false);
-  const friends = state.friends;
+  const openChat = () => {
+    const existing = state.conversations.find((conv) => conv.conversationType === 1 && conv.userId === friend.friendUserId);
+    if (existing) {
+      dispatch({ type: "SET_ACTIVE_CONVERSATION", conversationId: existing.conversationId });
+      navigate("/chat");
+      return;
+    }
+
+    const conversation: Conversation = {
+      conversationId: singleConversationId(state.userId || "", friend.friendUserId),
+      ownerUserId: state.userId || "",
+      conversationType: 1,
+      userId: friend.friendUserId,
+      showName: displayName,
+      faceUrl: friend.faceUrl,
+      latestMsg: "",
+      latestMsgSendTime: 0,
+      unreadCount: 0,
+      recvMsgOpt: 0,
+      isPinned: false,
+    };
+    dispatch({ type: "ADD_CONVERSATION", conversation });
+    dispatch({ type: "SET_ACTIVE_CONVERSATION", conversationId: conversation.conversationId });
+    navigate("/chat");
+  };
 
   return (
-    <div className="flex flex-1 flex-col">
-      <div className="flex items-center gap-1 border-b px-3 py-2">
-        <button
-          onClick={onSearchUser}
-          className="flex-1 rounded-md bg-secondary px-2 py-1.5 text-left text-xs text-muted-foreground hover:bg-secondary/80"
-        >
-          <UserPlus className="mr-1 inline h-3 w-3" /> 添加好友
-        </button>
-        <button
-          onClick={() => {
-            setFriendRequestOpen(true);
-            fetchUnhandledApplyCount();
-          }}
-          className="relative rounded-md bg-secondary px-2 py-1.5 text-xs text-muted-foreground hover:bg-secondary/80"
-        >
-          申请
-          {state.unhandledApplyCount > 0 && (
-            <span className="absolute -right-1.5 -top-1.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-destructive px-1 text-[10px] text-destructive-foreground">
-              {state.unhandledApplyCount > 99 ? "99+" : state.unhandledApplyCount}
-            </span>
-          )}
-        </button>
-      </div>
+    <div className="group flex items-center justify-between px-4 py-2.5 transition-colors hover:bg-accent/50">
+      <button onClick={openChat} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+        <Avatar className="h-9 w-9">
+          <AvatarImage src={friend.faceUrl} />
+          <AvatarFallback>{fallbackName(displayName)}</AvatarFallback>
+        </Avatar>
+        <div className="min-w-0">
+          <div className="truncate text-sm font-medium">{displayName}</div>
+          <div className="truncate text-xs text-muted-foreground">ID: {friend.friendUserId}</div>
+        </div>
+      </button>
 
-      <ScrollArea className="flex-1">
-        {friends.length === 0 && (
-          <div className="p-4 text-center text-sm text-muted-foreground">暂无好友</div>
-        )}
-
-        {friends.map((friend) => (
-          <div
-            key={friend.friendUserId}
-            className="group flex items-center justify-between px-4 py-2.5 transition-colors hover:bg-accent/50"
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button className="invisible rounded-md p-1 text-muted-foreground opacity-0 transition-all hover:bg-accent group-hover:visible group-hover:opacity-100">
+            <MoreHorizontal className="h-4 w-4" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem
+            className="text-destructive"
+            onClick={() => {
+              removeFriend(friend.friendUserId);
+              toast("已删除好友");
+            }}
           >
-            <div className="flex items-center gap-3">
-              <Avatar className="h-9 w-9">
-                <AvatarImage src={friend.faceUrl} />
-                <AvatarFallback>
-                  {(friend.remark || friend.nickname || friend.friendUserId).charAt(0).toUpperCase()}
-                </AvatarFallback>
-              </Avatar>
-              <div>
-                <div className="text-sm font-medium">
-                  {friend.remark || friend.nickname || friend.friendUserId}
-                </div>
-                <div className="text-xs text-muted-foreground">ID: {friend.friendUserId}</div>
-              </div>
-            </div>
-
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button className="invisible rounded-md p-1 text-muted-foreground opacity-0 transition-all hover:bg-accent group-hover:visible group-hover:opacity-100">
-                  <MoreHorizontal className="h-4 w-4" />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem
-                  className="text-destructive"
-                  onClick={() => {
-                    removeFriend(friend.friendUserId);
-                    toast("已删除好友");
-                  }}
-                >
-                  <UserMinus className="mr-2 h-4 w-4" />
-                  删除好友
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-        ))}
-      </ScrollArea>
-
-      <FriendRequestDialog open={friendRequestOpen} onOpenChange={setFriendRequestOpen} />
+            <UserMinus className="mr-2 h-4 w-4" />
+            删除好友
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   );
 }
 
-// ====== Time formatter ======
+function GroupItem({ group }: { group: GroupInfo }) {
+  const { state, dispatch } = useStore();
+  const navigate = useNavigate();
+  const conversation = useMemo(
+    () => state.conversations.find((conv) => conv.conversationType === 2 && (conv.groupId === group.groupId || conv.conversationId === `group_${group.groupId}`)),
+    [group.groupId, state.conversations]
+  );
+
+  const openChat = () => {
+    if (conversation) {
+      dispatch({ type: "SET_ACTIVE_CONVERSATION", conversationId: conversation.conversationId });
+      navigate("/chat");
+      return;
+    }
+
+    const localConversation: Conversation = {
+      conversationId: `group_${group.groupId}`,
+      ownerUserId: state.userId || "",
+      conversationType: 2,
+      groupId: group.groupId,
+      groupName: group.groupName,
+      showName: group.groupName,
+      faceUrl: group.faceUrl,
+      latestMsg: "",
+      latestMsgSendTime: 0,
+      unreadCount: 0,
+      recvMsgOpt: 0,
+      isPinned: false,
+    };
+    dispatch({ type: "ADD_CONVERSATION", conversation: localConversation });
+    dispatch({ type: "SET_ACTIVE_CONVERSATION", conversationId: localConversation.conversationId });
+    navigate("/chat");
+  };
+
+  return (
+    <button onClick={openChat} className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-accent/50">
+      <Avatar className="h-9 w-9">
+        <AvatarImage src={group.faceUrl} />
+        <AvatarFallback>{fallbackName(group.groupName)}</AvatarFallback>
+      </Avatar>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-medium">{group.groupName}</div>
+        <div className="truncate text-xs text-muted-foreground">
+          ID: {group.groupId}{group.memberCount ? ` · ${group.memberCount} 人` : ""}
+        </div>
+      </div>
+    </button>
+  );
+}
+
+function fallbackName(name?: string): string {
+  return (name || "?").charAt(0).toUpperCase();
+}
+
+function singleConversationId(userA: string, userB: string): string {
+  return userA <= userB ? `single_${userA}_${userB}` : `single_${userB}_${userA}`;
+}
 
 function formatTime(ts: number): string {
   const d = new Date(ts);

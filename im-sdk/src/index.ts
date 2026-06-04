@@ -37,8 +37,9 @@ import { EventBus } from "./event-bus.js";
 export * from "./types.js";
 
 // ── 内部导入 ──
-import { type ConnectionState, type IMEvents, type IMOptions, type Message, type FriendApply, type WSResponse, type WSPush, IMError, PUSH_OP } from "./types.js";
+import { type ConnectionState, type IMEvents, type IMOptions, type Message, type FriendApply, type MessageRevoked, type TokenPair, type WSPush, IMError, PUSH_OP } from "./types.js";
 import { WsTransport } from "./transport/ws.js";
+import { HttpTransport } from "./transport/http.js";
 import { UserAPI } from "./api/user.js";
 import { FriendAPI } from "./api/friend.js";
 import { GroupAPI } from "./api/group.js";
@@ -63,32 +64,46 @@ export class IMSDK {
   file: FileAPI;
 
   private transport: WsTransport;
+  private httpTransport?: HttpTransport;
   private getToken: () => string | null;
+  private getRefreshToken: () => string | null;
+  private accessToken: string | null = null;
+  private refreshTokenValue: string | null = null;
   private bus = new EventBus();
 
   constructor(private opts: IMOptions) {
-    this.getToken = opts.getToken || (() => null);
+    this.getToken = () => this.accessToken ?? opts.getToken?.() ?? null;
+    this.getRefreshToken = () => this.refreshTokenValue ?? opts.getRefreshToken?.() ?? null;
     this.transport = new WsTransport({
       getToken: this.getToken,
+      getRefreshToken: this.getRefreshToken,
+      onTokenChanged: (tokens) => this.applyTokens(tokens),
       maxReconnect: opts.maxReconnect,
       heartbeatInterval: opts.heartbeatInterval,
       requestTimeout: opts.requestTimeout,
     });
+    this.httpTransport = opts.httpUrl ? new HttpTransport({
+      baseUrl: opts.httpUrl,
+      getToken: this.getToken,
+    }) : undefined;
 
-    this.user = new UserAPI(this.transport);
-    this.friend = new FriendAPI(this.transport);
-    this.group = new GroupAPI(this.transport);
-    this.message = new MessageAPI(this.transport);
-    this.conversation = new ConversationAPI(this.transport);
-    this.file = new FileAPI(this.transport);
+    this.user = new UserAPI(this.transport, this.httpTransport);
+    this.friend = new FriendAPI(this.httpTransport);
+    this.group = new GroupAPI(this.httpTransport);
+    this.message = new MessageAPI(this.transport, this.httpTransport);
+    this.conversation = new ConversationAPI(this.httpTransport);
+    this.file = new FileAPI(this.httpTransport);
 
     // 转发 push 事件到 SDK 级别 listener
     this.transport.bus.on("push", (raw: unknown) => {
       const push = raw as WSPush;
+      this.bus.emit("push", push);
       if (push.op === PUSH_OP.MESSAGE) {
         this.bus.emit("message", push.data as Message);
       } else if (push.op === PUSH_OP.FRIEND_APPLY) {
         this.bus.emit("friendRequest", push.data as FriendApply);
+      } else if (push.op === PUSH_OP.MESSAGE_REVOKED) {
+        this.bus.emit("messageRevoked", push.data as MessageRevoked);
       }
     });
 
@@ -121,6 +136,20 @@ export class IMSDK {
     return this.transport.state;
   }
 
+  get token(): string | null {
+    return this.accessToken ?? this.opts.getToken?.() ?? null;
+  }
+
+  get refreshToken(): string | null {
+    return this.refreshTokenValue ?? this.opts.getRefreshToken?.() ?? null;
+  }
+
+  async login(userId: string, password?: string): Promise<TokenPair> {
+    const response = await this.user.login(userId, password);
+    const tokens = response.data as TokenPair | undefined;
+    return this.applyTokens(tokens ?? {});
+  }
+
   // ── 连接管理 ──
 
   /** 建立 WebSocket 连接 */
@@ -131,6 +160,23 @@ export class IMSDK {
   /** 断开连接 */
   disconnect(): void {
     this.transport.disconnect();
+  }
+
+  private applyTokens(tokens: TokenPair): TokenPair {
+    if (tokens.token) {
+      this.accessToken = tokens.token;
+    }
+    if (tokens.refreshToken) {
+      this.refreshTokenValue = tokens.refreshToken;
+    }
+    const current = {
+      ...(this.accessToken ? { token: this.accessToken } : {}),
+      ...(this.refreshTokenValue ? { refreshToken: this.refreshTokenValue } : {}),
+      ...(tokens.expiresIn !== undefined ? { expiresIn: tokens.expiresIn } : {}),
+    };
+    this.opts.onTokenChanged?.(current);
+    this.bus.emit("tokenChanged", current);
+    return current;
   }
 }
 

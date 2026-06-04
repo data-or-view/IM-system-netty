@@ -1,5 +1,5 @@
-import { OP } from "../types.js";
-import type { WsTransport } from "../transport/ws.js";
+import { IMError, type FileUploadResult } from "../types.js";
+import type { HttpTransport } from "../transport/http.js";
 
 export interface MultipartInitResult {
   uploadId: string;
@@ -15,60 +15,54 @@ export interface MultipartUploadResult {
  * 文件模块 API。
  */
 export class FileAPI {
-  constructor(private transport: WsTransport) {}
+  constructor(private transport?: HttpTransport) {}
 
-  /** 上传小文件（通过 WS 二进制帧） */
-  upload(fileName: string, fileData: Uint8Array, mimeType?: string): Promise<string> {
-    const { frame, promise } = this.transport.requestManager.createRequest(OP.FILE_UPLOAD, {
-      fileName,
-      ...(mimeType ? { mimeType } : {}),
-    });
-
-    // 发送 JSON header frame，后跟二进制 body
-    // 注意：当前后端只接收 TextWebSocketFrame，二进制 body 需要额外处理
-    // v1: 只发送 JSON header，body 为空
-    this.transport.send(frame);
-    return promise.then((r) => r.data as string);
+  /**
+   * 上传小文件。
+   *
+   * 当前后端 WS 只消费文本帧，这里暂时只提交文件元数据；
+   * 真正的二进制上传需要后续接入 HTTP upload transport。
+   */
+  upload(fileName: string, fileData: Uint8Array, mimeType = "application/octet-stream"): Promise<FileUploadResult> {
+    const http = this.transport;
+    return http ? http.uploadFile(fileName, fileData, mimeType) : this.missingHttp();
   }
 
   /** 初始化分片上传 */
   multipartInit(fileName: string, fileSize: number, mimeType?: string): Promise<MultipartInitResult> {
-    const { frame, promise } = this.transport.requestManager.createRequest(OP.FILE_MULTIPART_INIT, {
-      fileName,
-      fileSize,
-      ...(mimeType ? { mimeType } : {}),
-    });
-    this.transport.send(frame);
-    return promise.then((r) => r.data as MultipartInitResult);
+    const http = this.transport;
+    if (!http) return this.missingHttp();
+    return http.multipartInit(fileName, fileSize, mimeType ?? "application/octet-stream")
+      .then((r) => ({
+        uploadId: r.uploadId,
+        objectId: r.objectId ?? r.fileId ?? "",
+      }));
   }
 
   /** 上传分片 */
   multipartUpload(uploadId: string, partNumber: number, data: Uint8Array): Promise<string> {
-    const { frame, promise } = this.transport.requestManager.createRequest(OP.FILE_MULTIPART_UPLOAD, {
-      uploadId,
-      partNumber,
-      // data 通过 HTTP multipart 或 base64 传输
-    });
-    this.transport.send(frame);
-    return promise.then((r) => r.data as string);
+    const http = this.transport;
+    return http ? http.uploadPart(uploadId, partNumber, data) : this.missingHttp();
   }
 
   /** 完成分片上传 */
   multipartComplete(uploadId: string, parts: Array<{ partNumber: number; etag: string }>): Promise<MultipartUploadResult> {
-    const { frame, promise } = this.transport.requestManager.createRequest(OP.FILE_MULTIPART_COMPLETE, {
-      uploadId,
-      parts,
-    });
-    this.transport.send(frame);
-    return promise.then((r) => r.data as MultipartUploadResult);
+    const http = this.transport;
+    if (!http) return this.missingHttp();
+    return http.multipartComplete(uploadId, parts)
+      .then((r) => ({
+        objectId: r.fileId,
+        fileUrl: r.fileUrl,
+      }));
   }
 
   /** 取消分片上传 */
   multipartAbort(uploadId: string): Promise<void> {
-    const { frame, promise } = this.transport.requestManager.createRequest(OP.FILE_MULTIPART_ABORT, {
-      uploadId,
-    });
-    this.transport.send(frame);
-    return promise.then(() => undefined);
+    const http = this.transport;
+    return http ? http.multipartAbort(uploadId) : this.missingHttp();
+  }
+
+  private missingHttp<T>(): Promise<T> {
+    return Promise.reject(new IMError(-1, "File API requires httpUrl"));
   }
 }

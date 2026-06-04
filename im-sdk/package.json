@@ -16,7 +16,8 @@
   ],
   "scripts": {
     "build": "tsc",
-    "dev": "tsc --watch"
+    "dev": "tsc --watch",
+    "test": "npm run build && node --test"
   },
   "devDependencies": {
     "typescript": "^5.4.0"

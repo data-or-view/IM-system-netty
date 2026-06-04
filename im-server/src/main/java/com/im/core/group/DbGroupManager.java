@@ -497,6 +497,33 @@ public class DbGroupManager implements IGroupManager {
     }
 
     @Override
+    public List<GroupInformation> getJoinedGroupInformationList(String userId) {
+        return PersistenceExceptions.runDatabase("get joined group information list", () -> {
+            try (SqlSession session = MyBatisPlusFactory.openSession()) {
+                GroupMemberMapper memberMapper = session.getMapper(GroupMemberMapper.class);
+                GroupMapper groupMapper = session.getMapper(GroupMapper.class);
+
+                List<String> groupIds = memberMapper.selectList(
+                        new LambdaQueryWrapper<GroupMemberEntity>()
+                                .eq(GroupMemberEntity::getUserId, userId)
+                                .select(GroupMemberEntity::getGroupId)
+                ).stream().map(GroupMemberEntity::getGroupId).toList();
+
+                if (groupIds.isEmpty()) return List.of();
+
+                return groupMapper.selectList(
+                                new LambdaQueryWrapper<GroupEntity>()
+                                        .in(GroupEntity::getGroupId, groupIds)
+                                        .eq(GroupEntity::getStatus, 1)
+                                        .orderByDesc(GroupEntity::getUpdatedAt)
+                        ).stream()
+                        .map(this::toGroupInfo)
+                        .collect(Collectors.toList());
+            }
+        });
+    }
+
+    @Override
     public GroupInformation getGroupInformation(String groupId) {
         return PersistenceExceptions.runDatabase("get group information", () -> {
             try (SqlSession session = MyBatisPlusFactory.openSession()) {

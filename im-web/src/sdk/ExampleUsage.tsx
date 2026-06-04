@@ -4,11 +4,12 @@
  * 展示如何在 React 组件中使用 IM SDK。
  * 这不是一个真实页面，只是 API 用法的参考。
  */
+import { useEffect } from "react";
 import { im } from "./im-sdk";
 import { useIM } from "./useIM";
 
 // ── 1. 直接使用 SDK（非 React 场景） ──
-async function sdkExample() {
+export async function sdkExample() {
   im.connect();
 
   // 等待连接建立后操作
@@ -41,24 +42,12 @@ async function sdkExample() {
 
 // ── 2. React Hooks 使用 ──
 export function ChatPage() {
-  const { messages, connected, connect, message, conversation } = useIM();
+  const { messages, connected, connect } = useIM();
 
   // 连接
   useEffect(() => {
     if (!connected) connect();
   }, []);
-
-  // 发消息
-  const handleSend = async (toUserId: string, content: string) => {
-    const msg = await message.send({ toUserId, contentType: "1", content });
-    console.log("已发送:", msg);
-  };
-
-  // 拉取会话列表
-  const handleLoadConversations = async () => {
-    const list = await conversation.list();
-    console.log("会话列表:", list);
-  };
 
   return (
     <div>

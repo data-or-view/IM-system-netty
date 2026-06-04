@@ -240,6 +240,16 @@ public interface IGroupManager {
     Set<String> getJoinedGroups(String userId);
 
     /**
+     * 用户加入的群信息列表。
+     */
+    default List<GroupInformation> getJoinedGroupInformationList(String userId) {
+        return getJoinedGroups(userId).stream()
+                .map(this::getGroupInformation)
+                .filter(info -> info != null)
+                .toList();
+    }
+
+    /**
      * 获取群信息。
      */
     GroupInformation getGroupInformation(String groupId);

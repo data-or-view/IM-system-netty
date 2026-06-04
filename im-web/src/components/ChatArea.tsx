@@ -16,7 +16,7 @@ import { toast } from "sonner";
 import { im } from "@/sdk/im-sdk";
 
 export default function ChatArea() {
-  const { state, sendMessage, dispatch } = useStore();
+  const { state, sendMessage, fetchConversations, dispatch } = useStore();
   const [input, setInput] = useState("");
   const navigate = useNavigate();
 
@@ -58,17 +58,47 @@ export default function ChatArea() {
 
   const handleSend = () => {
     if (!input.trim() || !conv) return;
+    const content = input.trim();
+    setInput("");
 
     if (conv.conversationType === 2 && conv.groupId) {
       // Group chat
-      im.message.sendGroup(conv.groupId, "1", input.trim()).catch(() => {
-        toast("发送失败");
-      });
+      im.message
+        .sendGroup(conv.groupId, "1", content)
+        .then((m) => {
+          dispatch({
+            type: "APPEND_MESSAGE",
+            conversationId: m.conversationId,
+            msg: {
+              messageId: m.messageId,
+              seq: m.messageSeq,
+              senderUserId: m.fromUserId,
+              conversationId: m.conversationId,
+              contentType: Number(m.contentType),
+              content: m.content,
+              createTime: m.timestamp,
+              status: m.status,
+            },
+          });
+          dispatch({
+            type: "UPDATE_CONVERSATION_LATEST",
+            conversationId: m.conversationId,
+            latestMsg: m.content,
+            latestMsgSendTime: m.timestamp,
+          });
+          void fetchConversations();
+        })
+        .catch(() => {
+          toast("发送失败");
+          setInput(content);
+        });
     } else if (conv.userId) {
       // Single chat
-      sendMessage(conv.userId, input.trim());
+      sendMessage(conv.userId, content).catch(() => {
+        toast("发送失败");
+        setInput(content);
+      });
     }
-    setInput("");
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -78,14 +108,19 @@ export default function ChatArea() {
     }
   };
 
-  const handleRevoke = useCallback(async (messageId: string) => {
+  const handleRevoke = useCallback(async (msg: { conversationId: string; seq: number; groupId?: string }) => {
     try {
-      await im.message.revoke(messageId);
+      await im.message.revoke({
+        conversationId: msg.conversationId,
+        messageSeq: msg.seq,
+        ...(msg.groupId ? { groupId: msg.groupId } : {}),
+      });
+      dispatch({ type: "REVOKE_MESSAGE", conversationId: msg.conversationId, seq: msg.seq });
       toast("已撤回");
     } catch {
       toast("撤回失败");
     }
-  }, []);
+  }, [dispatch]);
 
   const handleHeaderClick = () => {
     if (!conv) return;
@@ -202,7 +237,11 @@ export default function ChatArea() {
                           </button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" side="top">
-                          <DropdownMenuItem onClick={() => handleRevoke(msg.messageId)}>
+                          <DropdownMenuItem onClick={() => handleRevoke({
+                            conversationId: msg.conversationId,
+                            seq: msg.seq,
+                            groupId: conv?.groupId,
+                          })}>
                             <Undo2 className="mr-2 h-4 w-4" />
                             撤回
                           </DropdownMenuItem>

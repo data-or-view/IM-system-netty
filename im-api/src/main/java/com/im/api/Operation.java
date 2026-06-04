@@ -41,6 +41,7 @@ public enum Operation {
     GROUP_DISBAND("group.disband", "POST", "/api/group/disband", true),
     GROUP_INFO_UPDATE("group.info.update", "POST", "/api/group/info/update", true),
     GROUP_INFO("group.info", "GET", "/api/group/info", true),
+    GROUP_LIST("group.list", "GET", "/api/group/list", true),
     GROUP_SEARCH("group.search", "GET", "/api/group/search", true),
     GROUP_MEMBERS("group.members", "GET", "/api/group/members", true),
     GROUP_MUTE_ALL("group.mute_all", "POST", "/api/group/mute/all", true),

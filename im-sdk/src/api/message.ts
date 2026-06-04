@@ -1,85 +1,83 @@
-import { OP, type Message, type SearchMessagesParam, type SearchMessagesResult, type SendMessageParam } from "../types.js";
+import { OP, type Message, type RevokeMessageParam, type SearchMessagesParam, type SearchMessagesResult, type SendMessageParam } from "../types.js";
 import type { WsTransport } from "../transport/ws.js";
+import { type HttpAPI, requireHttp } from "./http-api.js";
 
 /**
  * 消息模块 API。
  */
 export class MessageAPI {
-  constructor(private transport: WsTransport) {}
+  constructor(private wsTransport: WsTransport, private httpTransport?: HttpAPI) {}
 
-  /** 发送单聊消息 */
+  /** 发送单聊消息：实时链路，走 WS */
   send(param: SendMessageParam): Promise<Message> {
-    const { frame, promise } = this.transport.requestManager.createRequest(OP.CHAT_SEND, {
+    return this.wsTransport.request(OP.CHAT_SEND, {
       toUserId: param.toUserId,
       contentType: param.contentType,
       content: param.content,
-    });
-    this.transport.send(frame);
-    return promise.then((r) => r.data as Message);
+    }).then((r) => r.data as Message);
   }
 
-  /** 发送群聊消息 */
+  /** 发送群聊消息：实时链路，走 WS */
   sendGroup(groupId: string, contentType: string, content: string): Promise<Message> {
-    const { frame, promise } = this.transport.requestManager.createRequest(OP.CHAT_SEND_GROUP, {
+    return this.wsTransport.request(OP.CHAT_SEND_GROUP, {
       groupId,
       contentType,
       content,
-    });
-    this.transport.send(frame);
-    return promise.then((r) => r.data as Message);
+    }).then((r) => r.data as Message);
   }
 
   /** 拉取历史消息 */
   pull(conversationId: string, startSeq: number, endSeq?: number): Promise<Message[]> {
-    const { frame, promise } = this.transport.requestManager.createRequest(OP.CHAT_PULL, {
+    return requireHttp(this.httpTransport).post<{ messages?: Message[] } | Message[]>("/api/msg/pull", {
       conversationId,
       startSeq,
       ...(endSeq !== undefined ? { endSeq } : {}),
-    });
-    this.transport.send(frame);
-    return promise.then((r) => r.data as Message[]);
+    }).then((data) => Array.isArray(data) ? data : data.messages ?? []);
   }
 
   /** 获取最新 seq */
   seq(conversationId: string): Promise<number> {
-    const { frame, promise } = this.transport.requestManager.createRequest(OP.CHAT_SEQ, {
-      conversationId,
-    });
-    this.transport.send(frame);
-    return promise.then((r) => r.data as number);
+    return requireHttp(this.httpTransport).get<{ maxSeq?: number } | number>("/api/msg/seq", { conversationId })
+      .then((data) => typeof data === "number" ? data : data.maxSeq ?? 0);
   }
 
   /** 增量同步 */
-  sync(conversationId: string, lastSeq: number): Promise<Message[]> {
-    const { frame, promise } = this.transport.requestManager.createRequest(OP.CHAT_SYNC, {
-      conversationId,
-      lastSeq,
-    });
-    this.transport.send(frame);
-    return promise.then((r) => r.data as Message[]);
+  sync(conversationId: string, lastSeq: number): Promise<Array<{ conversationId: string; messages: Message[]; maxSeq: number }>> {
+    return requireHttp(this.httpTransport).post<{ syncs?: Array<{ conversationId: string; messages: Message[]; maxSeq: number }> }>("/api/msg/sync", {
+      seqs: { [conversationId]: lastSeq },
+    }).then((data) => data.syncs ?? []);
   }
 
   /** 搜索消息 */
   search(param: SearchMessagesParam): Promise<SearchMessagesResult> {
-    const { frame, promise } = this.transport.requestManager.createRequest(OP.CHAT_SEARCH, {
-      conversationId: param.conversationId,
+    const pageSize = param.pageSize ?? 20;
+    const page = param.page ?? 1;
+    return requireHttp(this.httpTransport).post<{ messages?: Message[]; totalCount?: number; total?: number; hasMore?: boolean }>("/api/msg/search", {
+      conversationIds: [param.conversationId],
       keyword: param.keyword,
       ...(param.contentTypeFilter ? { contentTypeFilter: param.contentTypeFilter } : {}),
       ...(param.startTime ? { startTime: param.startTime } : {}),
       ...(param.endTime ? { endTime: param.endTime } : {}),
-      ...(param.pageSize ? { pageSize: param.pageSize } : {}),
-      ...(param.page !== undefined ? { page: param.page } : {}),
-    });
-    this.transport.send(frame);
-    return promise.then((r) => r.data as SearchMessagesResult);
+      limit: pageSize,
+      offset: Math.max(page - 1, 0) * pageSize,
+    }).then((data) => ({
+      messages: data.messages ?? [],
+      total: data.total ?? data.totalCount ?? 0,
+      hasMore: data.hasMore ?? false,
+    }));
   }
 
   /** 撤回消息 */
-  revoke(messageId: string): Promise<void> {
-    const { frame, promise } = this.transport.requestManager.createRequest(OP.CHAT_REVOKE, {
-      messageId,
-    });
-    this.transport.send(frame);
-    return promise.then(() => undefined);
+  revoke(param: RevokeMessageParam): Promise<void>;
+  revoke(messageId: string): Promise<void>;
+  revoke(param: RevokeMessageParam | string): Promise<void> {
+    const payload = typeof param === "string"
+      ? { messageId: param }
+      : {
+          conversationId: param.conversationId,
+          messageSeq: param.messageSeq,
+          ...(param.groupId ? { groupId: param.groupId } : {}),
+        };
+    return requireHttp(this.httpTransport).post("/api/msg/revoke", payload).then(() => undefined);
   }
 }

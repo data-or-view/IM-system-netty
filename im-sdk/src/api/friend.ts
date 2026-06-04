@@ -1,106 +1,72 @@
-import { OP, type FriendInfo, type FriendApply, type WSResponse } from "../types.js";
-import type { WsTransport } from "../transport/ws.js";
+import { type FriendInfo, type FriendApply } from "../types.js";
+import { type HttpAPI, requireHttp } from "./http-api.js";
 
 /**
  * 好友模块 API。
  */
 export class FriendAPI {
-  constructor(private transport: WsTransport) {}
+  constructor(private transport?: HttpAPI) {}
 
   /** 获取好友列表 */
   list(): Promise<FriendInfo[]> {
-    const { frame, promise } = this.transport.requestManager.createRequest(OP.FRIEND_LIST);
-    this.transport.send(frame);
-    return promise.then((r) => {
-      const data = r.data as { friends?: FriendInfo[] } | null;
-      return data?.friends ?? [];
-    });
+    return requireHttp(this.transport).get<{ friends?: FriendInfo[] }>("/api/friend/list")
+      .then((data) => data.friends ?? []);
   }
 
   /** 搜索用户（添加好友前搜索） */
   search(keyword: string, limit = 20): Promise<FriendInfo[]> {
-    const { frame, promise } = this.transport.requestManager.createRequest(OP.USER_SEARCH, {
+    return requireHttp(this.transport).get<{ users?: FriendInfo[] } | FriendInfo[]>("/api/user/search", {
       keyword,
       limit,
-    });
-    this.transport.send(frame);
-    return promise.then((r) => {
-      const data = r.data as { users?: FriendInfo[] } | null;
-      return data?.users ?? [];
-    });
+    }).then((data) => Array.isArray(data) ? data : data.users ?? []);
   }
 
   /** 申请加好友 */
   apply(targetUserId: string, reqMsg?: string): Promise<void> {
-    const { frame, promise } = this.transport.requestManager.createRequest(OP.FRIEND_APPLY, {
+    return requireHttp(this.transport).post("/api/friend/apply", {
       toUserId: targetUserId,
       ...(reqMsg ? { reqMsg } : {}),
-    });
-    this.transport.send(frame);
-    return promise.then(() => undefined);
+    }).then(() => undefined);
   }
 
   /** 审批好友申请 */
   approve(fromUserId: string, agreed: boolean): Promise<void> {
-    const { frame, promise } = this.transport.requestManager.createRequest(OP.FRIEND_APPROVE, {
+    return requireHttp(this.transport).post("/api/friend/approve", {
       fromUserId,
-      agreed: String(agreed),
-    });
-    this.transport.send(frame);
-    return promise.then(() => undefined);
+      agreed,
+    }).then(() => undefined);
   }
 
   /** 删除好友 */
   remove(friendUserId: string): Promise<void> {
-    const { frame, promise } = this.transport.requestManager.createRequest(OP.FRIEND_REMOVE, {
-      toUserId: friendUserId,
-    });
-    this.transport.send(frame);
-    return promise.then(() => undefined);
+    return requireHttp(this.transport).post("/api/friend/remove", { friendUserId }).then(() => undefined);
   }
 
   /** 拉黑 */
   black(targetUserId: string): Promise<void> {
-    const { frame, promise } = this.transport.requestManager.createRequest(OP.FRIEND_BLACK, {
-      toUserId: targetUserId,
-    });
-    this.transport.send(frame);
-    return promise.then(() => undefined);
+    return requireHttp(this.transport).post("/api/friend/black", { blockedUserId: targetUserId }).then(() => undefined);
   }
 
   /** 取消拉黑 */
   unblack(targetUserId: string): Promise<void> {
-    const { frame, promise } = this.transport.requestManager.createRequest(OP.FRIEND_UNBLACK, {
-      toUserId: targetUserId,
-    });
-    this.transport.send(frame);
-    return promise.then(() => undefined);
+    return requireHttp(this.transport).post("/api/friend/unblack", { blockedUserId: targetUserId }).then(() => undefined);
   }
 
   /** 黑名单列表 */
   blacklist(): Promise<FriendInfo[]> {
-    const { frame, promise } = this.transport.requestManager.createRequest(OP.FRIEND_BLACKLIST);
-    this.transport.send(frame);
-    return promise.then((r) => {
-      const data = r.data as { blacklist?: FriendInfo[] } | null;
-      return data?.blacklist ?? [];
-    });
+    return requireHttp(this.transport).get<{ blacklist?: FriendInfo[] }>("/api/friend/blacklist")
+      .then((data) => data.blacklist ?? []);
   }
 
   /** 已发送的好友申请列表 */
   sentApplyList(): Promise<FriendApply[]> {
-    const { frame, promise } = this.transport.requestManager.createRequest(OP.FRIEND_APPLY_SENT);
-    this.transport.send(frame);
-    return promise.then((r) => {
-      const data = r.data as { applies?: FriendApply[] } | null;
-      return data?.applies ?? [];
-    });
+    return requireHttp(this.transport).get<{ applies?: FriendApply[] }>("/api/friend/apply/sent")
+      .then((data) => data.applies ?? []);
   }
 
   /** 未处理的好友申请数量 */
   unhandledApplyCount(): Promise<number> {
-    const { frame, promise } = this.transport.requestManager.createRequest(OP.FRIEND_APPLY_UNHANDLED_COUNT);
-    this.transport.send(frame);
-    return promise.then((r) => r.data as number);
+    return requireHttp(this.transport).get<{ count?: number } | number>("/api/friend/apply/unhandled/count")
+      .then((data) => typeof data === "number" ? data : data.count ?? 0);
   }
 }

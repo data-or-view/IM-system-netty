@@ -1,4 +1,4 @@
-import { type ConnectionState, type WSResponse, type WSPush, PUSH_OP, IMError } from "../types.js";
+import { type ConnectionState, type TokenPair, type WSResponse, type WSPush, PUSH_OP, IMError } from "../types.js";
 import { EventBus } from "../event-bus.js";
 import { RequestManager } from "../protocol/request-manager.js";
 
@@ -22,6 +22,8 @@ export class WsTransport {
   private ws: WebSocket | null = null;
   private url = "";
   private getToken: () => string | null;
+  private getRefreshToken: () => string | null;
+  private onTokenChanged?: (tokens: TokenPair) => void;
   private maxReconnect: number;
   private heartbeatInterval: number;
 
@@ -35,14 +37,22 @@ export class WsTransport {
 
   bus = new EventBus();
   // 类型安全的 emit 包装
-  private emitResponse = (resp: WSResponse) => this.bus.emit("response", resp);
   private emitPush = (push: WSPush) => this.bus.emit("push", push);
   private emitError = (err: IMError) => this.bus.emit("error", err);
 
   constructor(
-    opts: { getToken?: () => string | null; maxReconnect?: number; heartbeatInterval?: number; requestTimeout?: number },
+    opts: {
+      getToken?: () => string | null;
+      getRefreshToken?: () => string | null;
+      onTokenChanged?: (tokens: TokenPair) => void;
+      maxReconnect?: number;
+      heartbeatInterval?: number;
+      requestTimeout?: number;
+    },
   ) {
     this.getToken = opts.getToken || (() => null);
+    this.getRefreshToken = opts.getRefreshToken || (() => null);
+    this.onTokenChanged = opts.onTokenChanged;
     this.maxReconnect = opts.maxReconnect ?? 10;
     this.heartbeatInterval = opts.heartbeatInterval ?? 7000;
     this.reqManager = new RequestManager(opts.requestTimeout);
@@ -85,17 +95,32 @@ export class WsTransport {
 
   // ── 发送 ──
 
-  send(frame: Record<string, unknown>): void {
+  send(frame: Record<string, unknown>): boolean {
     if (this.ws?.readyState !== WebSocket.OPEN) {
       this.emitError(new IMError(-1, "Not connected"));
-      return;
+      return false;
     }
     // 自动注入 Authorization token
     const token = this.getToken();
     if (token) {
       frame.Authorization = token;
     }
+    if (frame.op === "heartbeat") {
+      const refreshToken = this.getRefreshToken();
+      if (refreshToken) {
+        frame.refreshToken = refreshToken;
+      }
+    }
     this.ws.send(JSON.stringify(frame));
+    return true;
+  }
+
+  request(op: string, params: Record<string, unknown> = {}): Promise<WSResponse> {
+    const { frame, promise } = this.reqManager.createRequest(op, params);
+    if (!this.send(frame)) {
+      this.reqManager.reject(frame.seq, new IMError(-1, "Not connected"));
+    }
+    return promise;
   }
 
   sendRaw(data: string): void {
@@ -141,17 +166,48 @@ export class WsTransport {
     // 判断是响应（有 seq 字段）还是推送（无 seq 字段）
     if (typeof parsed.seq === "number") {
       const resp = parsed as unknown as WSResponse;
+      this.handleTokenRefresh(resp);
       if (!this.reqManager.resolveResponse(resp)) {
         // 无匹配的 pending：可能是旧响应或广播
       }
-    } else if (parsed.op === PUSH_OP.MESSAGE || parsed.op === PUSH_OP.FRIEND_APPLY) {
-      this.emitPush(parsed as unknown as WSPush);
+    } else {
+      this.emitPush(this.toPush(parsed));
     }
+  }
+
+  private toPush(parsed: Record<string, unknown>): WSPush {
+    if (typeof parsed.op === "string") {
+      return parsed as unknown as WSPush;
+    }
+    if (typeof parsed.messageId === "string" && typeof parsed.conversationId === "string") {
+      return {
+        op: PUSH_OP.MESSAGE,
+        data: parsed,
+      };
+    }
+    return {
+      op: "unknown",
+      data: parsed,
+    };
   }
 
   private setState(state: ConnectionState): void {
     this._state = state;
     this.bus.emit("stateChanged", state);
+  }
+
+  private handleTokenRefresh(resp: WSResponse): void {
+    if (resp.code !== 0 || resp.op !== "heartbeat_ack" || !resp.data || typeof resp.data !== "object") {
+      return;
+    }
+    const data = resp.data as TokenPair;
+    if (data.token || data.refreshToken) {
+      this.onTokenChanged?.({
+        ...(data.token ? { token: data.token } : {}),
+        ...(data.refreshToken ? { refreshToken: data.refreshToken } : {}),
+        ...(data.expiresIn !== undefined ? { expiresIn: data.expiresIn } : {}),
+      });
+    }
   }
 
   private tryReconnect(): void {

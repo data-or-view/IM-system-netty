@@ -14,6 +14,7 @@ import React, {
   type ReactNode,
 } from "react";
 import { im } from "@/sdk/im-sdk";
+import type { Message as SDKMessage, TokenPair } from "im-sdk";
 
 // ========== 类型（与 SDK 类型一致） ==========
 
@@ -87,6 +88,7 @@ export interface GroupMember {
 
 interface State {
   token: string | null;
+  refreshToken: string | null;
   userId: string | null;
   connected: boolean;
 
@@ -106,8 +108,9 @@ interface State {
 }
 
 const initialState: State = {
-  token: null,
-  userId: null,
+  token: localStorage.getItem("im_token"),
+  refreshToken: localStorage.getItem("im_refreshToken"),
+  userId: localStorage.getItem("im_userId"),
   connected: false,
   conversations: [],
   messages: {},
@@ -126,11 +129,13 @@ const initialState: State = {
 
 type Action =
   | { type: "SET_CONNECTED"; connected: boolean }
-  | { type: "SET_AUTH"; userId: string; token: string }
+  | { type: "SET_AUTH"; userId: string; token: string; refreshToken?: string | null }
+  | { type: "SET_TOKENS"; token?: string | null; refreshToken?: string | null }
   | { type: "LOGOUT" }
   | { type: "SET_CONVERSATIONS"; list: Conversation[] }
   | { type: "APPEND_MESSAGE"; conversationId: string; msg: Message }
   | { type: "ADD_MESSAGES"; conversationId: string; msgs: Message[] }
+  | { type: "REVOKE_MESSAGE"; conversationId: string; seq: number }
   | { type: "SET_FRIENDS"; list: FriendInfo[] }
   | { type: "SET_MY_GROUPS"; list: GroupInfo[] }
   | { type: "SET_SEARCH_USERS"; list: UserInfo[] }
@@ -140,7 +145,7 @@ type Action =
   | { type: "ADD_FRIEND"; friend: FriendInfo }
   | { type: "REMOVE_FRIEND"; friendUserId: string }
   | { type: "ADD_CONVERSATION"; conversation: Conversation }
-  | { type: "UPDATE_CONVERSATION_LATEST"; conversationId: string; latestMsg: string; latestMsgSendTime: number }
+  | { type: "UPDATE_CONVERSATION_LATEST"; conversationId: string; latestMsg: string; latestMsgSendTime: number; incoming?: boolean }
   | { type: "SET_GROUP_MEMBERS"; groupId: string; members: GroupMember[] }
   | { type: "SET_GROUP_INFO"; groupId: string; info: GroupInfo }
   | { type: "SET_USER_PROFILE"; userId: string; info: UserInfo };
@@ -150,14 +155,25 @@ function reducer(state: State, action: Action): State {
     case "SET_CONNECTED":
       return { ...state, connected: action.connected };
     case "SET_AUTH":
-      return { ...state, userId: action.userId, token: action.token };
+      return {
+        ...state,
+        userId: action.userId,
+        token: action.token,
+        refreshToken: action.refreshToken ?? state.refreshToken,
+      };
+    case "SET_TOKENS":
+      return {
+        ...state,
+        token: action.token !== undefined ? action.token : state.token,
+        refreshToken: action.refreshToken !== undefined ? action.refreshToken : state.refreshToken,
+      };
     case "LOGOUT":
-      return { ...initialState };
+      return { ...initialState, token: null, refreshToken: null, userId: null, connected: false };
     case "SET_CONVERSATIONS":
       return { ...state, conversations: action.list };
     case "APPEND_MESSAGE": {
       const existing = state.messages[action.conversationId] || [];
-      if (existing.some((m) => m.messageId === action.msg.messageId)) return state;
+      if (existing.some((m) => m.messageId === action.msg.messageId || (m.seq > 0 && m.seq === action.msg.seq))) return state;
       return {
         ...state,
         messages: { ...state.messages, [action.conversationId]: [...existing, action.msg] },
@@ -166,12 +182,28 @@ function reducer(state: State, action: Action): State {
     case "ADD_MESSAGES": {
       const existing = state.messages[action.conversationId] || [];
       const newMsgs = action.msgs.filter(
-        (m) => !existing.some((e) => e.messageId === m.messageId)
+        (m) => !existing.some((e) => e.messageId === m.messageId || (e.seq > 0 && e.seq === m.seq))
       );
       if (newMsgs.length === 0) return state;
       return {
         ...state,
-        messages: { ...state.messages, [action.conversationId]: [...existing, ...newMsgs] },
+        messages: {
+          ...state.messages,
+          [action.conversationId]: [...existing, ...newMsgs].sort((a, b) => a.seq - b.seq || a.createTime - b.createTime),
+        },
+      };
+    }
+    case "REVOKE_MESSAGE": {
+      const existing = state.messages[action.conversationId] || [];
+      if (existing.length === 0) return state;
+      return {
+        ...state,
+        messages: {
+          ...state.messages,
+          [action.conversationId]: existing.map((m) =>
+            m.seq === action.seq ? { ...m, contentType: 101, content: "消息已撤回" } : m
+          ),
+        },
       };
     }
     case "SET_FRIENDS":
@@ -193,15 +225,13 @@ function reducer(state: State, action: Action): State {
       return { ...state, activeConversationId: action.conversationId, conversations: cleared };
     }
     case "ADD_FRIEND": {
-      if (state.friends.some((f) => f.friendUserId === action.friend.friendUserId))
-        return state;
+      if (state.friends.some((f) => f.friendUserId === action.friend.friendUserId)) return state;
       return { ...state, friends: [...state.friends, action.friend] };
     }
     case "REMOVE_FRIEND":
       return { ...state, friends: state.friends.filter((f) => f.friendUserId !== action.friendUserId) };
     case "ADD_CONVERSATION": {
-      if (state.conversations.some((c) => c.conversationId === action.conversation.conversationId))
-        return state;
+      if (state.conversations.some((c) => c.conversationId === action.conversation.conversationId)) return state;
       return { ...state, conversations: [...state.conversations, action.conversation] };
     }
     case "UPDATE_CONVERSATION_LATEST": {
@@ -216,8 +246,7 @@ function reducer(state: State, action: Action): State {
                 ...c,
                 latestMsg: action.latestMsg,
                 latestMsgSendTime: action.latestMsgSendTime,
-                // 如果是当前活跃会话，不增加未读数
-                unreadCount: isActive ? c.unreadCount : c.unreadCount + 1,
+                unreadCount: action.incoming && !isActive ? c.unreadCount + 1 : c.unreadCount,
               }
             : c
         ),
@@ -239,21 +268,21 @@ function reducer(state: State, action: Action): State {
 interface StoreContextType {
   state: State;
   dispatch: React.Dispatch<Action>;
-  login: (userId: string, password?: string) => void;
-  register: (userId: string, password?: string) => void;
+  login: (userId: string, password?: string) => Promise<void>;
+  register: (userId: string, password?: string) => Promise<void>;
   logout: () => void;
-  sendMessage: (toUserId: string, content: string) => Promise<void>;
-  fetchConversations: () => void;
-  fetchFriends: () => void;
+  sendMessage: (toUserId: string, content: string) => Promise<Message | undefined>;
+  fetchConversations: () => Promise<void>;
+  fetchFriends: () => Promise<void>;
   searchUser: (keyword: string, limit?: number) => void;
   applyFriend: (targetUserId: string, reqMsg?: string) => void;
   removeFriend: (targetUserId: string) => void;
   searchGroup: (keyword: string, limit?: number) => void;
   joinGroup: (groupId: string, reqMsg?: string) => void;
   quitGroup: (groupId: string) => void;
-  fetchMyGroups: () => void;
+  fetchMyGroups: () => Promise<void>;
   approveFriend: (fromUserId: string, agreed: boolean) => Promise<void>;
-  fetchUnhandledApplyCount: () => void;
+  fetchUnhandledApplyCount: () => Promise<void>;
   fetchGroupMembers: (groupId: string) => Promise<void>;
   fetchGroupInfo: (groupId: string) => Promise<void>;
   fetchUserProfile: (userId: string) => Promise<void>;
@@ -261,87 +290,61 @@ interface StoreContextType {
 
 const StoreContext = createContext<StoreContextType | null>(null);
 
+function persistTokens(tokens: TokenPair) {
+  if (tokens.token) localStorage.setItem("im_token", tokens.token);
+  if (tokens.refreshToken) localStorage.setItem("im_refreshToken", tokens.refreshToken);
+}
+
+function toViewMessage(sdkMsg: SDKMessage): Message {
+  return {
+    messageId: sdkMsg.messageId,
+    seq: sdkMsg.messageSeq ?? sdkMsg.sequenceId ?? 0,
+    senderUserId: sdkMsg.fromUserId,
+    senderNickname: undefined,
+    conversationId: sdkMsg.conversationId,
+    contentType: Number(sdkMsg.contentType),
+    content: sdkMsg.content,
+    createTime: sdkMsg.timestamp,
+    status: sdkMsg.status,
+  };
+}
+
+function groupInfoFromConversation(list: Conversation[]): GroupInfo[] {
+  return list
+    .filter((c) => c.conversationType === 2)
+    .map((c) => ({
+      groupId: c.groupId || c.conversationId.replace(/^group_/, ""),
+      groupName: c.groupName || c.showName,
+      faceUrl: c.faceUrl,
+    }));
+}
+
 // ========== Provider ==========
 
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initialState);
 
-  // ── SDK 事件监听 ──
-  useEffect(() => {
-    const unsub1 = im.on("connectionStateChanged", (s) => {
-      dispatch({ type: "SET_CONNECTED", connected: s === "connected" });
-
-      // 连接成功后，如果有缓存的 token 但未设置 userId，自动重新登录
-      if (s === "connected") {
-        const cachedToken = localStorage.getItem("im_token");
-        const cachedUserId = localStorage.getItem("im_userId");
-        if (!cachedToken && cachedUserId) {
-          im.user.login(cachedUserId).then((resp) => {
-            const data = resp.data as { token?: string } | null;
-            const token = data?.token || "";
-            localStorage.setItem("im_token", token);
-            localStorage.setItem("im_userId", cachedUserId);
-            dispatch({ type: "SET_AUTH", userId: cachedUserId, token });
-          });
-        }
-      }
-    });
-
-    const unsub2 = im.on("message", (sdkMsg) => {
-      const msg: Message = {
-        messageId: sdkMsg.messageId,
-        seq: sdkMsg.messageSeq,
-        senderUserId: sdkMsg.fromUserId,
-        senderNickname: undefined,
-        conversationId: sdkMsg.conversationId,
-        contentType: sdkMsg.contentType,
-        content: sdkMsg.content,
-        createTime: sdkMsg.timestamp,
-        status: 1,
-      };
-      const convId = msg.conversationId;
-      if (convId) {
-        dispatch({ type: "APPEND_MESSAGE", conversationId: convId, msg });
-        // 更新会话最新消息和未读数
-        dispatch({
-          type: "UPDATE_CONVERSATION_LATEST",
-          conversationId: convId,
-          latestMsg: msg.content,
-          latestMsgSendTime: msg.createTime,
-        });
-      }
-    });
-
-    const unsub3 = im.on("friendRequest", () => {
-      // 收到好友申请推送，刷新未处理数
-      im.friend.unhandledApplyCount().then((count) => {
-        dispatch({ type: "SET_UNHANDLED_APPLY_COUNT", count });
-      });
-    });
-
-    return () => {
-      unsub1();
-      unsub2();
-      unsub3();
-    };
-  }, []);
-
-  // ── Actions ──
-
   const fetchConversations = useCallback(async () => {
     try {
-      const list = await im.conversation.list();
-      dispatch({ type: "SET_CONVERSATIONS", list: list as unknown as Conversation[] });
-      const groupsList = (list as unknown as Conversation[])
-        .filter((c) => c.conversationType === 2)
-        .map((c) => ({
-          groupId: c.groupId || c.conversationId,
-          groupName: c.groupName || c.showName,
-          faceUrl: c.faceUrl,
-        }));
-      dispatch({ type: "SET_MY_GROUPS", list: groupsList });
+      const list = (await im.conversation.list()) as unknown as Conversation[];
+      dispatch({ type: "SET_CONVERSATIONS", list });
     } catch (err) {
       console.error("fetchConversations failed:", err);
+    }
+  }, []);
+
+  const fetchMyGroups = useCallback(async () => {
+    try {
+      const groups = await im.group.list();
+      dispatch({ type: "SET_MY_GROUPS", list: groups as unknown as GroupInfo[] });
+    } catch (err) {
+      console.error("fetchMyGroups failed:", err);
+      try {
+        const conversations = (await im.conversation.list()) as unknown as Conversation[];
+        dispatch({ type: "SET_MY_GROUPS", list: groupInfoFromConversation(conversations) });
+      } catch (fallbackErr) {
+        console.error("fetchMyGroups fallback failed:", fallbackErr);
+      }
     }
   }, []);
 
@@ -354,46 +357,114 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const fetchUnhandledApplyCount = useCallback(async () => {
+    try {
+      const count = await im.friend.unhandledApplyCount();
+      dispatch({ type: "SET_UNHANDLED_APPLY_COUNT", count });
+    } catch (err) {
+      console.error("fetchUnhandledApplyCount failed:", err);
+    }
+  }, []);
+
+  const hydrateAfterAuth = useCallback(async () => {
+    await Promise.all([fetchConversations(), fetchFriends(), fetchMyGroups(), fetchUnhandledApplyCount()]);
+  }, [fetchConversations, fetchFriends, fetchMyGroups, fetchUnhandledApplyCount]);
+
+  // ── SDK 事件监听 ──
+  useEffect(() => {
+    const unsubConnection = im.on("connectionStateChanged", (s) => {
+      dispatch({ type: "SET_CONNECTED", connected: s === "connected" });
+      if (s === "connected" && localStorage.getItem("im_token")) {
+        void hydrateAfterAuth();
+      }
+    });
+
+    const unsubMessage = im.on("message", (sdkMsg) => {
+      const msg = toViewMessage(sdkMsg);
+      if (!msg.conversationId) return;
+      dispatch({ type: "APPEND_MESSAGE", conversationId: msg.conversationId, msg });
+      dispatch({
+        type: "UPDATE_CONVERSATION_LATEST",
+        conversationId: msg.conversationId,
+        latestMsg: msg.content,
+        latestMsgSendTime: msg.createTime,
+        incoming: msg.senderUserId !== localStorage.getItem("im_userId"),
+      });
+    });
+
+    const unsubRevoke = im.on("messageRevoked", (event) => {
+      dispatch({ type: "REVOKE_MESSAGE", conversationId: event.conversationId, seq: event.seq });
+      dispatch({
+        type: "UPDATE_CONVERSATION_LATEST",
+        conversationId: event.conversationId,
+        latestMsg: "消息已撤回",
+        latestMsgSendTime: Date.now(),
+      });
+    });
+
+    const unsubFriendRequest = im.on("friendRequest", () => {
+      void fetchUnhandledApplyCount();
+    });
+
+    const unsubTokenChanged = im.on("tokenChanged", (tokens) => {
+      persistTokens(tokens);
+      dispatch({ type: "SET_TOKENS", token: tokens.token, refreshToken: tokens.refreshToken });
+    });
+
+    return () => {
+      unsubConnection();
+      unsubMessage();
+      unsubRevoke();
+      unsubFriendRequest();
+      unsubTokenChanged();
+    };
+  }, [fetchUnhandledApplyCount, hydrateAfterAuth]);
+
+  useEffect(() => {
+    if (state.token && state.userId && im.state === "disconnected") {
+      im.connect();
+    }
+  }, [state.token, state.userId]);
+
+  // ── Actions ──
+
   const login = useCallback(async (userId: string, password?: string) => {
     localStorage.setItem("im_userId", userId);
-    try {
-      const resp = await im.user.login(userId, password);
-      const data = resp.data as { token?: string } | null;
-      const token = data?.token || "";
-      localStorage.setItem("im_token", token);
-      dispatch({ type: "SET_AUTH", userId, token });
-      // 登录后拉取数据
-      await Promise.all([fetchConversations(), fetchFriends()]);
-      // 拉取未处理好友申请数
-      im.friend.unhandledApplyCount().then((count) => {
-        dispatch({ type: "SET_UNHANDLED_APPLY_COUNT", count });
-      });
-    } catch (err: unknown) {
-      console.error("Login failed:", err);
-    }
-  }, [fetchConversations, fetchFriends]);
+    const tokens = await im.login(userId, password);
+    persistTokens(tokens);
+    dispatch({ type: "SET_AUTH", userId, token: tokens.token ?? "", refreshToken: tokens.refreshToken });
+    await hydrateAfterAuth();
+  }, [hydrateAfterAuth]);
 
   const register = useCallback(async (userId: string, password?: string) => {
     localStorage.setItem("im_userId", userId);
-    try {
-      await im.user.register(userId, password);
-      // 注册成功后自动登录
-      await login(userId, password);
-    } catch (err: unknown) {
-      console.error("Register failed:", err);
-    }
+    await im.user.register(userId, password);
+    await login(userId, password);
   }, [login]);
 
   const logout = useCallback(() => {
     localStorage.removeItem("im_userId");
     localStorage.removeItem("im_token");
+    localStorage.removeItem("im_refreshToken");
     im.disconnect();
     dispatch({ type: "LOGOUT" });
   }, []);
 
   const sendMessage = useCallback(async (toUserId: string, content: string) => {
-    await im.message.send({ toUserId, contentType: "1", content });
-  }, []);
+    const sdkMsg = await im.message.send({ toUserId, contentType: "1", content });
+    const msg = toViewMessage(sdkMsg);
+    if (msg.conversationId) {
+      dispatch({ type: "APPEND_MESSAGE", conversationId: msg.conversationId, msg });
+      dispatch({
+        type: "UPDATE_CONVERSATION_LATEST",
+        conversationId: msg.conversationId,
+        latestMsg: msg.content,
+        latestMsgSendTime: msg.createTime,
+      });
+      void fetchConversations();
+    }
+    return msg;
+  }, [fetchConversations]);
 
   const searchUser = useCallback(async (keyword: string, limit = 20) => {
     try {
@@ -416,8 +487,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const applyFriend = useCallback(async (targetUserId: string, reqMsg?: string) => {
     try {
       await im.friend.apply(targetUserId, reqMsg);
-      // 申请成功后刷新好友列表
-      setTimeout(() => fetchFriends(), 300);
+      setTimeout(() => void fetchFriends(), 300);
     } catch (err) {
       console.error("applyFriend failed:", err);
     }
@@ -435,7 +505,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const joinGroup = useCallback(async (groupId: string, reqMsg?: string) => {
     try {
       await im.group.join(groupId, reqMsg);
-      setTimeout(() => fetchConversations(), 300);
+      setTimeout(() => void fetchConversations(), 300);
     } catch (err) {
       console.error("joinGroup failed:", err);
     }
@@ -444,34 +514,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const quitGroup = useCallback(async (groupId: string) => {
     try {
       await im.group.quit(groupId);
-      setTimeout(() => fetchConversations(), 300);
+      setTimeout(() => void fetchConversations(), 300);
     } catch (err) {
       console.error("quitGroup failed:", err);
     }
   }, [fetchConversations]);
 
-  const fetchUnhandledApplyCount = useCallback(async () => {
-    try {
-      const count = await im.friend.unhandledApplyCount();
-      dispatch({ type: "SET_UNHANDLED_APPLY_COUNT", count });
-    } catch (err) {
-      console.error("fetchUnhandledApplyCount failed:", err);
-    }
-  }, []);
-
   const approveFriend = useCallback(async (fromUserId: string, agreed: boolean) => {
     try {
       await im.friend.approve(fromUserId, agreed);
-      // 审批后刷新好友列表和未处理数
       await Promise.all([fetchFriends(), fetchUnhandledApplyCount()]);
     } catch (err) {
       console.error("approveFriend failed:", err);
     }
   }, [fetchFriends, fetchUnhandledApplyCount]);
-
-  const fetchMyGroups = useCallback(() => {
-    fetchConversations();
-  }, [fetchConversations]);
 
   const fetchGroupMembers = useCallback(async (groupId: string) => {
     try {

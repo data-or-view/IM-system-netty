@@ -1,39 +1,31 @@
-import { OP, type Conversation, type WSResponse } from "../types.js";
-import type { WsTransport } from "../transport/ws.js";
+import { type Conversation } from "../types.js";
+import { type HttpAPI, requireHttp } from "./http-api.js";
 
 /**
  * 会话模块 API。
  */
 export class ConversationAPI {
-  constructor(private transport: WsTransport) {}
+  constructor(private transport?: HttpAPI) {}
 
   /** 获取会话列表 */
   list(): Promise<Conversation[]> {
-    const { frame, promise } = this.transport.requestManager.createRequest(OP.CONVERSATION_LIST);
-    this.transport.send(frame);
-    return promise.then((r) => {
-      const data = r.data as { conversations?: Conversation[] } | null;
-      return data?.conversations ?? [];
-    });
+    return requireHttp(this.transport).get<{ conversations?: Conversation[] }>("/api/conversation/list")
+      .then((data) => data.conversations ?? []);
   }
 
   /** 更新会话设置（置顶、免打扰等） */
   set(conversationId: string, params: Record<string, unknown>): Promise<void> {
-    const { frame, promise } = this.transport.requestManager.createRequest(OP.CONVERSATION_SET, {
+    return requireHttp(this.transport).post("/api/conversation/set", {
       conversationId,
       ...params,
-    });
-    this.transport.send(frame);
-    return promise.then(() => undefined);
+    }).then(() => undefined);
   }
 
   /** 标记会话已读 */
   read(conversationId: string, seq?: number): Promise<void> {
-    const { frame, promise } = this.transport.requestManager.createRequest(OP.CONVERSATION_READ, {
+    return requireHttp(this.transport).post("/api/conversation/read", {
       conversationId,
-      ...(seq !== undefined ? { seq } : {}),
-    });
-    this.transport.send(frame);
-    return promise.then(() => undefined);
+      ...(seq !== undefined ? { readSeq: seq } : {}),
+    }).then(() => undefined);
   }
 }

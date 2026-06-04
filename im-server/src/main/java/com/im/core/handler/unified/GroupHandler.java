@@ -8,6 +8,7 @@ import com.im.api.RequestHandler;
 import com.im.common.exception.UnauthorizedException;
 import com.im.common.exception.ValidationException;
 import com.im.common.exception.NotFoundException;
+import com.im.common.id.IdGenerator;
 
 import java.util.List;
 import java.util.Map;
@@ -36,6 +37,7 @@ public class GroupHandler implements RequestHandler {
             case "group.disband" -> handleDisband(req);
             case "group.info.update" -> handleInfoUpdate(req);
             case "group.info" -> handleInfo(req);
+            case "group.list" -> handleList(req);
             case "group.search" -> handleSearch(req);
             case "group.members" -> handleMembers(req);
             case "group.mute_all" -> handleMuteAll(req);
@@ -48,9 +50,10 @@ public class GroupHandler implements RequestHandler {
         String groupName = req.getString("groupName");
         String ownerId = req.currentUserId();
         if (ownerId == null) throw new UnauthorizedException("not authenticated");
-        if (groupId == null || groupName == null) {
-            throw new ValidationException("groupId and groupName are required");
+        if (groupName == null || groupName.isBlank()) {
+            throw new ValidationException("groupName is required");
         }
+        if (groupId == null || groupId.isBlank()) groupId = IdGenerator.groupId();
         String faceUrl = req.getString("faceUrl", "");
         int groupType = req.getInt("groupType", 0);
         int needVerification = req.getInt("needVerification", 0);
@@ -120,6 +123,13 @@ public class GroupHandler implements RequestHandler {
         GroupInformation info = groupManager.getGroupInformation(groupId);
         if (info == null) throw new NotFoundException("group not found");
         return info;
+    }
+
+    private Object handleList(ApiRequest req) {
+        String userId = req.currentUserId();
+        if (userId == null) throw new UnauthorizedException("not authenticated");
+        List<GroupInformation> groups = groupManager.getJoinedGroupInformationList(userId);
+        return Map.of("groups", groups, "count", groups.size());
     }
 
     private Object handleSearch(ApiRequest req) {

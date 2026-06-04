@@ -13,7 +13,7 @@ import { im } from "@/sdk/im-sdk";
 
 export default function CreateGroupPage() {
   const navigate = useNavigate();
-  const { state, fetchConversations } = useStore();
+  const { state, dispatch, fetchConversations, fetchMyGroups } = useStore();
   const [groupName, setGroupName] = useState("");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [creating, setCreating] = useState(false);
@@ -28,8 +28,9 @@ export default function CreateGroupPage() {
     if (!groupName.trim() || creating) return;
     setCreating(true);
     try {
-      await im.group.create(groupName.trim(), 0, selectedIds);
-      await fetchConversations();
+      const group = await im.group.create(groupName.trim(), 0, selectedIds);
+      dispatch({ type: "SET_MY_GROUPS", list: [group, ...state.myGroups.filter((item) => item.groupId !== group.groupId)] });
+      await Promise.all([fetchMyGroups(), fetchConversations()]);
       toast("群创建成功");
       navigate("/chat");
     } catch {
