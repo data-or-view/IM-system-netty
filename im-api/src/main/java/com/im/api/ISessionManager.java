@@ -101,6 +101,17 @@ public interface ISessionManager {
         throw new UnsupportedOperationException("forceLogout(platform) not implemented");
     }
 
+    /**
+     * 强制指定 session 登出。
+     *
+     * @param userId     目标用户
+     * @param platformId 目标平台
+     * @param sessionId  目标 session
+     */
+    default void forceLogoutSession(String userId, int platformId, String sessionId) {
+        throw new UnsupportedOperationException("forceLogoutSession not implemented");
+    }
+
     // ========================================
     //  多端登录策略
     // ========================================

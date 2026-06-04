@@ -1,6 +1,7 @@
 package com.im.infrastructure.storage.file;
 
 import com.im.api.IFileStorageService;
+import com.im.common.exception.FileStorageException;
 import io.minio.*;
 import io.minio.errors.*;
 import io.minio.http.Method;
@@ -81,7 +82,7 @@ public class MinioFileStorageService implements IFileStorageService {
             log.debug("File uploaded: bucket={}, object={}, size={}, url={}", bucket, objectId, data.length, url);
             return url;
         } catch (Exception e) {
-            throw new RuntimeException("MinIO upload failed: " + e.getMessage(), e);
+            throw new FileStorageException("MinIO upload failed: " + e.getMessage(), e);
         }
     }
 
@@ -95,7 +96,7 @@ public class MinioFileStorageService implements IFileStorageService {
                 return is.readAllBytes();
             }
         } catch (Exception e) {
-            throw new RuntimeException("MinIO download failed: " + e.getMessage(), e);
+            throw new FileStorageException("MinIO download failed: " + e.getMessage(), e);
         }
     }
 
@@ -108,7 +109,7 @@ public class MinioFileStorageService implements IFileStorageService {
                     .build());
             log.debug("File deleted: bucket={}, object={}", bucket, objectId);
         } catch (Exception e) {
-            throw new RuntimeException("MinIO delete failed: " + e.getMessage(), e);
+            throw new FileStorageException("MinIO delete failed: " + e.getMessage(), e);
         }
     }
 
@@ -152,7 +153,7 @@ public class MinioFileStorageService implements IFileStorageService {
                     bucket, objectId, uploadId);
             return uploadId;
         } catch (Exception e) {
-            throw new RuntimeException("MinIO initiateMultipartUpload failed: " + e.getMessage(), e);
+            throw new FileStorageException("MinIO initiateMultipartUpload failed: " + e.getMessage(), e);
         }
     }
 
@@ -165,7 +166,7 @@ public class MinioFileStorageService implements IFileStorageService {
                     bucket, objectId, partNumber, etag);
             return etag;
         } catch (Exception e) {
-            throw new RuntimeException("MinIO uploadPart failed: " + e.getMessage(), e);
+            throw new FileStorageException("MinIO uploadPart failed: " + e.getMessage(), e);
         }
     }
 
@@ -180,7 +181,7 @@ public class MinioFileStorageService implements IFileStorageService {
             log.info("Multipart upload completed: bucket={}, object={}, parts={}",
                     bucket, objectId, parts.size());
         } catch (Exception e) {
-            throw new RuntimeException("MinIO completeMultipartUpload failed: " + e.getMessage(), e);
+            throw new FileStorageException("MinIO completeMultipartUpload failed: " + e.getMessage(), e);
         }
     }
 
@@ -191,7 +192,7 @@ public class MinioFileStorageService implements IFileStorageService {
             log.info("Multipart upload aborted: bucket={}, object={}, uploadId={}",
                     bucket, objectId, uploadId);
         } catch (Exception e) {
-            throw new RuntimeException("MinIO abortMultipartUpload failed: " + e.getMessage(), e);
+            throw new FileStorageException("MinIO abortMultipartUpload failed: " + e.getMessage(), e);
         }
     }
 

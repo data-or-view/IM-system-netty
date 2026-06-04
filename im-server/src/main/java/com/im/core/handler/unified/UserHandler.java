@@ -4,8 +4,9 @@ import com.im.api.ApiRequest;
 import com.im.api.IUserManager;
 import com.im.api.RequestHandler;
 import com.im.api.UserInformation;
-import com.im.common.enums.ImErrorCode;
-import com.im.common.exception.ImException;
+import com.im.common.exception.UnauthorizedException;
+import com.im.common.exception.ValidationException;
+import com.im.common.exception.NotFoundException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -34,7 +35,7 @@ public class UserHandler implements RequestHandler {
             case "user.info" -> handleInfo(req);
             case "user.search" -> handleSearch(req);
             case "user.update" -> handleUpdate(req);
-            default -> throw new ImException(ImErrorCode.NOT_FOUND, "unsupported: " + req.operation());
+            default -> throw new NotFoundException("unsupported: " + req.operation());
         };
     }
 
@@ -45,14 +46,14 @@ public class UserHandler implements RequestHandler {
         String password = req.getString("password", "");
 
         if (userId == null || userId.isBlank()) {
-            throw new ImException(ImErrorCode.BAD_REQUEST, "userId is required");
+            throw new ValidationException("userId is required");
         }
 
         boolean exists = false;
         try {
             var existing = userManager.getUserInformation(userId);
             exists = existing != null;
-        } catch (ImException e) {
+        } catch (NotFoundException e) {
             exists = false;
         }
 
@@ -74,16 +75,16 @@ public class UserHandler implements RequestHandler {
 
     private Object handleInfo(ApiRequest req) {
         String userId = req.getString("userId");
-        if (userId == null) throw new ImException(ImErrorCode.BAD_REQUEST, "userId is required");
+        if (userId == null) throw new ValidationException("userId is required");
         UserInformation info = userManager.getUserInformation(userId);
-        if (info == null) throw new ImException(ImErrorCode.NOT_FOUND, "user not found");
+        if (info == null) throw new NotFoundException("user not found");
         return info;
     }
 
     private Object handleSearch(ApiRequest req) {
         String keyword = req.getString("keyword");
         if (keyword == null || keyword.isBlank()) {
-            throw new ImException(ImErrorCode.BAD_REQUEST, "keyword is required");
+            throw new ValidationException("keyword is required");
         }
         int limit = req.getInt("limit", 20);
         List<UserInformation> users = userManager.searchUsers(keyword.trim(), limit);
@@ -92,7 +93,7 @@ public class UserHandler implements RequestHandler {
 
     private Object handleUpdate(ApiRequest req) {
         String userId = req.currentUserId();
-        if (userId == null) throw new ImException(ImErrorCode.UNAUTHORIZED, "not authenticated");
+        if (userId == null) throw new UnauthorizedException("not authenticated");
         userManager.updateUserInformation(userId, req.getString("nickname"),
                 req.getString("faceUrl"), req.getString("ex"),
                 req.getInt("globalRecvMsgOpt", -1));

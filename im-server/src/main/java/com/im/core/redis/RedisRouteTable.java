@@ -5,6 +5,7 @@ import com.im.api.ISessionManager;
 import com.im.api.PlatformID;
 import com.im.api.RouteBinding;
 import com.im.api.RouteNode;
+import com.im.common.exception.PersistenceExceptions;
 import io.lettuce.core.ScriptOutputType;
 import io.lettuce.core.cluster.api.async.RedisClusterAsyncCommands;
 import org.slf4j.Logger;
@@ -13,17 +14,15 @@ import org.slf4j.LoggerFactory;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.stream.Collectors;
 
 /**
  * Redis 驱动路由表 + 在线状态管理。
  *
  * 数据模型（Redis）：
  * <pre>
- *   route:{userId}     → {platformId:sessionId: nodeId} (Hash, TTL=180s) ← 节点路由
+ *   route:{userId}     → {platformId:sessionId: nodeId|expireAt} (Hash, TTL=180s) ← 节点路由
  *   online:{userId}    → {platform: timestamp} (ZSet, TTL=180s) ← 在线状态
  * </pre>
  *
@@ -115,19 +114,26 @@ public class RedisRouteTable implements IRouteTable {
 
     @Override
     public void online(String userId, String nodeId, int platformId, String sessionId) {
-        String key = KEY_ROUTE_PREFIX + userId;
-        async.hset(key, routeField(platformId, sessionId), nodeId);
-        async.expire(key, ROUTE_TTL_SECONDS);
-        log.info("Route online: userId={}, node={}, platform={}, session={}",
-                userId, nodeId, platformId, sessionId);
+        PersistenceExceptions.runRedis("route online", () -> {
+            String key = KEY_ROUTE_PREFIX + userId;
+            async.hset(key, routeField(platformId, sessionId), routeValue(nodeId, routeExpireAt()))
+                    .toCompletableFuture().join();
+            async.expire(key, ROUTE_TTL_SECONDS).toCompletableFuture().join();
+            log.info("Route online: userId={}, node={}, platform={}, session={}",
+                    userId, nodeId, platformId, sessionId);
+            return null;
+        });
     }
 
     @Override
     public void offline(String userId, String nodeId, int platformId, String sessionId) {
-        String key = KEY_ROUTE_PREFIX + userId;
-        async.hdel(key, routeField(platformId, sessionId));
-        log.info("Route offline: userId={}, node={}, platform={}, session={}",
-                userId, nodeId, platformId, sessionId);
+        PersistenceExceptions.runRedis("route offline", () -> {
+            String key = KEY_ROUTE_PREFIX + userId;
+            async.hdel(key, routeField(platformId, sessionId)).toCompletableFuture().join();
+            log.info("Route offline: userId={}, node={}, platform={}, session={}",
+                    userId, nodeId, platformId, sessionId);
+            return null;
+        });
     }
 
     @Override
@@ -143,136 +149,154 @@ public class RedisRouteTable implements IRouteTable {
     @Override
     public List<RouteNode> lookupAll(String userId) {
         boolean hasLocalSession = sessionManager.getByUserId(userId) != null;
-        Map<String, String> routes = async.hgetall(KEY_ROUTE_PREFIX + userId)
-                .toCompletableFuture()
-                .join();
+        List<RouteBinding> bindings = lookupAllBindings(userId);
 
-        if ((routes == null || routes.isEmpty()) && !hasLocalSession) {
+        if (bindings.isEmpty() && !hasLocalSession) {
             return Collections.emptyList();
         }
 
-        Set<String> nodeIds = routes != null
-                ? routes.values().stream().collect(Collectors.toSet())
-                : Set.of();
         java.util.ArrayList<RouteNode> result = new java.util.ArrayList<>();
         if (hasLocalSession) {
             result.add(RouteNode.local(localNodeId));
         }
-        for (String nodeId : nodeIds) {
-            if (nodeId != null && !nodeId.equals(localNodeId)) {
-                result.add(RouteNode.remote(nodeId, null, 0));
-            }
-        }
+        bindings.stream()
+                .map(RouteBinding::nodeId)
+                .distinct()
+                .filter(nodeId -> nodeId != null && !nodeId.equals(localNodeId))
+                .map(nodeId -> RouteNode.remote(nodeId, nodeId, 0))
+                .forEach(result::add);
         return result;
     }
 
     @Override
     public List<RouteBinding> lookupAllBindings(String userId) {
-        Map<String, String> routes = async.hgetall(KEY_ROUTE_PREFIX + userId)
-                .toCompletableFuture()
-                .join();
-        if (routes == null || routes.isEmpty()) {
-            return Collections.emptyList();
-        }
-        return routes.entrySet().stream()
-                .map(entry -> toRouteBinding(userId, entry.getKey(), entry.getValue()))
-                .toList();
+        return PersistenceExceptions.runRedis("lookup route bindings", () -> {
+            long now = System.currentTimeMillis();
+            Map<String, String> routes = async.hgetall(KEY_ROUTE_PREFIX + userId)
+                    .toCompletableFuture()
+                    .join();
+            if (routes == null || routes.isEmpty()) {
+                return Collections.emptyList();
+            }
+            return routes.entrySet().stream()
+                    .map(entry -> toRouteBinding(userId, entry.getKey(), entry.getValue()))
+                    .filter(binding -> !binding.isExpired(now))
+                    .toList();
+        });
     }
 
     // ========== 在线状态（Platform 级别） ==========
 
     @Override
     public void setOnline(String userId, int platformId) {
-        String key = KEY_ONLINE_PREFIX + userId;
-        long now = System.currentTimeMillis();
-        long expireAt = now + ONLINE_TTL_SECONDS * 1000L;
+        PersistenceExceptions.runRedis("set online platform", () -> {
+            String key = KEY_ONLINE_PREFIX + userId;
+            long now = System.currentTimeMillis();
+            long expireAt = now + ONLINE_TTL_SECONDS * 1000L;
 
-        // 初次加载 Lua 脚本（缓存 SHA 后不再重新加载）
-        if (shaSetOnline == null) {
-            shaSetOnline = async.scriptLoad(LUA_SET_ONLINE).toCompletableFuture().join();
-        }
+            // 初次加载 Lua 脚本（缓存 SHA 后不再重新加载）
+            if (shaSetOnline == null) {
+                shaSetOnline = async.scriptLoad(LUA_SET_ONLINE).toCompletableFuture().join();
+            }
 
-        async.evalsha(shaSetOnline, ScriptOutputType.MULTI,
-                new String[]{key},
-                String.valueOf(now),
-                String.valueOf(expireAt),
-                String.valueOf(platformId),
-                String.valueOf(ONLINE_TTL_SECONDS)
-        );
-        log.info("Online set: userId={}, platform={}", userId, platformId);
+            async.evalsha(shaSetOnline, ScriptOutputType.MULTI,
+                    new String[]{key},
+                    String.valueOf(now),
+                    String.valueOf(expireAt),
+                    String.valueOf(platformId),
+                    String.valueOf(ONLINE_TTL_SECONDS)
+            ).toCompletableFuture().join();
+            log.info("Online set: userId={}, platform={}", userId, platformId);
+            return null;
+        });
     }
 
     @Override
     public void setOffline(String userId, int platformId) {
-        String key = KEY_ONLINE_PREFIX + userId;
-        long now = System.currentTimeMillis();
+        PersistenceExceptions.runRedis("set offline platform", () -> {
+            String key = KEY_ONLINE_PREFIX + userId;
+            long now = System.currentTimeMillis();
 
-        if (shaSetOffline == null) {
-            shaSetOffline = async.scriptLoad(LUA_SET_OFFLINE).toCompletableFuture().join();
-        }
+            if (shaSetOffline == null) {
+                shaSetOffline = async.scriptLoad(LUA_SET_OFFLINE).toCompletableFuture().join();
+            }
 
-        async.evalsha(shaSetOffline, ScriptOutputType.MULTI,
-                new String[]{key},
-                String.valueOf(now),
-                String.valueOf(platformId),
-                String.valueOf(ONLINE_TTL_SECONDS)
-        );
-        log.info("Online removed: userId={}, platform={}", userId, platformId);
+            async.evalsha(shaSetOffline, ScriptOutputType.MULTI,
+                    new String[]{key},
+                    String.valueOf(now),
+                    String.valueOf(platformId),
+                    String.valueOf(ONLINE_TTL_SECONDS)
+            ).toCompletableFuture().join();
+            log.info("Online removed: userId={}, platform={}", userId, platformId);
+            return null;
+        });
     }
 
     @Override
     public List<Integer> getOnlinePlatforms(String userId) {
-        String key = KEY_ONLINE_PREFIX + userId;
-        long now = System.currentTimeMillis();
+        return PersistenceExceptions.runRedis("get online platforms", () -> {
+            String key = KEY_ONLINE_PREFIX + userId;
+            long now = System.currentTimeMillis();
 
-        @SuppressWarnings("unchecked")
-        List<String> platforms = (List<String>) async.zrangebyscore(
-                key,
-                String.valueOf(now),
-                "+inf"
-        ).toCompletableFuture().join();
+            @SuppressWarnings("unchecked")
+            List<String> platforms = (List<String>) async.zrangebyscore(
+                    key,
+                    String.valueOf(now),
+                    "+inf"
+            ).toCompletableFuture().join();
 
-        if (platforms == null || platforms.isEmpty()) {
-            return Collections.emptyList();
-        }
-        return platforms.stream()
-                .map(Integer::parseInt)
-                .toList();
+            if (platforms == null || platforms.isEmpty()) {
+                return Collections.emptyList();
+            }
+            return platforms.stream()
+                    .map(Integer::parseInt)
+                    .toList();
+        });
     }
 
     @Override
     public Map<String, List<Integer>> batchGetOnlinePlatforms(List<String> userIds) {
-        long now = System.currentTimeMillis();
-        Map<String, List<Integer>> result = new ConcurrentHashMap<>();
+        return PersistenceExceptions.runRedis("batch get online platforms", () -> {
+            long now = System.currentTimeMillis();
+            Map<String, List<Integer>> result = new ConcurrentHashMap<>();
 
-        java.util.List<CompletableFuture<Void>> futures = userIds.stream()
-                .map(userId -> {
-                    String key = KEY_ONLINE_PREFIX + userId;
-                    return async.zrangebyscore(key, String.valueOf(now), "+inf")
-                            .thenAccept(platforms -> {
-                                if (platforms != null && !platforms.isEmpty()) {
-                                    result.put(userId, platforms.stream()
-                                            .map(Integer::parseInt)
-                                            .toList());
-                                }
-                            });
-                })
-                .map(f -> (CompletableFuture<Void>) f.toCompletableFuture())
-                .toList();
+            java.util.List<CompletableFuture<Void>> futures = userIds.stream()
+                    .map(userId -> {
+                        String key = KEY_ONLINE_PREFIX + userId;
+                        return async.zrangebyscore(key, String.valueOf(now), "+inf")
+                                .thenAccept(platforms -> {
+                                    if (platforms != null && !platforms.isEmpty()) {
+                                        result.put(userId, platforms.stream()
+                                                .map(Integer::parseInt)
+                                                .toList());
+                                    }
+                                });
+                    })
+                    .map(f -> (CompletableFuture<Void>) f.toCompletableFuture())
+                    .toList();
 
-        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
-        return result;
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+            return result;
+        });
     }
 
     @Override
     public void renewOnline(String userId, int platformId) {
-        String key = KEY_ONLINE_PREFIX + userId;
-        long expireAt = System.currentTimeMillis() + ONLINE_TTL_SECONDS * 1000L;
+        renewOnline(userId, platformId, "default");
+    }
 
-        async.zadd(key, expireAt, String.valueOf(platformId));
-        async.expire(key, ONLINE_TTL_SECONDS);
-        async.expire(KEY_ROUTE_PREFIX + userId, ROUTE_TTL_SECONDS);
-        log.trace("Online renewed: userId={}, platform={}", userId, platformId);
+    @Override
+    public void renewOnline(String userId, int platformId, String sessionId) {
+        PersistenceExceptions.runRedis("renew online platform", () -> {
+            String key = KEY_ONLINE_PREFIX + userId;
+            long expireAt = System.currentTimeMillis() + ONLINE_TTL_SECONDS * 1000L;
+
+            async.zadd(key, expireAt, String.valueOf(platformId)).toCompletableFuture().join();
+            async.expire(key, ONLINE_TTL_SECONDS).toCompletableFuture().join();
+            renewRouteBinding(userId, platformId, sessionId);
+            log.trace("Online renewed: userId={}, platform={}, session={}", userId, platformId, sessionId);
+            return null;
+        });
     }
 
     private static String routeField(int platformId, String sessionId) {
@@ -280,7 +304,28 @@ public class RedisRouteTable implements IRouteTable {
         return platformId + ":" + sid;
     }
 
-    private static RouteBinding toRouteBinding(String userId, String routeField, String nodeId) {
+    private static String routeValue(String nodeId, long expireAt) {
+        return nodeId + "|" + expireAt;
+    }
+
+    private static long routeExpireAt() {
+        return System.currentTimeMillis() + ROUTE_TTL_SECONDS * 1000L;
+    }
+
+    private void renewRouteBinding(String userId, int platformId, String sessionId) {
+        String routeKey = KEY_ROUTE_PREFIX + userId;
+        String field = routeField(platformId, sessionId);
+        async.hget(routeKey, field).thenAccept(currentValue -> {
+            if (currentValue == null || currentValue.isBlank()) {
+                return;
+            }
+            RouteBinding current = toRouteBinding(userId, field, currentValue);
+            async.hset(routeKey, field, routeValue(current.nodeId(), routeExpireAt()));
+            async.expire(routeKey, ROUTE_TTL_SECONDS);
+        });
+    }
+
+    private static RouteBinding toRouteBinding(String userId, String routeField, String routeValue) {
         String[] parts = routeField.split(":", 2);
         int platformId = PlatformID.DEFAULT;
         if (parts.length > 0) {
@@ -291,6 +336,16 @@ public class RedisRouteTable implements IRouteTable {
             }
         }
         String sessionId = parts.length > 1 ? parts[1] : "default";
-        return new RouteBinding(userId, nodeId, platformId, sessionId, 0);
+        String[] valueParts = routeValue.split("\\|", 2);
+        String nodeId = valueParts[0];
+        long expireAt = 0;
+        if (valueParts.length > 1) {
+            try {
+                expireAt = Long.parseLong(valueParts[1]);
+            } catch (NumberFormatException ignored) {
+                expireAt = 0;
+            }
+        }
+        return new RouteBinding(userId, nodeId, platformId, sessionId, expireAt);
     }
 }

@@ -1,12 +1,14 @@
 package com.im.core.usecase;
 
 import com.im.api.IGroupManager;
+import com.im.api.IChatSendPolicy;
 import com.im.api.IMessageQueue;
 import com.im.api.ISequenceManager;
 import com.im.api.ConversationIds;
 import com.im.api.Message;
 import com.im.api.MessageQueueTopics;
 import com.im.api.content.IMessageContent;
+import com.im.common.exception.ForbiddenException;
 import com.im.core.handler.ContentSerializer;
 import com.im.core.handler.WebhookService;
 
@@ -20,16 +22,23 @@ public class SendMessageUseCase {
 
     private final IMessageQueue messageQueue;
     private final ISequenceManager sequenceManager;
-    private final IGroupManager groupManager;
     private final WebhookService webhookService;
+    private final IChatSendPolicy sendPolicy;
 
     public SendMessageUseCase(IMessageQueue messageQueue,
                               ISequenceManager sequenceManager, IGroupManager groupManager,
                               WebhookService webhookService) {
+        this(messageQueue, sequenceManager, webhookService, new LegacyGroupSendPolicy(groupManager));
+    }
+
+    public SendMessageUseCase(IMessageQueue messageQueue,
+                              ISequenceManager sequenceManager,
+                              WebhookService webhookService,
+                              IChatSendPolicy sendPolicy) {
         this.messageQueue = messageQueue;
         this.sequenceManager = sequenceManager;
-        this.groupManager = groupManager;
         this.webhookService = webhookService;
+        this.sendPolicy = sendPolicy;
     }
 
     public record SendMessageResult(String conversationId, long seq, String responseType) {}
@@ -61,6 +70,9 @@ public class SendMessageUseCase {
     private SendMessageResult handleSingleChat(Map<String, Object> params, String fromUserId,
                                                 String toUserId, IMessageContent content) {
         if (toUserId == null) return null;
+        if (sendPolicy != null) {
+            sendPolicy.requireCanSendSingle(fromUserId, toUserId);
+        }
 
         if (!webhookService.beforeSendSingle(params, fromUserId, toUserId, content)) return null;
 
@@ -84,8 +96,9 @@ public class SendMessageUseCase {
 
     private SendMessageResult handleGroupChat(Map<String, Object> params, String fromUserId,
                                                String groupId, IMessageContent content) {
-        if (groupManager != null && !groupManager.isMember(groupId, fromUserId)) return null;
-        if (groupManager != null && groupManager.isMemberMuted(groupId, fromUserId)) return null;
+        if (sendPolicy != null) {
+            sendPolicy.requireCanSendGroup(fromUserId, groupId);
+        }
 
         if (!webhookService.beforeSendGroup(params, fromUserId, groupId, content)) return null;
 
@@ -133,6 +146,29 @@ public class SendMessageUseCase {
         }
 
         return msg;
+    }
+
+    private static final class LegacyGroupSendPolicy implements IChatSendPolicy {
+        private final IGroupManager groupManager;
+
+        private LegacyGroupSendPolicy(IGroupManager groupManager) {
+            this.groupManager = groupManager;
+        }
+
+        @Override
+        public void requireCanSendSingle(String fromUserId, String toUserId) {
+            // Legacy constructor preserved the previous permissive single-chat behavior.
+        }
+
+        @Override
+        public void requireCanSendGroup(String fromUserId, String groupId) {
+            if (groupManager != null && !groupManager.isMember(groupId, fromUserId)) {
+                throw new ForbiddenException("not a group member");
+            }
+            if (groupManager != null && groupManager.isMemberMuted(groupId, fromUserId)) {
+                throw new ForbiddenException("group member muted");
+            }
+        }
     }
 
 }

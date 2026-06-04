@@ -112,4 +112,14 @@ public interface IRouteTable {
      * 延长该 platform 的过期时间。
      */
     void renewOnline(String userId, int platformId);
+
+    /**
+     * 续期用户指定 session 的在线状态和路由状态（心跳保活）。
+     *
+     * <p>集群部署时，同一用户同一平台可能存在新旧 session 的短暂并存窗口，
+     * 因此生产实现应优先刷新 platformId + sessionId 对应的路由字段。</p>
+     */
+    default void renewOnline(String userId, int platformId, String sessionId) {
+        renewOnline(userId, platformId);
+    }
 }

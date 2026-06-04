@@ -1,6 +1,7 @@
 package com.im.core.redis;
 
 import com.im.api.IClusterStateStore;
+import com.im.common.exception.PersistenceExceptions;
 import io.lettuce.core.cluster.api.async.RedisClusterAsyncCommands;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -55,7 +56,7 @@ public class RedisStateStore implements IClusterStateStore {
             notifyLocalWatchers(namespace, key, value);
             log.debug("State stored: {}={}", redisKey, value);
         } catch (Exception e) {
-            log.error("Redis SET failed for key {}: {}", redisKey, e.getMessage());
+            throw PersistenceExceptions.redis("put cluster state", e);
         }
     }
 
@@ -67,8 +68,7 @@ public class RedisStateStore implements IClusterStateStore {
             log.debug("State retrieved: {}={}", redisKey, value);
             return value;
         } catch (Exception e) {
-            log.warn("Redis GET failed for key {}: {}", redisKey, e.getMessage());
-            return null;
+            throw PersistenceExceptions.redis("get cluster state", e);
         }
     }
 
@@ -80,7 +80,7 @@ public class RedisStateStore implements IClusterStateStore {
             notifyLocalWatchers(namespace, key, null);
             log.debug("State deleted: {}", redisKey);
         } catch (Exception e) {
-            log.warn("Redis DEL failed for key {}: {}", redisKey, e.getMessage());
+            throw PersistenceExceptions.redis("delete cluster state", e);
         }
     }
 

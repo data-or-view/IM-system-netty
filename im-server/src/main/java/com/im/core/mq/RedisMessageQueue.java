@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.im.api.Message;
 import com.im.api.IMessageQueue;
+import com.im.common.exception.RedisPersistenceException;
 import com.im.core.redis.RedisConfiguration;
 import com.im.core.redis.RedisConfiguration.CloseableRedisCommands;
 import com.im.core.serialization.jackson.ObjectMapperProvider;
@@ -124,7 +125,7 @@ public class RedisMessageQueue implements IMessageQueue {
 
         // 先尝试异步发送（共享连接）
         try {
-            async.xadd(streamKey, "payload", json);
+            async.xadd(streamKey, "payload", json).toCompletableFuture().join();
             log.trace("Published to topic '{}': seqId={}", topic, msg.getSequenceId());
             return;
         } catch (Exception e) {
@@ -139,6 +140,7 @@ public class RedisMessageQueue implements IMessageQueue {
             log.info("Published to topic '{}' via sync fallback: seqId={}", topic, msg.getSequenceId());
         } catch (Exception e2) {
             log.error("Sync fallback also failed for topic '{}': {}", topic, e2.getMessage(), e2);
+            throw new RedisPersistenceException("publish message to redis stream failed", e2);
         }
     }
 

@@ -151,7 +151,13 @@ public class DeliveryConsumer implements Lifecycle {
      */
     private void pushToBindings(Message msg, String toUserId, List<RouteBinding> bindings) {
         Set<String> forwardedRemoteNodes = new java.util.HashSet<>();
+        long now = System.currentTimeMillis();
         for (RouteBinding binding : bindings) {
+            if (binding.isExpired(now)) {
+                log.debug("Skip expired route binding: userId={}, platform={}, session={}, node={}",
+                        toUserId, binding.platformId(), binding.sessionId(), binding.nodeId());
+                continue;
+            }
             RouteNode route = binding.toRouteNode(localNodeId);
             if (route.isLocal()) {
                 pusher.execute(() -> pushToLocalBinding(msg, toUserId, binding));

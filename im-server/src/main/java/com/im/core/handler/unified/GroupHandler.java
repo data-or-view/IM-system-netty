@@ -5,8 +5,9 @@ import com.im.api.GroupInformation;
 import com.im.api.GroupMemberInformation;
 import com.im.api.IGroupManager;
 import com.im.api.RequestHandler;
-import com.im.common.enums.ImErrorCode;
-import com.im.common.exception.ImException;
+import com.im.common.exception.UnauthorizedException;
+import com.im.common.exception.ValidationException;
+import com.im.common.exception.NotFoundException;
 
 import java.util.List;
 import java.util.Map;
@@ -38,7 +39,7 @@ public class GroupHandler implements RequestHandler {
             case "group.search" -> handleSearch(req);
             case "group.members" -> handleMembers(req);
             case "group.mute_all" -> handleMuteAll(req);
-            default -> throw new ImException(ImErrorCode.NOT_FOUND, "unsupported: " + req.operation());
+            default -> throw new NotFoundException("unsupported: " + req.operation());
         };
     }
 
@@ -46,8 +47,9 @@ public class GroupHandler implements RequestHandler {
         String groupId = req.getString("groupId");
         String groupName = req.getString("groupName");
         String ownerId = req.currentUserId();
-        if (groupId == null || groupName == null || ownerId == null) {
-            throw new ImException(ImErrorCode.UNAUTHORIZED, "groupId, groupName are required, owner from token");
+        if (ownerId == null) throw new UnauthorizedException("not authenticated");
+        if (groupId == null || groupName == null) {
+            throw new ValidationException("groupId and groupName are required");
         }
         String faceUrl = req.getString("faceUrl", "");
         int groupType = req.getInt("groupType", 0);
@@ -62,9 +64,8 @@ public class GroupHandler implements RequestHandler {
     private Object handleJoin(ApiRequest req) {
         String groupId = req.getString("groupId");
         String userId = req.currentUserId();
-        if (groupId == null || userId == null) {
-            throw new ImException(ImErrorCode.UNAUTHORIZED, "groupId is required");
-        }
+        if (userId == null) throw new UnauthorizedException("not authenticated");
+        if (groupId == null) throw new ValidationException("groupId is required");
         String reqMsg = req.getString("reqMsg", "");
         groupManager.joinGroup(groupId, userId, reqMsg);
         return Map.of("status", "OK");
@@ -73,9 +74,8 @@ public class GroupHandler implements RequestHandler {
     private Object handleQuit(ApiRequest req) {
         String groupId = req.getString("groupId");
         String userId = req.currentUserId();
-        if (groupId == null || userId == null) {
-            throw new ImException(ImErrorCode.UNAUTHORIZED, "groupId is required");
-        }
+        if (userId == null) throw new UnauthorizedException("not authenticated");
+        if (groupId == null) throw new ValidationException("groupId is required");
         groupManager.quitGroup(groupId, userId);
         return Map.of("status", "OK");
     }
@@ -84,8 +84,9 @@ public class GroupHandler implements RequestHandler {
         String groupId = req.getString("groupId");
         String operatorId = req.currentUserId();
         String targetUserId = req.getString("targetUserId");
-        if (groupId == null || operatorId == null || targetUserId == null) {
-            throw new ImException(ImErrorCode.UNAUTHORIZED, "groupId, targetUserId required");
+        if (operatorId == null) throw new UnauthorizedException("not authenticated");
+        if (groupId == null || targetUserId == null) {
+            throw new ValidationException("groupId and targetUserId are required");
         }
         groupManager.kickMember(groupId, operatorId, targetUserId);
         return Map.of("status", "OK");
@@ -94,16 +95,15 @@ public class GroupHandler implements RequestHandler {
     private Object handleDisband(ApiRequest req) {
         String groupId = req.getString("groupId");
         String operatorId = req.currentUserId();
-        if (groupId == null || operatorId == null) {
-            throw new ImException(ImErrorCode.UNAUTHORIZED, "groupId is required");
-        }
+        if (operatorId == null) throw new UnauthorizedException("not authenticated");
+        if (groupId == null) throw new ValidationException("groupId is required");
         groupManager.disbandGroup(groupId, operatorId);
         return Map.of("status", "OK");
     }
 
     private Object handleInfoUpdate(ApiRequest req) {
         String groupId = req.getString("groupId");
-        if (groupId == null) throw new ImException(ImErrorCode.BAD_REQUEST, "groupId is required");
+        if (groupId == null) throw new ValidationException("groupId is required");
         groupManager.setGroupInformation(groupId,
                 req.getString("groupName"), req.getString("notification"),
                 req.getString("introduction"), req.getString("faceUrl"),
@@ -116,16 +116,16 @@ public class GroupHandler implements RequestHandler {
 
     private Object handleInfo(ApiRequest req) {
         String groupId = req.getString("groupId");
-        if (groupId == null) throw new ImException(ImErrorCode.BAD_REQUEST, "groupId is required");
+        if (groupId == null) throw new ValidationException("groupId is required");
         GroupInformation info = groupManager.getGroupInformation(groupId);
-        if (info == null) throw new ImException(ImErrorCode.NOT_FOUND, "group not found");
+        if (info == null) throw new NotFoundException("group not found");
         return info;
     }
 
     private Object handleSearch(ApiRequest req) {
         String keyword = req.getString("keyword");
         if (keyword == null || keyword.isBlank()) {
-            throw new ImException(ImErrorCode.BAD_REQUEST, "keyword is required");
+            throw new ValidationException("keyword is required");
         }
         int limit = req.getInt("limit", 20);
         List<GroupInformation> groups = groupManager.searchGroups(keyword.trim(), limit);
@@ -134,7 +134,7 @@ public class GroupHandler implements RequestHandler {
 
     private Object handleMembers(ApiRequest req) {
         String groupId = req.getString("groupId");
-        if (groupId == null) throw new ImException(ImErrorCode.BAD_REQUEST, "groupId is required");
+        if (groupId == null) throw new ValidationException("groupId is required");
         List<GroupMemberInformation> members = groupManager.getMemberList(groupId);
         return Map.of("groupId", groupId, "members", members, "count", members.size());
     }
@@ -143,9 +143,8 @@ public class GroupHandler implements RequestHandler {
         String groupId = req.getString("groupId");
         String operatorId = req.currentUserId();
         boolean mute = req.getBoolean("mute", true);
-        if (groupId == null || operatorId == null) {
-            throw new ImException(ImErrorCode.UNAUTHORIZED, "groupId is required");
-        }
+        if (operatorId == null) throw new UnauthorizedException("not authenticated");
+        if (groupId == null) throw new ValidationException("groupId is required");
         groupManager.muteGroupAll(groupId, operatorId, mute);
         return Map.of("status", "OK", "mute", mute);
     }

@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.im.api.ApiRequest;
 import com.im.api.Operation;
 import com.im.api.ResponseWriter;
+import com.im.bootstrap.DispatchSubmitter;
+import com.im.common.enums.ImErrorCode;
 import com.im.core.dispatcher.ApiDispatcher;
 import com.im.core.serialization.jackson.ObjectMapperProvider;
 import io.netty.buffer.ByteBuf;
@@ -112,6 +114,8 @@ public class HttpRequestAdapter extends SimpleChannelInboundHandler<FullHttpRequ
                         params.putAll(bodyMap);
                     } catch (Exception e) {
                         log.warn("Invalid JSON body for {} {}: {}", method, path, e.getMessage());
+                        JsonResponse.imError(ctx, ImErrorCode.BAD_REQUEST, "invalid json body");
+                        return;
                     }
                 }
             }
@@ -128,7 +132,7 @@ public class HttpRequestAdapter extends SimpleChannelInboundHandler<FullHttpRequ
         // 创建 ResponseWriter + ApiRequest 并提交到虚拟线程
         ResponseWriter responseWriter = new HttpResponseWriter(ctx);
         ApiRequest request = new ApiRequest(operation, params, headers, responseWriter, bodyRaw);
-        virtualExecutor.execute(() -> dispatcher.dispatch(request));
+        DispatchSubmitter.submit(dispatcher, virtualExecutor, request, log);
     }
 
     private static String decodeURI(String s) {

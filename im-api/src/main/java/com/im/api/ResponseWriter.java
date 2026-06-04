@@ -31,4 +31,13 @@ public interface ResponseWriter {
      * @param detail 错误详情
      */
     void writeError(ImErrorCode code, String detail);
+
+    /**
+     * 响应是否已经写出。
+     *
+     * <p>Dispatcher 依赖这个状态避免 handler 手动写响应后再次自动写响应。</p>
+     */
+    default boolean isCommitted() {
+        return false;
+    }
 }

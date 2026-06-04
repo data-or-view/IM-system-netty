@@ -2,18 +2,22 @@ package com.im.core.handler.unified;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.im.api.ApiRequest;
+import com.im.api.IConversationAccessChecker;
 import com.im.api.IMessageStore;
 import com.im.api.ISequenceManager;
 import com.im.api.RequestHandler;
 import com.im.api.SearchMessagesParam;
 import com.im.api.SearchMessagesResult;
-import com.im.common.enums.ImErrorCode;
-import com.im.common.exception.ImException;
+import com.im.common.exception.UnauthorizedException;
+import com.im.common.exception.ValidationException;
+import com.im.common.exception.NotFoundException;
 import com.im.core.serialization.jackson.ObjectMapperProvider;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -30,10 +34,17 @@ public class MessageHandler implements RequestHandler {
 
     private final IMessageStore messageStore;
     private final ISequenceManager sequenceManager;
+    private final IConversationAccessChecker accessChecker;
 
     public MessageHandler(IMessageStore messageStore, ISequenceManager sequenceManager) {
+        this(messageStore, sequenceManager, null);
+    }
+
+    public MessageHandler(IMessageStore messageStore, ISequenceManager sequenceManager,
+                          IConversationAccessChecker accessChecker) {
         this.messageStore = messageStore;
         this.sequenceManager = sequenceManager;
+        this.accessChecker = accessChecker;
     }
 
     @Override
@@ -43,13 +54,16 @@ public class MessageHandler implements RequestHandler {
             case "chat.seq" -> handleSeq(req);
             case "chat.sync" -> handleSync(req);
             case "chat.search" -> handleSearch(req);
-            default -> throw new ImException(ImErrorCode.NOT_FOUND, "unsupported: " + req.operation());
+            default -> throw new NotFoundException("unsupported: " + req.operation());
         };
     }
 
     private Object handlePull(ApiRequest req) {
+        String userId = req.currentUserId();
+        if (userId == null) throw new UnauthorizedException("not authenticated");
         String conversationId = req.getString("conversationId");
-        if (conversationId == null) throw new ImException(ImErrorCode.BAD_REQUEST, "conversationId is required");
+        if (conversationId == null) throw new ValidationException("conversationId is required");
+        requireReadable(userId, conversationId);
         long startSeq = req.getInt("startSeq", 0);
         long endSeq = req.getInt("endSeq", 0);
         int limit = req.getInt("limit", 50);
@@ -61,8 +75,11 @@ public class MessageHandler implements RequestHandler {
     }
 
     private Object handleSeq(ApiRequest req) {
+        String userId = req.currentUserId();
+        if (userId == null) throw new UnauthorizedException("not authenticated");
         String conversationId = req.getString("conversationId");
-        if (conversationId == null) throw new ImException(ImErrorCode.BAD_REQUEST, "conversationId is required");
+        if (conversationId == null) throw new ValidationException("conversationId is required");
+        requireReadable(userId, conversationId);
         long maxSeq = sequenceManager.getMaximumSequence(conversationId);
         return Map.of("conversationId", conversationId, "maxSeq", maxSeq);
     }
@@ -77,6 +94,8 @@ public class MessageHandler implements RequestHandler {
      */
     @SuppressWarnings("unchecked")
     private Object handleSync(ApiRequest req) {
+        String userId = req.currentUserId();
+        if (userId == null) throw new UnauthorizedException("not authenticated");
         Map<String, Object> seqsRaw = (Map<String, Object>) req.params().get("seqs");
         int limit = req.getInt("limit", 50);
 
@@ -87,6 +106,7 @@ public class MessageHandler implements RequestHandler {
         List<Map<String, Object>> syncs = new ArrayList<>(seqsRaw.size());
         for (Map.Entry<String, Object> entry : seqsRaw.entrySet()) {
             String convId = entry.getKey();
+            requireReadable(userId, convId);
             long lastSeq = entry.getValue() instanceof Number
                     ? ((Number) entry.getValue()).longValue() : 0;
 
@@ -106,11 +126,19 @@ public class MessageHandler implements RequestHandler {
     @SuppressWarnings("unchecked")
     private Object handleSearch(ApiRequest req) {
         String userId = req.currentUserId();
-        if (userId == null) throw new ImException(ImErrorCode.UNAUTHORIZED, "not authenticated");
+        if (userId == null) throw new UnauthorizedException("not authenticated");
 
         String keyword = req.getString("keyword");
         List<String> contentTypeFilter = (List<String>) req.params().get("contentTypeFilter");
-        List<String> conversationIds = (List<String>) req.params().get("conversationIds");
+        List<String> conversationIds = readableSearchConversationIds(userId,
+                (List<String>) req.params().get("conversationIds"));
+        if (conversationIds != null && conversationIds.isEmpty()) {
+            return Map.of(
+                    "messages", List.of(),
+                    "totalCount", 0,
+                    "hasMore", false
+            );
+        }
         Number startTimeVal = (Number) req.params().get("startTime");
         Long startTime = startTimeVal != null ? startTimeVal.longValue() : null;
         Number endTimeVal = (Number) req.params().get("endTime");
@@ -138,6 +166,30 @@ public class MessageHandler implements RequestHandler {
                 "totalCount", result.getTotalCount(),
                 "hasMore", result.hasMore()
         );
+    }
+
+    private void requireReadable(String userId, String conversationId) {
+        if (accessChecker != null) {
+            accessChecker.requireReadable(userId, conversationId);
+        }
+    }
+
+    private List<String> readableSearchConversationIds(String userId, List<String> requestedConversationIds) {
+        if (accessChecker == null) {
+            return requestedConversationIds;
+        }
+        List<String> readable = accessChecker.listReadableConversationIds(userId);
+        if (readable == null || readable.isEmpty()) {
+            return List.of();
+        }
+        if (requestedConversationIds == null || requestedConversationIds.isEmpty()) {
+            return readable;
+        }
+        Set<String> readableSet = new HashSet<>(readable);
+        return requestedConversationIds.stream()
+                .filter(readableSet::contains)
+                .distinct()
+                .toList();
     }
 
     // 抽取公共方法而非三次重复 lambda，统一处理序列化异常

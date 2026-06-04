@@ -4,11 +4,14 @@ import com.im.api.*;
 import com.im.common.lifecycle.Lifecycle;
 import com.im.common.retry.RetryExecutor;
 import com.im.config.Config;
+import com.im.core.access.ConversationAccessChecker;
+import com.im.core.access.DefaultChatSendPolicy;
 import com.im.core.auth.JwtAuthenticator;
 import com.im.core.call.CallStateManager;
 import com.im.core.call.LiveKitCallManager;
 import com.im.core.conversation.DbConversationManager;
 import com.im.core.delivery.ClusterDeliveryHandler;
+import com.im.core.delivery.ClusterSessionCommandHandler;
 import com.im.core.delivery.DeliveryConsumer;
 import com.im.core.delivery.PersistenceConsumer;
 import com.im.core.delivery.RedisClusterMessageBus;
@@ -138,7 +141,7 @@ public class IMServer implements Lifecycle {
                 sessionManager, pendingAcknowledgementManager, routeTable, nodeId);
 
         this.dispatcher = initDispatcher(
-                config, nodeId, sessionManager, routeTable, business, storage, call);
+                config, nodeId, sessionManager, routeTable, clusterMessageBus, business, storage, call);
     }
 
     // ── Cluster infrastructure setup ──
@@ -249,6 +252,7 @@ public class IMServer implements Lifecycle {
         ClusterDeliveryHandler clusterDeliveryHandler = new ClusterDeliveryHandler(sessionManager);
         clusterMessageBus.subscribe("SINGLE_CHAT", clusterDeliveryHandler);
         clusterMessageBus.subscribe("GROUP_CHAT", clusterDeliveryHandler);
+        clusterMessageBus.subscribe("CLUSTER_COMMAND", new ClusterSessionCommandHandler(sessionManager));
         return new ConsumerModule(persistenceConsumer, deliveryConsumer);
     }
 
@@ -256,15 +260,23 @@ public class IMServer implements Lifecycle {
                                          String nodeId,
                                          SessionManager sessionManager,
                                          IRouteTable routeTable,
+                                         IClusterMessageBus clusterMessageBus,
                                          BusinessModule business,
                                          StorageModule storage,
                                          CallModule call) {
         LoginUseCase loginUseCase = new LoginUseCase(business.authenticator, storage.messageStore);
         WebhookService webhookService = new WebhookService(new LocalWebhookManager(
                 config.getString("im.webhook.url").orElse("")));
+        DefaultChatSendPolicy chatSendPolicy = new DefaultChatSendPolicy(
+                business.userManager,
+                business.friendManager,
+                business.groupManager,
+                config.getBoolean("im.chat.single.require-friend", false));
         SendMessageUseCase sendMessageUseCase = new SendMessageUseCase(
-                storage.messageQueue, storage.sequenceManager, business.groupManager, webhookService);
+                storage.messageQueue, storage.sequenceManager, webhookService, chatSendPolicy);
         RevokeUseCase revokeUseCase = new RevokeUseCase(storage.messageStore, business.groupManager);
+        ConversationAccessChecker conversationAccessChecker = new ConversationAccessChecker(
+                business.conversationManager, business.groupManager);
 
         ApiDispatcher dispatcher = new ApiDispatcher();
         dispatcher.addInterceptor(new com.im.core.handler.unified.TelemetryInterceptor());
@@ -280,10 +292,11 @@ public class IMServer implements Lifecycle {
                 Operation.GROUP_CREATE, Operation.GROUP_JOIN, Operation.GROUP_QUIT, Operation.GROUP_KICK,
                 Operation.GROUP_DISBAND, Operation.GROUP_INFO_UPDATE, Operation.GROUP_INFO,
                 Operation.GROUP_SEARCH, Operation.GROUP_MEMBERS, Operation.GROUP_MUTE_ALL);
-        dispatcher.registerHandlers(new com.im.core.handler.unified.ConversationHandler(business.conversationManager),
+        dispatcher.registerHandlers(new com.im.core.handler.unified.ConversationHandler(
+                        business.conversationManager, conversationAccessChecker),
                 Operation.CONVERSATION_LIST, Operation.CONVERSATION_SET, Operation.CONVERSATION_READ);
         dispatcher.registerHandlers(new com.im.core.handler.unified.MessageHandler(
-                        storage.messageStore, storage.sequenceManager),
+                        storage.messageStore, storage.sequenceManager, conversationAccessChecker),
                 Operation.CHAT_PULL, Operation.CHAT_SEQ, Operation.CHAT_SYNC, Operation.CHAT_SEARCH);
 
         var chatHandler = new com.im.core.handler.unified.ChatHandler(
@@ -293,7 +306,8 @@ public class IMServer implements Lifecycle {
         dispatcher.registerHandler(Operation.CHAT_REVOKE,
                 new com.im.core.handler.unified.RevokeHandler(revokeUseCase, sessionManager));
         dispatcher.registerHandler(Operation.LOGIN,
-                new LoginHandler(loginUseCase, sessionManager, routeTable, nodeId));
+                new LoginHandler(loginUseCase, sessionManager, routeTable, nodeId,
+                        clusterMessageBus, sessionManager.getLoginStrategy()));
         dispatcher.registerHandler(Operation.REGISTER,
                 new RegisterHandler(new RegisterUseCase(business.userManager)));
         dispatcher.registerHandler(Operation.HEARTBEAT,
@@ -330,11 +344,13 @@ public class IMServer implements Lifecycle {
         if (redisHost == null || redisHost.isEmpty()) return null;
 
         int redisPort = config.getInt("im.redis.port", 6379);
+        String redisUsername = config.getString("im.redis.username").orElse("");
         String redisPassword = config.getString("im.redis.password").orElse("");
         int redisDatabase = config.getInt("im.redis.database", 0);
         String redisClusterNodes = config.getString("im.redis.cluster.nodes").orElse(null);
 
         RedisConfiguration.Builder rcb = RedisConfiguration.builder()
+                .username(redisUsername)
                 .password(redisPassword)
                 .database(redisDatabase);
         if (redisClusterNodes != null && !redisClusterNodes.isEmpty()) {

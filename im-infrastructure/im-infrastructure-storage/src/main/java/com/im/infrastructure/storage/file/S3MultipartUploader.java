@@ -1,5 +1,7 @@
 package com.im.infrastructure.storage.file;
 
+import com.im.common.exception.FileStorageException;
+
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import javax.xml.parsers.DocumentBuilderFactory;
@@ -74,7 +76,7 @@ public class S3MultipartUploader {
 
         HttpResponse<String> resp = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
         if (resp.statusCode() != 200) {
-            throw new RuntimeException("InitiateMultipartUpload failed: HTTP " + resp.statusCode() + " " + resp.body());
+            throw new FileStorageException("InitiateMultipartUpload failed: HTTP " + resp.statusCode() + " " + resp.body());
         }
         return extractXmlTag(resp.body(), "UploadId");
     }
@@ -111,10 +113,10 @@ public class S3MultipartUploader {
             String body = httpClient.send(
                     HttpRequest.newBuilder().uri(URI.create(url)).method("GET", HttpRequest.BodyPublishers.noBody()).build(),
                     HttpResponse.BodyHandlers.ofString()).body();
-            throw new RuntimeException("UploadPart failed: HTTP " + resp.statusCode());
+            throw new FileStorageException("UploadPart failed: HTTP " + resp.statusCode());
         }
         return resp.headers().firstValue("ETag")
-                .orElseThrow(() -> new RuntimeException("No ETag in UploadPart response"));
+                .orElseThrow(() -> new FileStorageException("No ETag in UploadPart response"));
     }
 
     /**
@@ -146,7 +148,7 @@ public class S3MultipartUploader {
 
         HttpResponse<String> resp = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
         if (resp.statusCode() != 200) {
-            throw new RuntimeException("CompleteMultipartUpload failed: HTTP " + resp.statusCode() + " " + resp.body());
+            throw new FileStorageException("CompleteMultipartUpload failed: HTTP " + resp.statusCode() + " " + resp.body());
         }
     }
 
@@ -175,7 +177,7 @@ public class S3MultipartUploader {
         HttpResponse<String> resp = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
         int code = resp.statusCode();
         if (code != 204 && code != 200) {
-            throw new RuntimeException("AbortMultipartUpload failed: HTTP " + code + " " + resp.body());
+            throw new FileStorageException("AbortMultipartUpload failed: HTTP " + code + " " + resp.body());
         }
     }
 
@@ -223,7 +225,7 @@ public class S3MultipartUploader {
             mac.init(new SecretKeySpec(key, "HmacSHA256"));
             return mac.doFinal(data.getBytes(StandardCharsets.UTF_8));
         } catch (Exception e) {
-            throw new RuntimeException("HMAC-SHA256 failed", e);
+            throw new FileStorageException("HMAC-SHA256 failed", e);
         }
     }
 
@@ -232,7 +234,7 @@ public class S3MultipartUploader {
             MessageDigest md = MessageDigest.getInstance("SHA-256");
             return hex(md.digest(data.getBytes(StandardCharsets.UTF_8)));
         } catch (NoSuchAlgorithmException e) {
-            throw new RuntimeException("SHA-256 not available", e);
+            throw new FileStorageException("SHA-256 not available", e);
         }
     }
 
@@ -262,10 +264,10 @@ public class S3MultipartUploader {
         String open = "<" + tag + ">";
         String close = "</" + tag + ">";
         int start = xml.indexOf(open);
-        if (start < 0) throw new RuntimeException("XML tag <" + tag + "> not found: " + xml);
+        if (start < 0) throw new FileStorageException("XML tag <" + tag + "> not found: " + xml);
         start += open.length();
         int end = xml.indexOf(close, start);
-        if (end < 0) throw new RuntimeException("XML tag </" + tag + "> not found: " + xml);
+        if (end < 0) throw new FileStorageException("XML tag </" + tag + "> not found: " + xml);
         return xml.substring(start, end);
     }
 

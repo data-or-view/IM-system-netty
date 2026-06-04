@@ -17,7 +17,7 @@ public interface SeqUserMapper extends BaseMapper<SeqUserEntity> {
     SeqUserEntity selectByUserAndConversation(@Param("userId") String userId,
                                               @Param("conversationId") String conversationId);
 
-    @Update("UPDATE im_seq_users SET read_seq = #{readSeq}, updated_at = #{time} " +
+    @Update("UPDATE im_seq_users SET read_seq = GREATEST(read_seq, #{readSeq}), updated_at = #{time} " +
             "WHERE user_id = #{userId} AND conversation_id = #{conversationId}")
     int updateReadSeq(@Param("userId") String userId,
                       @Param("conversationId") String conversationId,

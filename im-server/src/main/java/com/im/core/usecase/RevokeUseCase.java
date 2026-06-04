@@ -2,8 +2,7 @@ package com.im.core.usecase;
 
 import com.im.api.IGroupManager;
 import com.im.api.IMessageStore;
-import com.im.common.enums.ImErrorCode;
-import com.im.common.exception.ImException;
+import com.im.common.exception.NotFoundException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -52,7 +51,7 @@ public class RevokeUseCase {
         String nickname = userId;
         boolean updated = messageStore.revokeMessage(conversationId, seq, userId, role, nickname);
         if (!updated) {
-            throw new ImException(ImErrorCode.NOT_FOUND, "message not found or already revoked");
+            throw new NotFoundException("message not found or already revoked");
         }
         log.info("Message revoked: conv={}, seq={}, revoker={}", conversationId, seq, userId);
 

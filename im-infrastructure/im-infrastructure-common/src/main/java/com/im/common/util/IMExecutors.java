@@ -1,8 +1,14 @@
 package com.im.common.util;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadFactory;
 
 /**
  * 统一线程池工具类。
@@ -20,7 +26,12 @@ import java.util.concurrent.ScheduledExecutorService;
  */
 public final class IMExecutors {
 
+    private static final Logger log = LoggerFactory.getLogger(IMExecutors.class);
+
     private IMExecutors() {}
+
+    private static final Thread.UncaughtExceptionHandler UNCAUGHT_EXCEPTION_HANDLER =
+            (thread, error) -> log.error("Uncaught exception in thread {}", thread.getName(), error);
 
     /**
      * 创建虚拟线程执行器。
@@ -31,9 +42,11 @@ public final class IMExecutors {
      * @return 虚拟线程执行器
      */
     public static ExecutorService newVirtualThreadExecutor(String namePrefix) {
+        requireNamePrefix(namePrefix);
         return Executors.newThreadPerTaskExecutor(
                 Thread.ofVirtual()
                         .name(namePrefix + "-", 0)
+                        .uncaughtExceptionHandler(UNCAUGHT_EXCEPTION_HANDLER)
                         .factory()
         );
     }
@@ -48,11 +61,47 @@ public final class IMExecutors {
      * @return 定时调度器
      */
     public static ScheduledExecutorService newScheduledExecutor(String namePrefix, int coreSize) {
-        return Executors.newScheduledThreadPool(coreSize,
+        requireNamePrefix(namePrefix);
+        if (coreSize <= 0) {
+            throw new IllegalArgumentException("coreSize must be > 0");
+        }
+        return new ObservedScheduledThreadPoolExecutor(coreSize,
                 Thread.ofPlatform()
                         .name(namePrefix + "-scheduler-", 0)
                         .daemon(true)
-                        .factory()
-        );
+                        .uncaughtExceptionHandler(UNCAUGHT_EXCEPTION_HANDLER)
+                        .factory());
+    }
+
+    private static void requireNamePrefix(String namePrefix) {
+        if (namePrefix == null || namePrefix.isBlank()) {
+            throw new IllegalArgumentException("namePrefix must not be blank");
+        }
+    }
+
+    private static final class ObservedScheduledThreadPoolExecutor extends ScheduledThreadPoolExecutor {
+        private ObservedScheduledThreadPoolExecutor(int corePoolSize, ThreadFactory threadFactory) {
+            super(corePoolSize, threadFactory);
+            setRemoveOnCancelPolicy(true);
+        }
+
+        @Override
+        protected void afterExecute(Runnable runnable, Throwable error) {
+            super.afterExecute(runnable, error);
+            Throwable actual = error;
+            if (actual == null && runnable instanceof Future<?> future && future.isDone()) {
+                try {
+                    future.get();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    actual = e;
+                } catch (Exception e) {
+                    actual = e.getCause() != null ? e.getCause() : e;
+                }
+            }
+            if (actual != null) {
+                log.error("Scheduled task failed in {}", Thread.currentThread().getName(), actual);
+            }
+        }
     }
 }

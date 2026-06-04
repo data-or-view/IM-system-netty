@@ -6,6 +6,8 @@ import com.im.api.Operation;
 import com.im.api.RequestHandler;
 import com.im.api.ResponseWriter;
 import com.im.common.enums.ImErrorCode;
+import com.im.common.exception.BusinessException;
+import com.im.common.exception.InfrastructureException;
 import com.im.common.exception.ImException;
 import org.junit.jupiter.api.Test;
 
@@ -180,6 +182,30 @@ class ApiDispatcherTest {
     }
 
     @Test
+    void businessExceptionReturnsSafeMessage() {
+        dispatcher.registerHandler(Operation.HEARTBEAT, req -> {
+            throw new BusinessException(ImErrorCode.FORBIDDEN, "conversation not readable");
+        });
+
+        dispatcher.dispatch(request(Operation.HEARTBEAT));
+
+        assertEquals(ImErrorCode.FORBIDDEN, responseWriter.lastError);
+        assertEquals("conversation not readable", responseWriter.lastErrorDetail);
+    }
+
+    @Test
+    void infrastructureExceptionHidesInternalDetail() {
+        dispatcher.registerHandler(Operation.HEARTBEAT, req -> {
+            throw new InfrastructureException(ImErrorCode.MQ_UNAVAILABLE, "redis xadd timeout");
+        });
+
+        dispatcher.dispatch(request(Operation.HEARTBEAT));
+
+        assertEquals(ImErrorCode.MQ_UNAVAILABLE, responseWriter.lastError);
+        assertNull(responseWriter.lastErrorDetail);
+    }
+
+    @Test
     void interceptorImExceptionPropagatesToClient() {
         dispatcher.addInterceptor(new ApiInterceptor() {
             @Override public String name() { return "Auth"; }
@@ -287,6 +313,54 @@ class ApiDispatcherTest {
         assertNull(responseWriter.lastErrorDetail);
     }
 
+    @Test
+    void customExceptionHandlerFailureFallsBackToInternalError() {
+        dispatcher.registerExceptionHandler(IllegalArgumentException.class, (e, req) -> {
+            throw new RuntimeException("custom handler failed");
+        });
+
+        dispatcher.registerHandler(Operation.HEARTBEAT, req -> {
+            throw new IllegalArgumentException("bad arg");
+        });
+
+        dispatcher.dispatch(request(Operation.HEARTBEAT));
+
+        assertEquals(ImErrorCode.INTERNAL_ERROR, responseWriter.lastError);
+        assertNull(responseWriter.lastErrorDetail);
+    }
+
+    @Test
+    void afterCompletionReceivesHandlerResult() {
+        List<Object> captured = new ArrayList<>();
+
+        dispatcher.addInterceptor(new ApiInterceptor() {
+            @Override public boolean preHandle(ApiRequest request) { return true; }
+            @Override public void afterCompletion(ApiRequest request, Object result, Exception error) {
+                captured.add(result);
+            }
+        });
+        dispatcher.registerHandler(Operation.HEARTBEAT, req -> "ok");
+
+        dispatcher.dispatch(request(Operation.HEARTBEAT));
+
+        assertEquals(List.of("ok"), captured);
+    }
+
+    @Test
+    void dispatcherDoesNotAutoWriteWhenHandlerAlreadyCommittedResponse() {
+        dispatcher.registerHandler(Operation.HEARTBEAT, req -> {
+            req.responseWriter().writeError(ImErrorCode.BAD_REQUEST, "written by handler");
+            return "should-not-be-written";
+        });
+
+        dispatcher.dispatch(request(Operation.HEARTBEAT));
+
+        assertEquals(1, responseWriter.writeCount);
+        assertEquals(ImErrorCode.BAD_REQUEST, responseWriter.lastError);
+        assertEquals("written by handler", responseWriter.lastErrorDetail);
+        assertNull(responseWriter.lastResult);
+    }
+
     // ── 辅助 ──
 
     private class LoggingInterceptor implements ApiInterceptor {
@@ -314,16 +388,24 @@ class ApiDispatcherTest {
         Object lastResult;
         ImErrorCode lastError;
         String lastErrorDetail;
+        int writeCount;
 
         @Override
         public void write(Object result) {
+            this.writeCount++;
             this.lastResult = result;
         }
 
         @Override
         public void writeError(ImErrorCode code, String detail) {
+            this.writeCount++;
             this.lastError = code;
             this.lastErrorDetail = detail;
+        }
+
+        @Override
+        public boolean isCommitted() {
+            return writeCount > 0;
         }
     }
 }

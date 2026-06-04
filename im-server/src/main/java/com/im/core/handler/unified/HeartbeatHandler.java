@@ -46,7 +46,7 @@ public class HeartbeatHandler implements RequestHandler {
             if (session != null) {
                 session.touch();
                 if (session.isAuthenticated()) {
-                    heartbeatUseCase.execute(session.getUserId(), session.getPlatformId());
+                    heartbeatUseCase.execute(session.getUserId(), session.getPlatformId(), session.getSessionId());
                 }
             }
         }

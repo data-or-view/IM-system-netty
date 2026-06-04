@@ -11,8 +11,12 @@ public class HeartbeatUseCase {
     }
 
     public void execute(String userId, int platformId) {
+        execute(userId, platformId, "default");
+    }
+
+    public void execute(String userId, int platformId, String sessionId) {
         if (routeTable != null && userId != null) {
-            routeTable.renewOnline(userId, platformId);
+            routeTable.renewOnline(userId, platformId, sessionId);
         }
     }
 }

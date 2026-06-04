@@ -14,6 +14,7 @@ import com.im.common.retry.RetryConfig;
 import com.im.common.retry.RetryExecutor;
 import com.im.common.retry.RetryStrategies;
 import com.im.api.content.ContentType;
+import com.im.common.exception.PersistenceExceptions;
 import org.apache.ibatis.session.SqlSession;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -53,21 +54,22 @@ public class DbMessageStore implements IMessageStore {
             log.warn("Cannot save message without conversationId: mid={}", msg.getMessageId());
             return;
         }
-        retryExecutor.execute(CFG, () -> {
-        try (SqlSession session = MyBatisPlusFactory.openSession()) {
-            MessageMapper mapper = session.getMapper(MessageMapper.class);
-            mapper.insert(entity);
-            session.commit();
-        }
-                    return null;
-        });
+        PersistenceExceptions.runDatabase("save message", () -> retryExecutor.execute(CFG, () -> {
+            try (SqlSession session = MyBatisPlusFactory.openSession()) {
+                MessageMapper mapper = session.getMapper(MessageMapper.class);
+                mapper.insert(entity);
+                session.commit();
+            }
+            return null;
+        }));
     }
 
     @Override
     public List<Message> pullBySequence(String conversationId, long startSeq, long endSeq, int limit) {
         int actualLimit = (limit <= 0) ? 50 : Math.min(limit, 200);
 
-        try (SqlSession session = MyBatisPlusFactory.openSession()) {
+        return PersistenceExceptions.runDatabase("pull messages by sequence", () -> {
+            try (SqlSession session = MyBatisPlusFactory.openSession()) {
             MessageMapper mapper = session.getMapper(MessageMapper.class);
             List<MessageEntity> entities;
 
@@ -85,7 +87,8 @@ public class DbMessageStore implements IMessageStore {
                 result.add(toMessage(entities.get(i)));
             }
             return result;
-        }
+            }
+        });
     }
 
     @Override
@@ -94,7 +97,8 @@ public class DbMessageStore implements IMessageStore {
 
         int actualLimit = Math.min(limit > 0 ? limit : 50, MAX_OFFLINE_PULL);
 
-        try (SqlSession session = MyBatisPlusFactory.openSession()) {
+        return PersistenceExceptions.runDatabase("pull offline messages", () -> {
+            try (SqlSession session = MyBatisPlusFactory.openSession()) {
             MessageMapper mapper = session.getMapper(MessageMapper.class);
 
             // 查询 recv_id = userId, is_read = 0 的消息作为离线消息
@@ -113,66 +117,70 @@ public class DbMessageStore implements IMessageStore {
                 result.add(toMessage(entity));
             }
             return result;
-        }
+            }
+        });
     }
 
     @Override
     public void markDelivered(String userId, List<String> msgIds) {
         if (userId == null || msgIds == null || msgIds.isEmpty()) return;
 
-        retryExecutor.execute(CFG, () -> {
-        try (SqlSession session = MyBatisPlusFactory.openSession()) {
-            MessageMapper mapper = session.getMapper(MessageMapper.class);
+        PersistenceExceptions.runDatabase("mark messages delivered", () -> retryExecutor.execute(CFG, () -> {
+            try (SqlSession session = MyBatisPlusFactory.openSession()) {
+                MessageMapper mapper = session.getMapper(MessageMapper.class);
 
-            for (String clientMsgId : msgIds) {
-                mapper.update(
-                        null,
-                        new LambdaUpdateWrapper<MessageEntity>()
-                                .eq(MessageEntity::getClientMsgId, clientMsgId)
-                                .eq(MessageEntity::getRecvId, userId)
-                                .set(MessageEntity::getIsRead, 1)
-                );
+                for (String clientMsgId : msgIds) {
+                    mapper.update(
+                            null,
+                            new LambdaUpdateWrapper<MessageEntity>()
+                                    .eq(MessageEntity::getClientMsgId, clientMsgId)
+                                    .eq(MessageEntity::getRecvId, userId)
+                                    .set(MessageEntity::getIsRead, 1)
+                    );
+                }
+                session.commit();
+                log.debug("Marked {} messages delivered for user {}", msgIds.size(), userId);
             }
-            session.commit();
-            log.debug("Marked {} messages delivered for user {}", msgIds.size(), userId);
-        }
-                    return null;
-        });
+            return null;
+        }));
     }
 
     @Override
     public void deleteBefore(String userId, long seqId) {
-        retryExecutor.execute(CFG, () -> {
-        try (SqlSession session = MyBatisPlusFactory.openSession()) {
-            MessageMapper mapper = session.getMapper(MessageMapper.class);
+        PersistenceExceptions.runDatabase("delete messages before sequence", () -> retryExecutor.execute(CFG, () -> {
+            try (SqlSession session = MyBatisPlusFactory.openSession()) {
+                MessageMapper mapper = session.getMapper(MessageMapper.class);
 
-            mapper.delete(
-                    new LambdaQueryWrapper<MessageEntity>()
-                            .eq(MessageEntity::getRecvId, userId)
-                            .lt(MessageEntity::getSeq, seqId)
-            );
-            session.commit();
-            log.debug("Deleted messages before seq {} for user {}", seqId, userId);
-        }
-                    return null;
-        });
+                mapper.delete(
+                        new LambdaQueryWrapper<MessageEntity>()
+                                .eq(MessageEntity::getRecvId, userId)
+                                .lt(MessageEntity::getSeq, seqId)
+                );
+                session.commit();
+                log.debug("Deleted messages before seq {} for user {}", seqId, userId);
+            }
+            return null;
+        }));
     }
 
     @Override
     public boolean revokeMessage(String conversationId, long seq, String revokerId, int role, String nickname) {
-        return retryExecutor.execute(CFG, () -> {
+        return PersistenceExceptions.runDatabase("revoke message", () -> retryExecutor.execute(CFG, () -> {
             try (SqlSession session = MyBatisPlusFactory.openSession()) {
                 MessageMapper mapper = session.getMapper(MessageMapper.class);
                 int updated = mapper.revokeMessage(conversationId, seq, revokerId, role, nickname, System.currentTimeMillis());
                 session.commit();
                 return updated > 0;
             }
-        });
+        }));
     }
 
     @Override
     public SearchMessagesResult searchMessages(SearchMessagesParam param) {
         if (param == null || param.getUserId() == null) {
+            return SearchMessagesResult.empty();
+        }
+        if (param.getConversationIds() != null && param.getConversationIds().isEmpty()) {
             return SearchMessagesResult.empty();
         }
 
@@ -189,13 +197,15 @@ public class DbMessageStore implements IMessageStore {
                 }
             }
         }
+        final List<Integer> finalContentTypeIds = contentTypeIds;
 
-        try (SqlSession session = MyBatisPlusFactory.openSession()) {
+        return PersistenceExceptions.runDatabase("search messages", () -> {
+            try (SqlSession session = MyBatisPlusFactory.openSession()) {
             MessageMapper mapper = session.getMapper(MessageMapper.class);
 
             long total = mapper.countByKeyword(
                     param.getConversationIds(), param.getKeyword(),
-                    contentTypeIds, param.getSenderId(),
+                    finalContentTypeIds, param.getSenderId(),
                     param.getStartTime(), param.getEndTime());
 
             int limit = param.getLimit();
@@ -203,7 +213,7 @@ public class DbMessageStore implements IMessageStore {
             // 多查一行判断 hasMore
             List<MessageEntity> entities = mapper.selectByKeyword(
                     param.getConversationIds(), param.getKeyword(),
-                    contentTypeIds, param.getSenderId(),
+                    finalContentTypeIds, param.getSenderId(),
                     param.getStartTime(), param.getEndTime(),
                     limit + 1, offset);
 
@@ -218,7 +228,8 @@ public class DbMessageStore implements IMessageStore {
             }
 
             return new SearchMessagesResult(messages, (int) total, hasMore);
-        }
+            }
+        });
     }
 
     // ========== Entity / Message 互转 ==========

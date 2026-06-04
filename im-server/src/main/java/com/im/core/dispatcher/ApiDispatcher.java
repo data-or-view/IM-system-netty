@@ -148,7 +148,7 @@ public class ApiDispatcher {
             try {
                 if (!interceptor.preHandle(request)) {
                     log.debug("Interceptor '{}' blocked request op={}", interceptor.name(), request.operation());
-                    afterCompleteReverse(request, idx, null);
+                    afterCompleteReverse(request, idx, null, null);
                     request.responseWriter().writeError(ImErrorCode.FORBIDDEN,
                             "blocked by interceptor: " + interceptor.name());
                     return;
@@ -156,14 +156,14 @@ public class ApiDispatcher {
             } catch (ImException e) {
                 log.warn("Interceptor '{}' preHandle rejected: {} {}", interceptor.name(),
                         e.getErrorCode().getCode(), e.getDetail());
-                afterCompleteReverse(request, idx, e);
-                request.responseWriter().writeError(e.getErrorCode(), e.getDetail());
+                afterCompleteReverse(request, idx, null, e);
+                writeImError(request, e);
                 return;
             } catch (Exception e) {
                 log.warn("Interceptor '{}' preHandle threw", interceptor.name(), e);
-                afterCompleteReverse(request, idx, null);
+                afterCompleteReverse(request, idx, null, e);
                 request.responseWriter().writeError(ImErrorCode.INTERNAL_ERROR,
-                        "interceptor error: " + interceptor.name());
+                        null);
                 return;
             }
         }
@@ -176,39 +176,49 @@ public class ApiDispatcher {
         } catch (ImException e) {
             handlerEx = e;
             log.warn("Handler rejected: {} {} op={}", e.getCode(), e.getMessage(), request.operation());
-            request.responseWriter().writeError(e.getErrorCode(), e.getDetail());
+            writeImError(request, e);
         } catch (Exception e) {
             handlerEx = e;
             ExceptionHandler customHandler = findExceptionHandler(e.getClass());
             if (customHandler != null) {
                 log.warn("Handler error handled by custom handler: op={}, ex={}",
                         request.operation(), e.getClass().getSimpleName());
-                customHandler.handle(e, request);
+                try {
+                    customHandler.handle(e, request);
+                } catch (Exception customEx) {
+                    log.error("Custom exception handler failed: op={}, ex={}",
+                            request.operation(), customEx.getClass().getSimpleName(), customEx);
+                    request.responseWriter().writeError(ImErrorCode.INTERNAL_ERROR, null);
+                }
             } else {
                 log.error("Handler error: op={}", request.operation(), e);
                 request.responseWriter().writeError(ImErrorCode.INTERNAL_ERROR, null);
             }
         } finally {
-            afterCompleteReverse(request, idx, handlerEx);
+            afterCompleteReverse(request, idx, result, handlerEx);
         }
 
         // handler 正常返回且未自行写响应时，由 ResponseWriter 自动序列化
-        if (handlerEx == null) {
+        if (handlerEx == null && !request.responseWriter().isCommitted()) {
             Object response = result;
             request.responseWriter().write(response);
         }
     }
 
     /** 反序回调已通过的拦截器的 afterCompletion */
-    private void afterCompleteReverse(ApiRequest request, int passedCount, Exception error) {
+    private void afterCompleteReverse(ApiRequest request, int passedCount, Object result, Exception error) {
         for (int i = passedCount - 1; i >= 0; i--) {
             try {
-                interceptors.get(i).afterCompletion(request,
-                        error == null ? "proceed" : null, error);
+                interceptors.get(i).afterCompletion(request, result, error);
             } catch (Exception e) {
                 log.warn("Interceptor '{}' afterCompletion threw: {}", interceptors.get(i).name(), e.getMessage());
             }
         }
+    }
+
+    private void writeImError(ApiRequest request, ImException e) {
+        String detail = e.isClientVisible() ? e.getSafeMessage() : null;
+        request.responseWriter().writeError(e.getErrorCode(), detail);
     }
 
     /** 按异常类型的继承链查找匹配的 ExceptionHandler。 */

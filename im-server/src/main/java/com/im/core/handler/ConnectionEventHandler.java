@@ -76,15 +76,23 @@ public class ConnectionEventHandler extends ChannelInboundHandlerAdapter {
 
     @Override
     public void channelInactive(ChannelHandlerContext ctx) {
-        eventExecutor.submit(() -> cleanupSession(ctx));
+        eventExecutor.execute(() -> safeCleanupSession(ctx, "channelInactive"));
         ctx.fireChannelInactive();
     }
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
         log.error("Channel exception: remote={}", ctx.channel().remoteAddress(), cause);
-        eventExecutor.submit(() -> cleanupSession(ctx));
+        eventExecutor.execute(() -> safeCleanupSession(ctx, "exceptionCaught"));
         ctx.close();
+    }
+
+    private void safeCleanupSession(ChannelHandlerContext ctx, String trigger) {
+        try {
+            cleanupSession(ctx);
+        } catch (Exception e) {
+            log.error("Session cleanup failed: trigger={}, remote={}", trigger, ctx.channel().remoteAddress(), e);
+        }
     }
 
     /** 提取 session 清理逻辑，channelInactive / exceptionCaught / idle 三处复用。 */

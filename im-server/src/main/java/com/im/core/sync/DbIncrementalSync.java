@@ -8,6 +8,7 @@ import com.im.core.db.mapper.SyncVersionMapper;
 import com.im.common.retry.RetryConfig;
 import com.im.common.retry.RetryExecutor;
 import com.im.common.retry.RetryStrategies;
+import com.im.common.exception.PersistenceExceptions;
 import org.apache.ibatis.session.SqlSession;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -48,7 +49,7 @@ public class DbIncrementalSync {
      * @param action     变更类型：insert / update / delete
      */
     public void recordChange(String userId, String entityType, String entityId, String action) {
-        retryExecutor.execute(CFG, () -> {
+        PersistenceExceptions.runDatabase("record sync change", () -> retryExecutor.execute(CFG, () -> {
             try (SqlSession session = MyBatisPlusFactory.openSession()) {
                 SyncVersionMapper versionMapper = session.getMapper(SyncVersionMapper.class);
                 SyncChangeMapper changeMapper = session.getMapper(SyncChangeMapper.class);
@@ -68,7 +69,7 @@ public class DbIncrementalSync {
                 session.commit();
             }
             return null;
-        });
+        }));
     }
 
     /**
@@ -106,44 +107,42 @@ public class DbIncrementalSync {
             Function<String, T> entityMapper,
             Function<String, T> deletedEntityBuilder,
             int limit) {
-        try (SqlSession session = MyBatisPlusFactory.openSession()) {
-            SyncVersionMapper versionMapper = session.getMapper(SyncVersionMapper.class);
-            SyncChangeMapper changeMapper = session.getMapper(SyncChangeMapper.class);
+        return PersistenceExceptions.runDatabase("get sync changes", () -> {
+            try (SqlSession session = MyBatisPlusFactory.openSession()) {
+                SyncVersionMapper versionMapper = session.getMapper(SyncVersionMapper.class);
+                SyncChangeMapper changeMapper = session.getMapper(SyncChangeMapper.class);
 
-            long currentVersion = versionMapper.getVersion(userId, entityType);
-            if (currentVersion <= sinceVersion) {
-                return IncrementalSyncResult.empty(currentVersion);
-            }
-
-            List<SyncChangeEntity> changes = changeMapper.selectChangesSince(
-                    userId, entityType, sinceVersion, limit);
-
-            if (changes.isEmpty()) {
-                return IncrementalSyncResult.empty(currentVersion);
-            }
-
-            List<T> entities = new ArrayList<>(changes.size());
-            for (SyncChangeEntity change : changes) {
-                T entity;
-                if (ACTION_DELETE.equals(change.getAction())) {
-                    entity = deletedEntityBuilder.apply(change.getEntityId());
-                } else {
-                    entity = entityMapper.apply(change.getEntityId());
+                long currentVersion = versionMapper.getVersion(userId, entityType);
+                if (currentVersion <= sinceVersion) {
+                    return IncrementalSyncResult.empty(currentVersion);
                 }
-                if (entity != null) {
-                    entities.add(entity);
+
+                List<SyncChangeEntity> changes = changeMapper.selectChangesSince(
+                        userId, entityType, sinceVersion, limit);
+
+                if (changes.isEmpty()) {
+                    return IncrementalSyncResult.empty(currentVersion);
                 }
+
+                List<T> entities = new ArrayList<>(changes.size());
+                for (SyncChangeEntity change : changes) {
+                    T entity;
+                    if (ACTION_DELETE.equals(change.getAction())) {
+                        entity = deletedEntityBuilder.apply(change.getEntityId());
+                    } else {
+                        entity = entityMapper.apply(change.getEntityId());
+                    }
+                    if (entity != null) {
+                        entities.add(entity);
+                    }
+                }
+
+                long latestVersion = changes.get(changes.size() - 1).getVersion();
+                boolean hasMore = changes.size() >= limit && currentVersion > latestVersion;
+
+                return new IncrementalSyncResult<>(entities, latestVersion, hasMore);
             }
-
-            long latestVersion = changes.get(changes.size() - 1).getVersion();
-            boolean hasMore = changes.size() >= limit && currentVersion > latestVersion;
-
-            return new IncrementalSyncResult<>(entities, latestVersion, hasMore);
-        } catch (Exception e) {
-            log.warn("Failed to get incremental changes for {} {} since {}: {}",
-                    userId, entityType, sinceVersion, e.getMessage());
-            return IncrementalSyncResult.empty(0);
-        }
+        });
     }
 
     /**
@@ -160,39 +159,37 @@ public class DbIncrementalSync {
      */
     public IncrementalSyncResult<String> getChangesAsIds(
             String userId, String entityType, long sinceVersion, int limit) {
-        try (SqlSession session = MyBatisPlusFactory.openSession()) {
-            SyncVersionMapper versionMapper = session.getMapper(SyncVersionMapper.class);
-            SyncChangeMapper changeMapper = session.getMapper(SyncChangeMapper.class);
+        return PersistenceExceptions.runDatabase("get sync change ids", () -> {
+            try (SqlSession session = MyBatisPlusFactory.openSession()) {
+                SyncVersionMapper versionMapper = session.getMapper(SyncVersionMapper.class);
+                SyncChangeMapper changeMapper = session.getMapper(SyncChangeMapper.class);
 
-            long currentVersion = versionMapper.getVersion(userId, entityType);
-            if (currentVersion <= sinceVersion) {
-                return IncrementalSyncResult.empty(currentVersion);
-            }
-
-            List<SyncChangeEntity> changes = changeMapper.selectChangesSince(
-                    userId, entityType, sinceVersion, limit);
-
-            if (changes.isEmpty()) {
-                return IncrementalSyncResult.empty(currentVersion);
-            }
-
-            List<String> entities = new ArrayList<>(changes.size());
-            for (SyncChangeEntity change : changes) {
-                if (ACTION_DELETE.equals(change.getAction())) {
-                    entities.add(change.getEntityId());
-                } else {
-                    entities.add(change.getEntityId());
+                long currentVersion = versionMapper.getVersion(userId, entityType);
+                if (currentVersion <= sinceVersion) {
+                    return IncrementalSyncResult.empty(currentVersion);
                 }
+
+                List<SyncChangeEntity> changes = changeMapper.selectChangesSince(
+                        userId, entityType, sinceVersion, limit);
+
+                if (changes.isEmpty()) {
+                    return IncrementalSyncResult.empty(currentVersion);
+                }
+
+                List<String> entities = new ArrayList<>(changes.size());
+                for (SyncChangeEntity change : changes) {
+                    if (ACTION_DELETE.equals(change.getAction())) {
+                        entities.add(change.getEntityId());
+                    } else {
+                        entities.add(change.getEntityId());
+                    }
+                }
+
+                long latestVersion = changes.get(changes.size() - 1).getVersion();
+                boolean hasMore = changes.size() >= limit && currentVersion > latestVersion;
+
+                return new IncrementalSyncResult<>(entities, latestVersion, hasMore);
             }
-
-            long latestVersion = changes.get(changes.size() - 1).getVersion();
-            boolean hasMore = changes.size() >= limit && currentVersion > latestVersion;
-
-            return new IncrementalSyncResult<>(entities, latestVersion, hasMore);
-        } catch (Exception e) {
-            log.warn("Failed to get incremental changes as IDs for {} {} since {}: {}",
-                    userId, entityType, sinceVersion, e.getMessage());
-            return IncrementalSyncResult.empty(0);
-        }
+        });
     }
 }

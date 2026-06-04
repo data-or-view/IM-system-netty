@@ -4,8 +4,8 @@ import com.im.api.ApiInterceptor;
 import com.im.api.ApiRequest;
 import com.im.api.IAuthenticator;
 import com.im.api.Operation;
-import com.im.common.enums.ImErrorCode;
 import com.im.common.exception.ImException;
+import com.im.common.exception.UnauthorizedException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -27,6 +27,8 @@ public class AuthInterceptor implements ApiInterceptor {
 
     private static final Logger log = LoggerFactory.getLogger(AuthInterceptor.class);
 
+    public static final int ORDER = Integer.MIN_VALUE + 100;
+
     private static final String TOKEN_HEADER = "Authorization";
 
     private final IAuthenticator authenticator;
@@ -43,7 +45,7 @@ public class AuthInterceptor implements ApiInterceptor {
     /** 认证必须最先执行 */
     @Override
     public int order() {
-        return Integer.MIN_VALUE;
+        return ORDER;
     }
 
     @Override
@@ -59,7 +61,7 @@ public class AuthInterceptor implements ApiInterceptor {
         String token = request.header(TOKEN_HEADER);
         if (token == null || token.isBlank()) {
             log.warn("Request without token: op={}", request.operation());
-            return false;
+            throw new UnauthorizedException("missing token");
         }
         if (token.startsWith("Bearer ")) {
             token = token.substring(7).trim();
@@ -76,7 +78,7 @@ public class AuthInterceptor implements ApiInterceptor {
             throw e;
         } catch (Exception e) {
             // 非 ImException 包装为 UNAUTHORIZED，附带错误原因
-            throw new ImException(ImErrorCode.UNAUTHORIZED, e.getMessage());
+            throw new UnauthorizedException(e.getMessage(), e);
         }
     }
 

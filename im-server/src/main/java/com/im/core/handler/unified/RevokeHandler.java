@@ -5,8 +5,8 @@ import com.im.api.ApiRequest;
 import com.im.api.IConnectionSession;
 import com.im.api.ISessionManager;
 import com.im.api.RequestHandler;
-import com.im.common.enums.ImErrorCode;
-import com.im.common.exception.ImException;
+import com.im.common.exception.UnauthorizedException;
+import com.im.common.exception.ValidationException;
 import com.im.core.serialization.jackson.ObjectMapperProvider;
 import com.im.core.usecase.RevokeUseCase;
 import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
@@ -36,7 +36,7 @@ public class RevokeHandler implements RequestHandler {
     public Object handle(ApiRequest req) {
         String userId = req.currentUserId();
         if (userId == null) {
-            throw new ImException(ImErrorCode.UNAUTHORIZED, "not authenticated");
+            throw new UnauthorizedException("not authenticated");
         }
 
         String conversationId = req.getString("conversationId");
@@ -44,7 +44,7 @@ public class RevokeHandler implements RequestHandler {
         String groupId = req.getString("groupId");
 
         if (conversationId == null || seq <= 0) {
-            throw new ImException(ImErrorCode.BAD_REQUEST, "conversationId and messageSeq are required");
+            throw new ValidationException("conversationId and messageSeq are required");
         }
 
         RevokeUseCase.RevokeResult result = revokeUseCase.execute(userId, conversationId, seq, groupId);

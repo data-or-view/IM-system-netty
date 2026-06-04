@@ -11,6 +11,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * WebSocket 协议响应写回。
@@ -29,6 +30,7 @@ public class WsResponseWriter implements ResponseWriter {
     private final ChannelHandlerContext ctx;
     private final int seq;
     private final String operation;
+    private final AtomicBoolean committed = new AtomicBoolean(false);
 
     public WsResponseWriter(ChannelHandlerContext ctx, int seq, String operation) {
         this.ctx = ctx;
@@ -38,6 +40,9 @@ public class WsResponseWriter implements ResponseWriter {
 
     @Override
     public void write(Object result) {
+        if (!committed.compareAndSet(false, true)) {
+            return;
+        }
         Map<String, Object> envelope = new LinkedHashMap<>();
         envelope.put("op", operation + "_ack");
         envelope.put("seq", seq);
@@ -50,6 +55,9 @@ public class WsResponseWriter implements ResponseWriter {
 
     @Override
     public void writeError(ImErrorCode code, String detail) {
+        if (!committed.compareAndSet(false, true)) {
+            return;
+        }
         Map<String, Object> envelope = new LinkedHashMap<>();
         envelope.put("op", operation + "_ack");
         envelope.put("seq", seq);
@@ -59,6 +67,11 @@ public class WsResponseWriter implements ResponseWriter {
             envelope.put("detail", detail);
         }
         writeFrame(envelope);
+    }
+
+    @Override
+    public boolean isCommitted() {
+        return committed.get();
     }
 
     /**

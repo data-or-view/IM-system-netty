@@ -5,6 +5,7 @@ import com.im.common.retry.RetryEvent;
 import com.im.common.retry.RetryExecutionException;
 import com.im.common.retry.RetryExecutor;
 import com.im.common.retry.RetryListener;
+import com.im.common.exception.ImException;
 import dev.failsafe.Failsafe;
 import dev.failsafe.Fallback;
 import dev.failsafe.RetryPolicy;
@@ -63,6 +64,10 @@ public class FailsafeRetryExecutor implements RetryExecutor {
             return Failsafe.with(policy)
                     .get(checked(callable));
         } catch (RuntimeException e) {
+            ImException business = findBusinessException(e);
+            if (business != null) {
+                throw business;
+            }
             // 重试耗尽后抛 FailsafeException，保留原始异常原因
             throw new RetryExecutionException(
                     "Retry exhausted after " + config.getMaxAttempts()
@@ -82,6 +87,10 @@ public class FailsafeRetryExecutor implements RetryExecutor {
             return Failsafe.with(fallback, policy)
                     .get(checked(callable));
         } catch (RuntimeException e) {
+            ImException business = findBusinessException(e);
+            if (business != null) {
+                throw business;
+            }
             // fallback 本身也可能抛异常
             throw new RetryExecutionException(
                     "Retry exhausted with recovery failed after " + config.getMaxAttempts()
@@ -161,5 +170,16 @@ public class FailsafeRetryExecutor implements RetryExecutor {
                 throw new RuntimeException(t);
             }
         };
+    }
+
+    private static ImException findBusinessException(Throwable throwable) {
+        Throwable current = throwable;
+        while (current != null) {
+            if (current instanceof ImException imException) {
+                return imException;
+            }
+            current = current.getCause();
+        }
+        return null;
     }
 }

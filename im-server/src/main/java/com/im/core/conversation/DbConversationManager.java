@@ -15,6 +15,7 @@ import com.im.core.sync.DbIncrementalSync;
 import com.im.common.retry.RetryConfig;
 import com.im.common.retry.RetryExecutor;
 import com.im.common.retry.RetryStrategies;
+import com.im.common.exception.PersistenceExceptions;
 import org.apache.ibatis.session.SqlSession;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -52,31 +53,35 @@ public class DbConversationManager implements IConversationManager {
 
     @Override
     public List<Conversation> getConversations(String ownerUserId) {
-        try (SqlSession session = MyBatisPlusFactory.openSession()) {
-            ConversationMapper mapper = session.getMapper(ConversationMapper.class);
-            List<ConversationEntity> entities = mapper.selectByUserOrdered(ownerUserId);
-            if (entities == null || entities.isEmpty()) {
-                return Collections.emptyList();
+        return PersistenceExceptions.runDatabase("get conversations", () -> {
+            try (SqlSession session = MyBatisPlusFactory.openSession()) {
+                ConversationMapper mapper = session.getMapper(ConversationMapper.class);
+                List<ConversationEntity> entities = mapper.selectByUserOrdered(ownerUserId);
+                if (entities == null || entities.isEmpty()) {
+                    return Collections.emptyList();
+                }
+                return entities.stream()
+                        .map(e -> toConversation(session, e))
+                        .collect(Collectors.toList());
             }
-            return entities.stream()
-                    .map(e -> toConversation(session, e))
-                    .collect(Collectors.toList());
-        }
+        });
     }
 
     @Override
     public Conversation getConversation(String ownerUserId, String conversationId) {
-        try (SqlSession session = MyBatisPlusFactory.openSession()) {
-            ConversationMapper mapper = session.getMapper(ConversationMapper.class);
-            ConversationEntity entity = mapper.selectByUserAndConversation(ownerUserId, conversationId);
-            if (entity == null) return null;
-            return toConversation(session, entity);
-        }
+        return PersistenceExceptions.runDatabase("get conversation", () -> {
+            try (SqlSession session = MyBatisPlusFactory.openSession()) {
+                ConversationMapper mapper = session.getMapper(ConversationMapper.class);
+                ConversationEntity entity = mapper.selectByUserAndConversation(ownerUserId, conversationId);
+                if (entity == null) return null;
+                return toConversation(session, entity);
+            }
+        });
     }
 
     @Override
     public void updateOnMessage(String ownerUserId, String conversationId, Message msg, boolean isSelf) {
-        retryExecutor.execute(CFG, () -> {
+        PersistenceExceptions.runDatabase("update conversation on message", () -> retryExecutor.execute(CFG, () -> {
             try (SqlSession session = MyBatisPlusFactory.openSession()) {
                 ConversationMapper mapper = session.getMapper(ConversationMapper.class);
 
@@ -110,57 +115,54 @@ public class DbConversationManager implements IConversationManager {
                 session.commit();
             }
             return null;
-        });
+        }));
 
         sync.recordChange(ownerUserId, "conversation", conversationId, "update");
     }
 
     @Override
     public long getReadSeq(String ownerUserId, String conversationId) {
-        try (SqlSession session = MyBatisPlusFactory.openSession()) {
-            SeqUserMapper seqMapper = session.getMapper(SeqUserMapper.class);
-            SeqUserEntity seqUser = seqMapper.selectByUserAndConversation(ownerUserId, conversationId);
-            return seqUser != null ? seqUser.getReadSeq() : 0;
-        } catch (Exception e) {
-            log.warn("Failed to get readSeq for {}: {}", conversationId, e.getMessage());
-            return 0;
-        }
+        return PersistenceExceptions.runDatabase("get conversation read sequence", () -> {
+            try (SqlSession session = MyBatisPlusFactory.openSession()) {
+                SeqUserMapper seqMapper = session.getMapper(SeqUserMapper.class);
+                SeqUserEntity seqUser = seqMapper.selectByUserAndConversation(ownerUserId, conversationId);
+                return seqUser != null ? seqUser.getReadSeq() : 0;
+            }
+        });
     }
 
     @Override
     public int getTotalUnreadCount(String userId) {
-        try (SqlSession session = MyBatisPlusFactory.openSession()) {
-            ConversationMapper mapper = session.getMapper(ConversationMapper.class);
-            List<ConversationEntity> entities = mapper.selectByUserOrdered(userId);
-            if (entities == null || entities.isEmpty()) return 0;
+        return PersistenceExceptions.runDatabase("get total unread count", () -> {
+            try (SqlSession session = MyBatisPlusFactory.openSession()) {
+                ConversationMapper mapper = session.getMapper(ConversationMapper.class);
+                List<ConversationEntity> entities = mapper.selectByUserOrdered(userId);
+                if (entities == null || entities.isEmpty()) return 0;
 
-            int total = 0;
-            for (ConversationEntity e : entities) {
-                total += computeUnreadCount(session, e);
+                int total = 0;
+                for (ConversationEntity e : entities) {
+                    total += computeUnreadCount(session, e);
+                }
+                return total;
             }
-            return total;
-        } catch (Exception e) {
-            log.warn("Failed to get total unread count for {}: {}", userId, e.getMessage());
-            return 0;
-        }
+        });
     }
 
     @Override
     public int getUnreadCount(String ownerUserId, String conversationId) {
-        try (SqlSession session = MyBatisPlusFactory.openSession()) {
-            ConversationMapper mapper = session.getMapper(ConversationMapper.class);
-            ConversationEntity entity = mapper.selectByUserAndConversation(ownerUserId, conversationId);
-            if (entity == null) return 0;
-            return (int) computeUnreadCount(session, entity);
-        } catch (Exception e) {
-            log.warn("Failed to get unread count for {}: {}", conversationId, e.getMessage());
-            return 0;
-        }
+        return PersistenceExceptions.runDatabase("get unread count", () -> {
+            try (SqlSession session = MyBatisPlusFactory.openSession()) {
+                ConversationMapper mapper = session.getMapper(ConversationMapper.class);
+                ConversationEntity entity = mapper.selectByUserAndConversation(ownerUserId, conversationId);
+                if (entity == null) return 0;
+                return (int) computeUnreadCount(session, entity);
+            }
+        });
     }
 
     @Override
     public void markRead(String ownerUserId, String conversationId, long readSeq) {
-        retryExecutor.execute(CFG, () -> {
+        PersistenceExceptions.runDatabase("mark conversation read", () -> retryExecutor.execute(CFG, () -> {
             try (SqlSession session = MyBatisPlusFactory.openSession()) {
                 ConversationMapper mapper = session.getMapper(ConversationMapper.class);
                 mapper.resetUnread(ownerUserId, conversationId);
@@ -174,14 +176,14 @@ public class DbConversationManager implements IConversationManager {
                 session.commit();
             }
             return null;
-        });
+        }));
 
         sync.recordChange(ownerUserId, "conversation", conversationId, "update");
     }
 
     @Override
     public void setPinned(String ownerUserId, String conversationId, boolean pinned) {
-        retryExecutor.execute(CFG, () -> {
+        PersistenceExceptions.runDatabase("set conversation pinned", () -> retryExecutor.execute(CFG, () -> {
             try (SqlSession session = MyBatisPlusFactory.openSession()) {
                 ConversationMapper mapper = session.getMapper(ConversationMapper.class);
                 mapper.update(
@@ -195,14 +197,14 @@ public class DbConversationManager implements IConversationManager {
                 session.commit();
             }
             return null;
-        });
+        }));
 
         sync.recordChange(ownerUserId, "conversation", conversationId, "update");
     }
 
     @Override
     public void setRecvMsgOpt(String ownerUserId, String conversationId, int recvMsgOpt) {
-        retryExecutor.execute(CFG, () -> {
+        PersistenceExceptions.runDatabase("set conversation receive option", () -> retryExecutor.execute(CFG, () -> {
             try (SqlSession session = MyBatisPlusFactory.openSession()) {
                 ConversationMapper mapper = session.getMapper(ConversationMapper.class);
                 mapper.update(
@@ -216,14 +218,14 @@ public class DbConversationManager implements IConversationManager {
                 session.commit();
             }
             return null;
-        });
+        }));
 
         sync.recordChange(ownerUserId, "conversation", conversationId, "update");
     }
 
     @Override
     public void setBurnDuration(String ownerUserId, String conversationId, int burnDuration) {
-        retryExecutor.execute(CFG, () -> {
+        PersistenceExceptions.runDatabase("set conversation burn duration", () -> retryExecutor.execute(CFG, () -> {
             try (SqlSession session = MyBatisPlusFactory.openSession()) {
                 ConversationMapper mapper = session.getMapper(ConversationMapper.class);
                 mapper.update(
@@ -237,14 +239,14 @@ public class DbConversationManager implements IConversationManager {
                 session.commit();
             }
             return null;
-        });
+        }));
 
         sync.recordChange(ownerUserId, "conversation", conversationId, "update");
     }
 
     @Override
     public void createSingleConversation(String ownerUserId, String targetUserId, String conversationId) {
-        retryExecutor.execute(CFG, () -> {
+        PersistenceExceptions.runDatabase("create single conversation", () -> retryExecutor.execute(CFG, () -> {
             try (SqlSession session = MyBatisPlusFactory.openSession()) {
                 ConversationMapper mapper = session.getMapper(ConversationMapper.class);
                 ConversationEntity existing = mapper.selectByUserAndConversation(ownerUserId, conversationId);
@@ -263,7 +265,7 @@ public class DbConversationManager implements IConversationManager {
                         ownerUserId, conversationId, targetUserId);
             }
             return null;
-        });
+        }));
 
         sync.recordChange(ownerUserId, "conversation", conversationId, "insert");
     }
@@ -272,7 +274,7 @@ public class DbConversationManager implements IConversationManager {
     public void createGroupConversations(List<String> memberIds, String groupId, String conversationId) {
         if (memberIds == null || memberIds.isEmpty()) return;
 
-        retryExecutor.execute(CFG, () -> {
+        PersistenceExceptions.runDatabase("create group conversations", () -> retryExecutor.execute(CFG, () -> {
             try (SqlSession session = MyBatisPlusFactory.openSession()) {
                 ConversationMapper mapper = session.getMapper(ConversationMapper.class);
                 long now = System.currentTimeMillis();
@@ -294,7 +296,7 @@ public class DbConversationManager implements IConversationManager {
                 log.debug("Group conversations created: groupId={}, members={}", groupId, memberIds.size());
             }
             return null;
-        });
+        }));
 
         for (String memberId : memberIds) {
             sync.recordChange(memberId, "conversation", conversationId, "insert");
@@ -341,42 +343,33 @@ public class DbConversationManager implements IConversationManager {
     }
 
     private void ensureSeqUser(SqlSession session, String userId, String conversationId, long newSeq) {
-        try {
-            SeqUserMapper seqMapper = session.getMapper(SeqUserMapper.class);
-            SeqUserEntity existing = seqMapper.selectByUserAndConversation(userId, conversationId);
-            if (existing == null) {
-                SeqUserEntity su = new SeqUserEntity();
-                su.setUserId(userId);
-                su.setConversationId(conversationId);
-                su.setMinSeq(newSeq);
-                su.setMaxSeq(newSeq);
-                su.setReadSeq(0);
-                su.setUpdatedAt(System.currentTimeMillis());
-                seqMapper.insert(su);
-            } else if (newSeq > existing.getMaxSeq()) {
-                existing.setMaxSeq(newSeq);
-                existing.setUpdatedAt(System.currentTimeMillis());
-                seqMapper.updateById(existing);
-            }
-        } catch (Exception ex) {
-            log.warn("Failed to ensure seq_user for {}: {}", conversationId, ex.getMessage());
+        SeqUserMapper seqMapper = session.getMapper(SeqUserMapper.class);
+        SeqUserEntity existing = seqMapper.selectByUserAndConversation(userId, conversationId);
+        if (existing == null) {
+            SeqUserEntity su = new SeqUserEntity();
+            su.setUserId(userId);
+            su.setConversationId(conversationId);
+            su.setMinSeq(newSeq);
+            su.setMaxSeq(newSeq);
+            su.setReadSeq(0);
+            su.setUpdatedAt(System.currentTimeMillis());
+            seqMapper.insert(su);
+        } else if (newSeq > existing.getMaxSeq()) {
+            existing.setMaxSeq(newSeq);
+            existing.setUpdatedAt(System.currentTimeMillis());
+            seqMapper.updateById(existing);
         }
     }
 
     private long computeUnreadCount(SqlSession session, ConversationEntity e) {
-        try {
-            SeqUserMapper seqMapper = session.getMapper(SeqUserMapper.class);
-            SeqUserEntity seqUser = seqMapper.selectByUserAndConversation(
-                    e.getOwnerUserId(), e.getConversationId());
-            if (seqUser == null) {
-                return e.getMaxSeq() > 0 ? 1 : 0;
-            }
-            long unread = e.getMaxSeq() - seqUser.getReadSeq();
-            return Math.max(unread, 0);
-        } catch (Exception ex) {
-            log.warn("Failed to compute unread for conv {}: {}", e.getConversationId(), ex.getMessage());
-            return 0;
+        SeqUserMapper seqMapper = session.getMapper(SeqUserMapper.class);
+        SeqUserEntity seqUser = seqMapper.selectByUserAndConversation(
+                e.getOwnerUserId(), e.getConversationId());
+        if (seqUser == null) {
+            return e.getMaxSeq() > 0 ? 1 : 0;
         }
+        long unread = e.getMaxSeq() - seqUser.getReadSeq();
+        return Math.max(unread, 0);
     }
 
     private void parseAttachedInfo(Conversation conv, String attachedInfo) {

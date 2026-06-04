@@ -1,8 +1,9 @@
 package com.im.core.user;
 
 import com.im.api.IRouteTable;
-import com.im.common.enums.ImErrorCode;
-import com.im.common.exception.ImException;
+import com.im.common.exception.NotFoundException;
+import com.im.common.exception.ConflictException;
+import com.im.common.exception.PersistenceExceptions;
 import com.im.api.IUserManager;
 import com.im.api.UserInformation;
 import com.im.core.db.MyBatisPlusFactory;
@@ -40,12 +41,12 @@ public class DbUserManager implements IUserManager {
 
     @Override
     public void register(String userId, String nickname, String faceUrl, String ex) {
-        retryExecutor.execute(CFG, () -> {
+        PersistenceExceptions.runDatabase("register user", () -> retryExecutor.execute(CFG, () -> {
             try (SqlSession session = MyBatisPlusFactory.openSession()) {
                 UserMapper mapper = session.getMapper(UserMapper.class);
                 UserEntity existing = mapper.selectById(userId);
                 if (existing != null) {
-                    throw new ImException(ImErrorCode.CONFLICT, "User already exists: " + userId);
+                    throw new ConflictException("User already exists: " + userId);
                 }
                 UserEntity entity = new UserEntity();
                 entity.setUserId(userId);
@@ -60,31 +61,35 @@ public class DbUserManager implements IUserManager {
                 log.info("User registered: userId={}, nickname={}", userId, entity.getNickname());
             }
             return null;
-        });
+        }));
     }
 
     @Override
     public UserInformation getUserInformation(String userId) {
-        try (SqlSession session = MyBatisPlusFactory.openSession()) {
-            UserMapper mapper = session.getMapper(UserMapper.class);
-            UserEntity entity = mapper.selectById(userId);
-            if (entity == null) {
-                throw new ImException(ImErrorCode.NOT_FOUND, "User not found: " + userId);
+        return PersistenceExceptions.runDatabase("get user information", () -> {
+            try (SqlSession session = MyBatisPlusFactory.openSession()) {
+                UserMapper mapper = session.getMapper(UserMapper.class);
+                UserEntity entity = mapper.selectById(userId);
+                if (entity == null) {
+                    throw new NotFoundException("User not found: " + userId);
+                }
+                return toUserInformation(entity);
             }
-            return toUserInformation(entity);
-        }
+        });
     }
 
     @Override
     public List<UserInformation> getUsersInfo(List<String> userIds) {
-        try (SqlSession session = MyBatisPlusFactory.openSession()) {
-            UserMapper mapper = session.getMapper(UserMapper.class);
-            return userIds.stream()
-                    .map(mapper::selectById)
-                    .filter(e -> e != null)
-                    .map(this::toUserInformation)
-                    .toList();
-        }
+        return PersistenceExceptions.runDatabase("get users information", () -> {
+            try (SqlSession session = MyBatisPlusFactory.openSession()) {
+                UserMapper mapper = session.getMapper(UserMapper.class);
+                return userIds.stream()
+                        .map(mapper::selectById)
+                        .filter(e -> e != null)
+                        .map(this::toUserInformation)
+                        .toList();
+            }
+        });
     }
 
     @Override
@@ -100,12 +105,12 @@ public class DbUserManager implements IUserManager {
     @Override
     public void updateUserInformation(String userId, String nickname, String faceUrl,
                                       String ex, int globalRecvMsgOpt) {
-        retryExecutor.execute(CFG, () -> {
+        PersistenceExceptions.runDatabase("update user information", () -> retryExecutor.execute(CFG, () -> {
             try (SqlSession session = MyBatisPlusFactory.openSession()) {
                 UserMapper mapper = session.getMapper(UserMapper.class);
                 UserEntity entity = mapper.selectById(userId);
                 if (entity == null) {
-                    throw new ImException(ImErrorCode.NOT_FOUND, "User not found: " + userId);
+                    throw new NotFoundException("User not found: " + userId);
                 }
                 if (nickname != null) entity.setNickname(nickname);
                 if (faceUrl != null) entity.setFaceUrl(faceUrl);
@@ -117,18 +122,20 @@ public class DbUserManager implements IUserManager {
                 log.info("User updated: userId={}", userId);
             }
             return null;
-        });
+        }));
     }
 
     @Override
     public List<UserInformation> searchUsers(String keyword, int limit) {
-        try (SqlSession session = MyBatisPlusFactory.openSession()) {
-            UserMapper mapper = session.getMapper(UserMapper.class);
-            // 同时搜索 nickname 和 user_id
-            return mapper.searchByKeyword(keyword, limit).stream()
-                    .map(this::toUserInformation)
-                    .toList();
-        }
+        return PersistenceExceptions.runDatabase("search users", () -> {
+            try (SqlSession session = MyBatisPlusFactory.openSession()) {
+                UserMapper mapper = session.getMapper(UserMapper.class);
+                // 同时搜索 nickname 和 user_id
+                return mapper.searchByKeyword(keyword, limit).stream()
+                        .map(this::toUserInformation)
+                        .toList();
+            }
+        });
     }
 
     private UserInformation toUserInformation(UserEntity entity) {

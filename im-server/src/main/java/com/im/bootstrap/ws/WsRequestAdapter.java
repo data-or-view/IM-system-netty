@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.im.api.ApiRequest;
 import com.im.api.Operation;
 import com.im.api.ResponseWriter;
+import com.im.bootstrap.DispatchSubmitter;
 import com.im.core.dispatcher.ApiDispatcher;
 import com.im.core.serialization.jackson.ObjectMapperProvider;
 import com.im.core.session.NettyConnectionRef;
@@ -112,6 +113,6 @@ public class WsRequestAdapter extends SimpleChannelInboundHandler<WebSocketFrame
         ResponseWriter responseWriter = new WsResponseWriter(ctx, seq, operation.opName());
         ApiRequest request = new ApiRequest(operation, params, headers, responseWriter, null);
         request.setAttribute("_connectionId", NettyConnectionRef.connectionId(ctx.channel()));
-        virtualExecutor.execute(() -> dispatcher.dispatch(request));
+        DispatchSubmitter.submit(dispatcher, virtualExecutor, request, log);
     }
 }

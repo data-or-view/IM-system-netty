@@ -2,8 +2,7 @@ package com.im.core.handler.unified;
 
 import com.im.api.ApiRequest;
 import com.im.api.RequestHandler;
-import com.im.common.enums.ImErrorCode;
-import com.im.common.exception.ImException;
+import com.im.common.exception.ValidationException;
 import com.im.core.usecase.RegisterUseCase;
 
 import java.util.Map;
@@ -23,7 +22,7 @@ public class RegisterHandler implements RequestHandler {
     public Object handle(ApiRequest req) {
         String userId = req.getString("userId");
         if (userId == null || userId.isBlank()) {
-            throw new ImException(ImErrorCode.BAD_REQUEST, "userId is required");
+            throw new ValidationException("userId is required");
         }
 
         String nickname = req.getString("nickname", userId);

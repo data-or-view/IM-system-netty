@@ -1,5 +1,7 @@
 package com.im.common.retry;
 
+import com.im.common.exception.ImException;
+
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -45,7 +47,7 @@ public final class RetryConfig {
         private double multiplier = 2.0;
         private double jitter = 0.2;
         private List<Class<? extends Throwable>> retryOn = List.of(Exception.class);
-        private List<Class<? extends Throwable>> abortOn = List.of();
+        private List<Class<? extends Throwable>> abortOn = List.of(ImException.class);
 
         public Builder maxAttempts(int val) {
             if (val < 1) throw new IllegalArgumentException("maxAttempts must be >= 1");

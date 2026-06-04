@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.MybatisSqlSessionFactoryBuilder;
 import com.baomidou.mybatisplus.extension.plugins.MybatisPlusInterceptor;
 import com.baomidou.mybatisplus.extension.plugins.inner.PaginationInnerInterceptor;
+import com.im.common.exception.DatabasePersistenceException;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import org.apache.ibatis.logging.slf4j.Slf4jImpl;
@@ -88,7 +89,7 @@ public final class MyBatisPlusFactory {
      */
     public static SqlSessionFactory getSqlSessionFactory() {
         if (sqlSessionFactory == null) {
-            throw new IllegalStateException("MyBatis-Plus not initialized. Call MyBatisPlusFactory.init() first.");
+            throw new DatabasePersistenceException("MyBatis-Plus not initialized. Call MyBatisPlusFactory.init() first.");
         }
         return sqlSessionFactory;
     }

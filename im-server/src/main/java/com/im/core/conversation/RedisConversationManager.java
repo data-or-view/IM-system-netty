@@ -4,6 +4,7 @@ import com.im.api.Conversation;
 import com.im.api.IConversationManager;
 import com.im.api.IncrementalSyncResult;
 import com.im.api.Message;
+import com.im.common.exception.PersistenceExceptions;
 import com.im.core.redis.RedisConfiguration;
 import io.lettuce.core.cluster.api.async.RedisClusterAsyncCommands;
 import org.slf4j.Logger;
@@ -58,7 +59,7 @@ public class RedisConversationManager implements IConversationManager {
 
     @Override
     public List<Conversation> getConversations(String ownerUserId) {
-        try {
+        return PersistenceExceptions.runRedis("get conversations", () -> {
             List<String> convIds = async.zrevrange(listKey(ownerUserId), 0, -1)
                     .get(REDIS_TIMEOUT_MS, TimeUnit.MILLISECONDS);
 
@@ -70,28 +71,22 @@ public class RedisConversationManager implements IConversationManager {
                 if (conv != null) result.add(conv);
             }
             return result;
-        } catch (Exception e) {
-            log.warn("Failed to get conversations for {}: {}", ownerUserId, e.getMessage());
-            return Collections.emptyList();
-        }
+        });
     }
 
     @Override
     public Conversation getConversation(String ownerUserId, String conversationId) {
-        try {
+        return PersistenceExceptions.runRedis("get conversation", () -> {
             Map<String, String> fields = async.hgetall(dataKey(ownerUserId, conversationId))
                     .get(REDIS_TIMEOUT_MS, TimeUnit.MILLISECONDS);
             if (fields == null || fields.isEmpty()) return null;
             return hashToConversation(fields);
-        } catch (Exception e) {
-            log.warn("Failed to get conversation {} for {}: {}", conversationId, ownerUserId, e.getMessage());
-            return null;
-        }
+        });
     }
 
     @Override
     public void updateOnMessage(String ownerUserId, String conversationId, Message msg, boolean isSelf) {
-        try {
+        PersistenceExceptions.runRedis("update conversation on message", () -> {
             String key = dataKey(ownerUserId, conversationId);
             long now = System.currentTimeMillis();
 
@@ -135,66 +130,63 @@ public class RedisConversationManager implements IConversationManager {
                     .get(REDIS_TIMEOUT_MS, TimeUnit.MILLISECONDS);
 
             incrVersion(ownerUserId);
-        } catch (Exception e) {
-            log.warn("Failed to updateOnMessage for {} conv {}: {}", ownerUserId, conversationId, e.getMessage());
-        }
+            return null;
+        });
     }
 
     @Override
     public void markRead(String ownerUserId, String conversationId, long readSeq) {
-        try {
+        PersistenceExceptions.runRedis("mark conversation read", () -> {
             String key = dataKey(ownerUserId, conversationId);
+            long currentReadSeq = getReadSeq(ownerUserId, conversationId);
+            long nextReadSeq = Math.max(currentReadSeq, readSeq);
             async.hset(key, "unreadCount", "0").get(REDIS_TIMEOUT_MS, TimeUnit.MILLISECONDS);
-            async.hset(key, "readSeq", String.valueOf(readSeq)).get(REDIS_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+            async.hset(key, "readSeq", String.valueOf(nextReadSeq)).get(REDIS_TIMEOUT_MS, TimeUnit.MILLISECONDS);
             async.hset(key, "updateTime", String.valueOf(System.currentTimeMillis())).get(REDIS_TIMEOUT_MS, TimeUnit.MILLISECONDS);
             incrVersion(ownerUserId);
-        } catch (Exception e) {
-            log.warn("Failed to markRead for {} conv {}: {}", ownerUserId, conversationId, e.getMessage());
-        }
+            return null;
+        });
     }
 
     @Override
     public void setPinned(String ownerUserId, String conversationId, boolean pinned) {
-        try {
+        PersistenceExceptions.runRedis("set conversation pinned", () -> {
             String key = dataKey(ownerUserId, conversationId);
             async.hset(key, "isPinned", pinned ? "1" : "0").get(REDIS_TIMEOUT_MS, TimeUnit.MILLISECONDS);
             async.hset(key, "updateTime", String.valueOf(System.currentTimeMillis())).get(REDIS_TIMEOUT_MS, TimeUnit.MILLISECONDS);
             incrVersion(ownerUserId);
-        } catch (Exception e) {
-            log.warn("Failed to setPinned for {} conv {}: {}", ownerUserId, conversationId, e.getMessage());
-        }
+            return null;
+        });
     }
 
     @Override
     public void setRecvMsgOpt(String ownerUserId, String conversationId, int recvMsgOpt) {
-        try {
+        PersistenceExceptions.runRedis("set conversation receive option", () -> {
             String key = dataKey(ownerUserId, conversationId);
             async.hset(key, "recvMsgOpt", String.valueOf(recvMsgOpt)).get(REDIS_TIMEOUT_MS, TimeUnit.MILLISECONDS);
             async.hset(key, "updateTime", String.valueOf(System.currentTimeMillis())).get(REDIS_TIMEOUT_MS, TimeUnit.MILLISECONDS);
             incrVersion(ownerUserId);
-        } catch (Exception e) {
-            log.warn("Failed to setRecvMsgOpt for {} conv {}: {}", ownerUserId, conversationId, e.getMessage());
-        }
+            return null;
+        });
     }
 
     @Override
     public void setBurnDuration(String ownerUserId, String conversationId, int burnDuration) {
-        try {
+        PersistenceExceptions.runRedis("set conversation burn duration", () -> {
             String key = dataKey(ownerUserId, conversationId);
             async.hset(key, "burnDuration", String.valueOf(burnDuration)).get(REDIS_TIMEOUT_MS, TimeUnit.MILLISECONDS);
             async.hset(key, "updateTime", String.valueOf(System.currentTimeMillis())).get(REDIS_TIMEOUT_MS, TimeUnit.MILLISECONDS);
             incrVersion(ownerUserId);
-        } catch (Exception e) {
-            log.warn("Failed to setBurnDuration for {} conv {}: {}", ownerUserId, conversationId, e.getMessage());
-        }
+            return null;
+        });
     }
 
     @Override
     public void createSingleConversation(String ownerUserId, String targetUserId, String conversationId) {
-        try {
+        PersistenceExceptions.runRedis("create single conversation", () -> {
             String key = dataKey(ownerUserId, conversationId);
             boolean exists = async.exists(key).get(REDIS_TIMEOUT_MS, TimeUnit.MILLISECONDS) == 1;
-            if (exists) return;
+            if (exists) return null;
 
             long now = System.currentTimeMillis();
             Conversation conv = new Conversation(conversationId, ownerUserId, Conversation.SESSION_TYPE_SINGLE);
@@ -204,14 +196,13 @@ public class RedisConversationManager implements IConversationManager {
             async.hset(key, conversationToHash(conv)).get(REDIS_TIMEOUT_MS, TimeUnit.MILLISECONDS);
             async.zadd(listKey(ownerUserId), now, conversationId).get(REDIS_TIMEOUT_MS, TimeUnit.MILLISECONDS);
             incrVersion(ownerUserId);
-        } catch (Exception e) {
-            log.warn("Failed to createSingleConversation for {}: {}", ownerUserId, e.getMessage());
-        }
+            return null;
+        });
     }
 
     @Override
     public void createGroupConversations(List<String> memberIds, String groupId, String conversationId) {
-        try {
+        PersistenceExceptions.runRedis("create group conversations", () -> {
             long now = System.currentTimeMillis();
             for (String memberId : memberIds) {
                 String key = dataKey(memberId, conversationId);
@@ -226,26 +217,22 @@ public class RedisConversationManager implements IConversationManager {
                 async.zadd(listKey(memberId), now, conversationId).get(REDIS_TIMEOUT_MS, TimeUnit.MILLISECONDS);
                 incrVersion(memberId);
             }
-        } catch (Exception e) {
-            log.warn("Failed to createGroupConversations for group {}: {}", groupId, e.getMessage());
-        }
+            return null;
+        });
     }
 
     @Override
     public long getReadSeq(String ownerUserId, String conversationId) {
-        try {
+        return PersistenceExceptions.runRedis("get conversation read sequence", () -> {
             String val = async.hget(dataKey(ownerUserId, conversationId), "readSeq")
                     .get(REDIS_TIMEOUT_MS, TimeUnit.MILLISECONDS);
             return val != null ? Long.parseLong(val) : 0;
-        } catch (Exception e) {
-            log.warn("Failed to getReadSeq for {} conv {}: {}", ownerUserId, conversationId, e.getMessage());
-            return 0;
-        }
+        });
     }
 
     @Override
     public int getTotalUnreadCount(String userId) {
-        try {
+        return PersistenceExceptions.runRedis("get total unread count", () -> {
             List<String> convIds = async.zrange(listKey(userId), 0, -1)
                     .get(REDIS_TIMEOUT_MS, TimeUnit.MILLISECONDS);
             if (convIds == null || convIds.isEmpty()) return 0;
@@ -255,29 +242,23 @@ public class RedisConversationManager implements IConversationManager {
                 total += getUnreadCount(userId, convId);
             }
             return total;
-        } catch (Exception e) {
-            log.warn("Failed to getTotalUnreadCount for {}: {}", userId, e.getMessage());
-            return 0;
-        }
+        });
     }
 
     @Override
     public int getUnreadCount(String ownerUserId, String conversationId) {
-        try {
+        return PersistenceExceptions.runRedis("get unread count", () -> {
             String val = async.hget(dataKey(ownerUserId, conversationId), "unreadCount")
                     .get(REDIS_TIMEOUT_MS, TimeUnit.MILLISECONDS);
             return val != null ? Integer.parseInt(val) : 0;
-        } catch (Exception e) {
-            log.warn("Failed to getUnreadCount for {} conv {}: {}", ownerUserId, conversationId, e.getMessage());
-            return 0;
-        }
+        });
     }
 
     // ========== 增量同步 ==========
 
     @Override
     public IncrementalSyncResult<Conversation> getIncrementalConversations(String ownerUserId, long version) {
-        try {
+        return PersistenceExceptions.runRedis("get incremental conversations", () -> {
             String verStr = async.get(versionKey(ownerUserId))
                     .get(REDIS_TIMEOUT_MS, TimeUnit.MILLISECONDS);
             long currentVersion = verStr != null ? Long.parseLong(verStr) : 0;
@@ -287,20 +268,14 @@ public class RedisConversationManager implements IConversationManager {
 
             List<Conversation> all = getConversations(ownerUserId);
             return new IncrementalSyncResult<>(all, currentVersion, false);
-        } catch (Exception e) {
-            log.warn("Failed to getIncrementalConversations for {}: {}", ownerUserId, e.getMessage());
-            return IncrementalSyncResult.empty(0);
-        }
+        });
     }
 
     // ========== 工具方法 ==========
 
     private void incrVersion(String ownerUserId) {
-        try {
-            async.incr(versionKey(ownerUserId)).get(REDIS_TIMEOUT_MS, TimeUnit.MILLISECONDS);
-        } catch (Exception e) {
-            log.warn("Failed to incr version for {}: {}", ownerUserId, e.getMessage());
-        }
+        PersistenceExceptions.runRedis("increment conversation sync version", () ->
+                async.incr(versionKey(ownerUserId)).get(REDIS_TIMEOUT_MS, TimeUnit.MILLISECONDS));
     }
 
     private Conversation hashToConversation(Map<String, String> fields) {

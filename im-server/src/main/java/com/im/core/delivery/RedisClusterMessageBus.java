@@ -2,6 +2,7 @@ package com.im.core.delivery;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.im.api.ClusterCommand;
 import com.im.api.ClusterMessage;
 import com.im.api.ClusterMessageHandler;
 import com.im.api.IClusterMessageBus;
@@ -197,14 +198,16 @@ public class RedisClusterMessageBus implements IClusterMessageBus {
      *  "command":{"_op":10,"_seq":1,...,"_body":"base64..."}}
      */
     String serialize(ClusterMessage msg) throws Exception {
-        Message message = msg.getMessage();
-        Map<String, Object> msgMap = message.toJsonMap();
-
         Map<String, Object> root = new LinkedHashMap<>();
         root.put("kind", msg.getKind().name());
         root.put("fromNodeId", msg.getFromNodeId());
         root.put("ttl", msg.getTtl());
-        root.put("message", msgMap);
+        if (msg.getKind() == ClusterMessage.Kind.CLUSTER_COMMAND) {
+            root.put("command", commandToMap(msg.getCommand()));
+        } else {
+            Message message = msg.getMessage();
+            root.put("message", message.toJsonMap());
+        }
 
         return MAPPER.writeValueAsString(root);
     }
@@ -219,12 +222,35 @@ public class RedisClusterMessageBus implements IClusterMessageBus {
         String fromNodeId = (String) root.get("fromNodeId");
         int ttl = ((Number) root.get("ttl")).intValue();
 
+        ClusterMessage.Kind kind = ClusterMessage.Kind.valueOf(kindStr);
+        if (kind == ClusterMessage.Kind.CLUSTER_COMMAND) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> commandMap = (Map<String, Object>) root.get("command");
+            return new ClusterMessage(kind, fromNodeId, commandFromMap(commandMap), ttl);
+        }
+
         @SuppressWarnings("unchecked")
         Map<String, Object> msgMap = (Map<String, Object>) root.get("message");
-        Message message = Message.fromJsonMap(msgMap);
+        return new ClusterMessage(kind, fromNodeId, Message.fromJsonMap(msgMap), ttl);
+    }
 
-        ClusterMessage.Kind kind = ClusterMessage.Kind.valueOf(kindStr);
-        return new ClusterMessage(kind, fromNodeId, message, ttl);
+    private static Map<String, Object> commandToMap(ClusterCommand command) {
+        Map<String, Object> map = new LinkedHashMap<>();
+        map.put("type", command.type().name());
+        map.put("userId", command.userId());
+        map.put("platformId", command.platformId());
+        map.put("sessionId", command.sessionId());
+        map.put("reason", command.reason());
+        return map;
+    }
+
+    private static ClusterCommand commandFromMap(Map<String, Object> map) {
+        ClusterCommand.Type type = ClusterCommand.Type.valueOf((String) map.get("type"));
+        String userId = (String) map.get("userId");
+        int platformId = ((Number) map.getOrDefault("platformId", -1)).intValue();
+        String sessionId = (String) map.getOrDefault("sessionId", "default");
+        String reason = (String) map.get("reason");
+        return new ClusterCommand(type, userId, platformId, sessionId, reason);
     }
 
     // ── 工具 ──

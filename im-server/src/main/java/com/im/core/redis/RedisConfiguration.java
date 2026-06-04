@@ -152,6 +152,7 @@ public class RedisConfiguration implements Lifecycle, AutoCloseable {
         private String host = "localhost";
         private int port = 6379;
         private List<String> clusterNodes = Collections.emptyList();
+        private String username;
         private String password;
         private int database = 0;
         private Duration timeout = Duration.ofSeconds(3);
@@ -169,6 +170,7 @@ public class RedisConfiguration implements Lifecycle, AutoCloseable {
             this.clusterNodes = new ArrayList<>(nodes);
             return this;
         }
+        public Builder username(String username) { this.username = username; return this; }
         public Builder password(String password) { this.password = password; return this; }
         public Builder database(int database) { this.database = database; return this; }
         public Builder timeout(Duration timeout) { this.timeout = timeout; return this; }
@@ -183,8 +185,7 @@ public class RedisConfiguration implements Lifecycle, AutoCloseable {
                             .withHost(p[0])
                             .withPort(p.length > 1 ? Integer.parseInt(p[1]) : 6379)
                             .withTimeout(timeout);
-                    if (password != null && !password.isEmpty())
-                        b.withPassword(password.toCharArray());
+                    applyAuthentication(b);
                     uris.add(b.build());
                 }
                 RedisClusterClient cc = RedisClusterClient.create(uris);
@@ -201,9 +202,19 @@ public class RedisConfiguration implements Lifecycle, AutoCloseable {
                 RedisURI.Builder b = RedisURI.builder()
                         .withHost(host).withPort(port)
                         .withDatabase(database).withTimeout(timeout);
-                if (password != null && !password.isEmpty())
-                    b.withPassword(password.toCharArray());
+                applyAuthentication(b);
                 return new RedisConfiguration(RedisClient.create(b.build()));
+            }
+        }
+
+        private void applyAuthentication(RedisURI.Builder builder) {
+            if (password == null || password.isEmpty()) {
+                return;
+            }
+            if (username != null && !username.isBlank()) {
+                builder.withAuthentication(username, password.toCharArray());
+            } else {
+                builder.withPassword(password.toCharArray());
             }
         }
     }

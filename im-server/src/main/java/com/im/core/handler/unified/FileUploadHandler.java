@@ -2,8 +2,7 @@ package com.im.core.handler.unified;
 
 import com.im.api.ApiRequest;
 import com.im.api.RequestHandler;
-import com.im.common.enums.ImErrorCode;
-import com.im.common.exception.ImException;
+import com.im.common.exception.ValidationException;
 import com.im.infrastructure.storage.usecase.FileUploadUseCase;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,14 +32,14 @@ public class FileUploadHandler implements RequestHandler {
         byte[] body = req.bodyRaw();
 
         if (body == null || body.length == 0) {
-            throw new ImException(ImErrorCode.BAD_REQUEST, "file body is empty");
+            throw new ValidationException("file body is empty");
         }
         // fileName/mimeType 缺失会存脏数据到对象存储，必须校验
         if (fileName == null || fileName.isBlank()) {
-            throw new ImException(ImErrorCode.BAD_REQUEST, "fileName is required");
+            throw new ValidationException("fileName is required");
         }
         if (mimeType == null || mimeType.isBlank()) {
-            throw new ImException(ImErrorCode.BAD_REQUEST, "mimeType is required");
+            throw new ValidationException("mimeType is required");
         }
 
         FileUploadUseCase.FileUploadResult result = fileUploadUseCase.execute(fileName, mimeType, body);

@@ -8,8 +8,9 @@ import com.im.api.SignalingAction;
 import com.im.api.content.ContentType;
 import com.im.api.content.IMessageContent;
 import com.im.api.content.SignalingContent;
-import com.im.common.enums.ImErrorCode;
-import com.im.common.exception.ImException;
+import com.im.common.exception.UnauthorizedException;
+import com.im.common.exception.ValidationException;
+import com.im.common.exception.ForbiddenException;
 import com.im.core.call.CallStateManager;
 import com.im.core.handler.ContentParser;
 import com.im.core.usecase.SendMessageUseCase;
@@ -43,7 +44,7 @@ public class ChatHandler implements RequestHandler {
     public Object handle(ApiRequest req) {
         String uid = req.currentUserId();
         if (uid == null) {
-            throw new ImException(ImErrorCode.UNAUTHORIZED, "not authenticated");
+            throw new UnauthorizedException("not authenticated");
         }
         String toUserId = req.getString("toUserId");
         String groupId = req.getString("groupId");
@@ -53,10 +54,10 @@ public class ChatHandler implements RequestHandler {
         try {
             content = ContentParser.parse(req.params(), req.bodyRaw());
         } catch (Exception e) {
-            throw new ImException(ImErrorCode.BAD_REQUEST, "invalid content: " + e.getMessage());
+            throw new ValidationException("invalid content: " + e.getMessage());
         }
         if (content == null) {
-            throw new ImException(ImErrorCode.BAD_REQUEST, "content type (_ct) is required");
+            throw new ValidationException("content type (_ct) is required");
         }
 
         // ── 音视频通话信令处理 ──
@@ -64,7 +65,7 @@ public class ChatHandler implements RequestHandler {
             SignalingContent signal = (SignalingContent) content;
             if (signal.getAction() == SignalingAction.INVITE) {
                 if (groupId != null) {
-                    throw new ImException(ImErrorCode.BAD_REQUEST, "group call not supported yet");
+                    throw new ValidationException("group call not supported yet");
                 }
                 return handleInvite(req.params(), uid, toUserId, signal);
             }
@@ -79,7 +80,7 @@ public class ChatHandler implements RequestHandler {
                 req.params(), uid, toUserId, groupId, content);
 
         if (result == null) {
-            throw new ImException(ImErrorCode.FORBIDDEN, "message sending blocked");
+            throw new ForbiddenException("message sending blocked");
         }
 
         return Map.of("status", "RECEIVED",

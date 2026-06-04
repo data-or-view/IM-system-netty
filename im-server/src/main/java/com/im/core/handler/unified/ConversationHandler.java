@@ -2,10 +2,12 @@ package com.im.core.handler.unified;
 
 import com.im.api.ApiRequest;
 import com.im.api.Conversation;
+import com.im.api.IConversationAccessChecker;
 import com.im.api.IConversationManager;
 import com.im.api.RequestHandler;
-import com.im.common.enums.ImErrorCode;
-import com.im.common.exception.ImException;
+import com.im.common.exception.UnauthorizedException;
+import com.im.common.exception.ValidationException;
+import com.im.common.exception.NotFoundException;
 
 import java.util.List;
 import java.util.Map;
@@ -18,9 +20,15 @@ import java.util.Map;
 public class ConversationHandler implements RequestHandler {
 
     private final IConversationManager conversationManager;
+    private final IConversationAccessChecker accessChecker;
 
     public ConversationHandler(IConversationManager conversationManager) {
+        this(conversationManager, null);
+    }
+
+    public ConversationHandler(IConversationManager conversationManager, IConversationAccessChecker accessChecker) {
         this.conversationManager = conversationManager;
+        this.accessChecker = accessChecker;
     }
 
     @Override
@@ -29,7 +37,7 @@ public class ConversationHandler implements RequestHandler {
             case "conversation.list" -> handleList(req);
             case "conversation.set" -> handleSet(req);
             case "conversation.read" -> handleRead(req);
-            default -> throw new ImException(ImErrorCode.NOT_FOUND, "unsupported: " + req.operation());
+            default -> throw new NotFoundException("unsupported: " + req.operation());
         };
     }
 
@@ -38,11 +46,12 @@ public class ConversationHandler implements RequestHandler {
         String conversationId = req.getString("conversationId");
         long readSeq = req.getLong("readSeq", 0);
 
-        if (userId == null || conversationId == null) {
-            throw new ImException(ImErrorCode.BAD_REQUEST, "userId and conversationId are required");
-        }
+        if (userId == null) throw new UnauthorizedException("not authenticated");
+        if (conversationId == null) throw new ValidationException("conversationId is required");
 
-        conversationManager.markRead(userId, conversationId, readSeq);
+        requireReadable(userId, conversationId);
+        long currentReadSeq = conversationManager.getReadSeq(userId, conversationId);
+        conversationManager.markRead(userId, conversationId, Math.max(currentReadSeq, readSeq));
         int unreadCount = conversationManager.getUnreadCount(userId, conversationId);
 
         return Map.of(
@@ -53,7 +62,7 @@ public class ConversationHandler implements RequestHandler {
 
     private Object handleList(ApiRequest req) {
         String userId = req.currentUserId();
-        if (userId == null) throw new ImException(ImErrorCode.UNAUTHORIZED, "not authenticated");
+        if (userId == null) throw new UnauthorizedException("not authenticated");
         List<Conversation> conversations = conversationManager.getConversations(userId);
         return Map.of("userId", userId, "conversations", conversations, "count", conversations.size());
     }
@@ -61,9 +70,9 @@ public class ConversationHandler implements RequestHandler {
     private Object handleSet(ApiRequest req) {
         String userId = req.currentUserId();
         String conversationId = req.getString("conversationId");
-        if (userId == null || conversationId == null) {
-            throw new ImException(ImErrorCode.BAD_REQUEST, "userId and conversationId are required");
-        }
+        if (userId == null) throw new UnauthorizedException("not authenticated");
+        if (conversationId == null) throw new ValidationException("conversationId is required");
+        requireReadable(userId, conversationId);
         if (req.params().containsKey("pinned")) {
             conversationManager.setPinned(userId, conversationId, req.getBoolean("pinned", false));
         }
@@ -71,5 +80,11 @@ public class ConversationHandler implements RequestHandler {
             conversationManager.setRecvMsgOpt(userId, conversationId, req.getInt("recvMsgOpt", 0));
         }
         return Map.of("conversationId", conversationId, "status", "OK");
+    }
+
+    private void requireReadable(String userId, String conversationId) {
+        if (accessChecker != null) {
+            accessChecker.requireReadable(userId, conversationId);
+        }
     }
 }

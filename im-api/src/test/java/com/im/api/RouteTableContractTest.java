@@ -29,6 +29,15 @@ class RouteTableContractTest {
         assertEquals(List.of("user001|node-a|5|default"), table.offlineCalls);
     }
 
+    @Test
+    void sessionRenewalFallsBackToPlatformRenewalForLegacyImplementations() {
+        RecordingRouteTable table = new RecordingRouteTable();
+
+        table.renewOnline("user001", PlatformID.IOS, "session-1");
+
+        assertEquals(List.of(PlatformID.IOS), table.getOnlinePlatforms("user001"));
+    }
+
     private static final class RecordingRouteTable implements IRouteTable {
         private final List<String> onlineCalls = new ArrayList<>();
         private final List<String> offlineCalls = new ArrayList<>();

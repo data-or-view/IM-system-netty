@@ -20,16 +20,35 @@ public class ClusterMessage {
     private final Kind kind;
     private final String fromNodeId;
     private final Message message;
+    private final ClusterCommand command;
     private int ttl;
 
     public ClusterMessage(Kind kind, String fromNodeId, Message message) {
-        this(kind, fromNodeId, message, 3);
+        this(kind, fromNodeId, message, null, 3);
     }
 
     public ClusterMessage(Kind kind, String fromNodeId, Message message, int ttl) {
+        this(kind, fromNodeId, message, null, ttl);
+    }
+
+    public ClusterMessage(Kind kind, String fromNodeId, ClusterCommand command) {
+        this(kind, fromNodeId, null, command, 3);
+    }
+
+    public ClusterMessage(Kind kind, String fromNodeId, ClusterCommand command, int ttl) {
+        this(kind, fromNodeId, null, command, ttl);
+    }
+
+    private ClusterMessage(Kind kind, String fromNodeId, Message message, ClusterCommand command, int ttl) {
         this.kind = Objects.requireNonNull(kind, "kind");
         this.fromNodeId = Objects.requireNonNull(fromNodeId, "fromNodeId");
-        this.message = Objects.requireNonNull(message, "message");
+        if (kind == Kind.USER_MESSAGE) {
+            this.message = Objects.requireNonNull(message, "message");
+            this.command = null;
+        } else {
+            this.message = message;
+            this.command = Objects.requireNonNull(command, "command");
+        }
         this.ttl = ttl;
     }
 
@@ -38,6 +57,10 @@ public class ClusterMessage {
      */
     public static ClusterMessage fromMessage(String fromNodeId, Message message) {
         return new ClusterMessage(Kind.USER_MESSAGE, fromNodeId, message);
+    }
+
+    public static ClusterMessage fromCommand(String fromNodeId, ClusterCommand command) {
+        return new ClusterMessage(Kind.CLUSTER_COMMAND, fromNodeId, command);
     }
 
     public Kind getKind() {
@@ -50,6 +73,10 @@ public class ClusterMessage {
 
     public Message getMessage() {
         return message;
+    }
+
+    public ClusterCommand getCommand() {
+        return command;
     }
 
     public int getTtl() {
@@ -65,6 +92,9 @@ public class ClusterMessage {
      * 获取消息 topic。
      */
     public String getTopic() {
+        if (kind == Kind.CLUSTER_COMMAND) {
+            return "CLUSTER_COMMAND";
+        }
         return message.getGroupId() != null ? "GROUP_CHAT" : "SINGLE_CHAT";
     }
 

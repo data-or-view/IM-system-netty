@@ -14,6 +14,11 @@ LOG_DIR="$PROJECT_DIR/logs"
 PID_DIR="$PROJECT_DIR/bin/pids"
 CLASSPATH_JAR="$PROJECT_DIR/im-server/target/original-im-server-1.0.0-SNAPSHOT.jar"
 
+REDIS_HOST="${IM_REDIS_HOST:-127.0.0.1}"
+REDIS_PORT="${IM_REDIS_PORT:-6379}"
+REDIS_USERNAME="${IM_REDIS_USERNAME:-}"
+REDIS_PASSWORD="${IM_REDIS_PASSWORD:-difyai123456}"
+
 # Node configurations
 NODE1_ID="node-1"
 NODE1_WS_PORT=8081
@@ -52,8 +57,15 @@ fi
 
 # Check Redis
 if command -v redis-cli &>/dev/null; then
-  if ! redis-cli -h 127.0.0.1 -p 6379 ping &>/dev/null; then
-    echo "[WARN] Redis is not reachable at 127.0.0.1:6379 — cluster features (route table, message bus) will be disabled."
+  redis_cli=(redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT")
+  if [ -n "$REDIS_PASSWORD" ]; then
+    if [ -n "$REDIS_USERNAME" ]; then
+      redis_cli+=("--user" "$REDIS_USERNAME")
+    fi
+    redis_cli+=("-a" "$REDIS_PASSWORD")
+  fi
+  if ! "${redis_cli[@]}" ping &>/dev/null; then
+    echo "[WARN] Redis is not reachable at $REDIS_HOST:$REDIS_PORT — cluster features may fail."
   else
     echo "[OK] Redis is reachable"
   fi
@@ -96,6 +108,10 @@ start_node() {
     "-Dim.node.id=$node_id" \
     "-Dim.ws.port=$ws_port" \
     "-Dim.http.port=$http_port" \
+    "-Dim.redis.host=$REDIS_HOST" \
+    "-Dim.redis.port=$REDIS_PORT" \
+    "-Dim.redis.username=$REDIS_USERNAME" \
+    "-Dim.redis.password=$REDIS_PASSWORD" \
     $extra_opts \
     -jar "$JAR" \
     > "$log_file" 2>&1 &

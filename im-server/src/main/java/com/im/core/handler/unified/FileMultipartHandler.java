@@ -3,8 +3,8 @@ package com.im.core.handler.unified;
 import com.im.api.ApiRequest;
 import com.im.api.IFileStorageService.PartInfo;
 import com.im.api.RequestHandler;
-import com.im.common.enums.ImErrorCode;
-import com.im.common.exception.ImException;
+import com.im.common.exception.ValidationException;
+import com.im.common.exception.NotFoundException;
 import com.im.infrastructure.storage.usecase.MultipartUploadUseCase;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,7 +35,7 @@ public class FileMultipartHandler implements RequestHandler {
             case "file.multipart.upload" -> handleUpload(req);
             case "file.multipart.complete" -> handleComplete(req);
             case "file.multipart.abort" -> handleAbort(req);
-            default -> throw new ImException(ImErrorCode.NOT_FOUND, "unsupported: " + req.operation());
+            default -> throw new NotFoundException("unsupported: " + req.operation());
         };
     }
 
@@ -43,7 +43,7 @@ public class FileMultipartHandler implements RequestHandler {
         String fileName = req.getString("fileName");
         String mimeType = req.getString("mimeType");
         if (fileName == null || mimeType == null) {
-            throw new ImException(ImErrorCode.BAD_REQUEST, "fileName and mimeType are required");
+            throw new ValidationException("fileName and mimeType are required");
         }
         MultipartUploadUseCase.InitResult result = multipartUploadUseCase.initiateUpload(fileName, mimeType);
         log.info("Multipart init: fileId={}, uploadId={}", result.fileId(), result.uploadId());
@@ -55,7 +55,7 @@ public class FileMultipartHandler implements RequestHandler {
         int partNumber = req.getInt("partNumber", -1);
         byte[] body = req.bodyRaw();
         if (uploadId == null || partNumber < 1 || body == null || body.length == 0) {
-            throw new ImException(ImErrorCode.BAD_REQUEST, "uploadId, partNumber and body are required");
+            throw new ValidationException("uploadId, partNumber and body are required");
         }
         String etag = multipartUploadUseCase.uploadPart(uploadId, partNumber, body);
         return Map.of("etag", etag);
@@ -65,14 +65,14 @@ public class FileMultipartHandler implements RequestHandler {
     private Map<String, Object> handleComplete(ApiRequest req) {
         String uploadId = req.getString("uploadId");
         if (uploadId == null) {
-            throw new ImException(ImErrorCode.BAD_REQUEST, "uploadId is required");
+            throw new ValidationException("uploadId is required");
         }
         List<Map<String, Object>> partsMap = (List<Map<String, Object>>) req.params().get("parts");
         if (partsMap == null || partsMap.isEmpty()) {
-            throw new ImException(ImErrorCode.BAD_REQUEST, "parts list is required");
+            throw new ValidationException("parts list is required");
         }
         List<PartInfo> parts = partsMap.stream()
-                .map(m -> new PartInfo(((Number) m.get("partNumber")).intValue(), (String) m.get("etag")))
+                .map(this::toPartInfo)
                 .toList();
         MultipartUploadUseCase.CompleteResult result = multipartUploadUseCase.completeUpload(uploadId, parts);
         log.info("Multipart complete: fileId={}, url={}", result.fileId(), result.fileUrl());
@@ -83,10 +83,22 @@ public class FileMultipartHandler implements RequestHandler {
                 "mimeType", result.mimeType());
     }
 
+    private PartInfo toPartInfo(Map<String, Object> part) {
+        Object partNumberValue = part.get("partNumber");
+        Object etagValue = part.get("etag");
+        if (!(partNumberValue instanceof Number number) || number.intValue() < 1) {
+            throw new ValidationException("partNumber is required");
+        }
+        if (!(etagValue instanceof String etag) || etag.isBlank()) {
+            throw new ValidationException("etag is required");
+        }
+        return new PartInfo(number.intValue(), etag);
+    }
+
     private Map<String, String> handleAbort(ApiRequest req) {
         String uploadId = req.getString("uploadId");
         if (uploadId == null) {
-            throw new ImException(ImErrorCode.BAD_REQUEST, "uploadId is required");
+            throw new ValidationException("uploadId is required");
         }
         multipartUploadUseCase.abortUpload(uploadId);
         log.info("Multipart aborted: uploadId={}", uploadId);

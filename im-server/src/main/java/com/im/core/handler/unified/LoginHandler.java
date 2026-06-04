@@ -2,13 +2,17 @@ package com.im.core.handler.unified;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.im.api.ApiRequest;
+import com.im.api.ClusterCommand;
+import com.im.api.ClusterMessage;
+import com.im.api.IClusterMessageBus;
 import com.im.api.IConnectionSession;
 import com.im.api.IRouteTable;
 import com.im.api.ISessionManager;
 import com.im.api.Message;
+import com.im.api.MultiLoginStrategy;
 import com.im.api.RequestHandler;
-import com.im.common.enums.ImErrorCode;
-import com.im.common.exception.ImException;
+import com.im.api.RouteBinding;
+import com.im.common.exception.ValidationException;
 import com.im.core.serialization.jackson.ObjectMapperProvider;
 import com.im.core.usecase.LoginUseCase;
 import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
@@ -32,20 +36,30 @@ public class LoginHandler implements RequestHandler {
     private final ISessionManager sessionManager;
     private final IRouteTable routeTable;
     private final String localNodeId;
+    private final IClusterMessageBus clusterMessageBus;
+    private final MultiLoginStrategy loginStrategy;
 
     public LoginHandler(LoginUseCase loginUseCase, ISessionManager sessionManager,
                         IRouteTable routeTable, String localNodeId) {
+        this(loginUseCase, sessionManager, routeTable, localNodeId, null, MultiLoginStrategy.ALLOW_MULTIPLE);
+    }
+
+    public LoginHandler(LoginUseCase loginUseCase, ISessionManager sessionManager,
+                        IRouteTable routeTable, String localNodeId,
+                        IClusterMessageBus clusterMessageBus, MultiLoginStrategy loginStrategy) {
         this.loginUseCase = loginUseCase;
         this.sessionManager = sessionManager;
         this.routeTable = routeTable;
         this.localNodeId = localNodeId;
+        this.clusterMessageBus = clusterMessageBus;
+        this.loginStrategy = loginStrategy != null ? loginStrategy : MultiLoginStrategy.ALLOW_MULTIPLE;
     }
 
     @Override
     public Object handle(ApiRequest req) {
         String userId = req.getString("userId");
         if (userId == null || userId.isBlank()) {
-            throw new ImException(ImErrorCode.BAD_REQUEST, "userId is required");
+            throw new ValidationException("userId is required");
         }
 
         int platformId = req.getInt("platformId", 0);
@@ -72,6 +86,7 @@ public class LoginHandler implements RequestHandler {
                 int boundPlatformId = boundSession != null ? boundSession.getPlatformId() : platformId;
                 routeTable.online(userId, localNodeId, boundPlatformId, sessionId);
                 routeTable.setOnline(userId, boundPlatformId);
+                sendRemoteKickCommands(userId, boundPlatformId, sessionId);
             }
         }
 
@@ -96,5 +111,25 @@ public class LoginHandler implements RequestHandler {
                 "refreshToken", result.refreshToken() != null ? result.refreshToken() : "",
                 "expiresIn", 7200,
                 "platformId", platformId);
+    }
+
+    private void sendRemoteKickCommands(String userId, int platformId, String currentSessionId) {
+        if (clusterMessageBus == null || routeTable == null || loginStrategy == MultiLoginStrategy.ALLOW_MULTIPLE) {
+            return;
+        }
+        for (RouteBinding binding : routeTable.lookupAllBindings(userId)) {
+            if (binding.nodeId().equals(localNodeId) || binding.sessionId().equals(currentSessionId)) {
+                continue;
+            }
+            if (loginStrategy == MultiLoginStrategy.SAME_TERM_KICK && binding.platformId() != platformId) {
+                continue;
+            }
+            if (loginStrategy == MultiLoginStrategy.REJECT_NEW) {
+                continue;
+            }
+            ClusterCommand command = ClusterCommand.kickSession(
+                    userId, binding.platformId(), binding.sessionId(), loginStrategy.name());
+            clusterMessageBus.sendToNode(ClusterMessage.fromCommand(localNodeId, command), binding.nodeId());
+        }
     }
 }

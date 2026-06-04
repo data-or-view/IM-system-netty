@@ -1,8 +1,7 @@
 package com.im.core.auth;
 
 import com.im.api.IAuthenticator;
-import com.im.common.exception.ImException;
-import com.im.common.enums.ImErrorCode;
+import com.im.common.exception.UnauthorizedException;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtParser;
 import io.jsonwebtoken.Jwts;
@@ -79,12 +78,12 @@ public class JwtAuthenticator implements IAuthenticator {
         // 验证 refresh token
         Claims claims = parseToken(refreshToken);
         if (claims == null) {
-            throw new ImException(ImErrorCode.UNAUTHORIZED, "invalid refresh token");
+            throw new UnauthorizedException("invalid refresh token");
         }
 
         // 检查 typ 标记，必须是 refresh token
         if (!REFRESH_TYP.equals(claims.get(CLAIM_TYP, String.class))) {
-            throw new ImException(ImErrorCode.UNAUTHORIZED, "not a refresh token");
+            throw new UnauthorizedException("not a refresh token");
         }
 
         String userId = claims.get(CLAIM_UID, String.class);
@@ -107,11 +106,11 @@ public class JwtAuthenticator implements IAuthenticator {
     public String authenticate(String token) {
         Claims claims = parseToken(token);
         if (claims == null) {
-            throw new ImException(ImErrorCode.UNAUTHORIZED, "invalid token");
+            throw new UnauthorizedException("invalid token");
         }
         String userId = claims.get(CLAIM_UID, String.class);
         if (userId == null) {
-            throw new ImException(ImErrorCode.UNAUTHORIZED, "token missing userId");
+            throw new UnauthorizedException("token missing userId");
         }
         return userId;
     }

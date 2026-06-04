@@ -1,10 +1,9 @@
 package com.im.core.seq;
 
 import com.im.api.ISequenceManager;
+import com.im.common.exception.PersistenceExceptions;
 import com.im.core.redis.RedisConfiguration;
 import io.lettuce.core.cluster.api.async.RedisClusterAsyncCommands;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.concurrent.TimeUnit;
 
@@ -16,13 +15,9 @@ import java.util.concurrent.TimeUnit;
  *
  * <p>Key 格式：{@code im:seq:{conversationId}}</p>
  *
- * <h3>降级策略</h3>
- * Redis 不可用时，nextSequence 降级返回 {@link System#currentTimeMillis()}，
- * 保证业务不中断（但会导致 seq 乱序，仅作为容错兜底）。
+ * <p>Redis 不可用时必须抛出持久化异常，避免集群下生成乱序或不可恢复的消息序号。</p>
  */
 public class RedisSequenceManager implements ISequenceManager {
-
-    private static final Logger log = LoggerFactory.getLogger(RedisSequenceManager.class);
 
     private static final String KEY_PREFIX = "im:seq:";
     private static final long REDIS_TIMEOUT_MS = 3000;
@@ -31,7 +26,6 @@ public class RedisSequenceManager implements ISequenceManager {
 
     public RedisSequenceManager(RedisConfiguration redisConfig) {
         this.async = redisConfig.async();
-        log.info("RedisSequenceManager initialized");
     }
 
     @Override
@@ -40,14 +34,11 @@ public class RedisSequenceManager implements ISequenceManager {
             String key = KEY_PREFIX + conversationId;
             Long result = async.incr(key).get(REDIS_TIMEOUT_MS, TimeUnit.MILLISECONDS);
             if (result == null) {
-                log.error("Redis INCR returned null for key={}", key);
-                return System.currentTimeMillis();
+                throw new IllegalStateException("Redis INCR returned null for key=" + key);
             }
             return result;
         } catch (Exception e) {
-            log.error("Redis INCR failed for conversation {}: {} (fallback to timestamp)",
-                    conversationId, e.getMessage());
-            return System.currentTimeMillis();
+            throw PersistenceExceptions.redis("allocate message sequence", e);
         }
     }
 
@@ -58,9 +49,7 @@ public class RedisSequenceManager implements ISequenceManager {
             String result = async.get(key).get(REDIS_TIMEOUT_MS, TimeUnit.MILLISECONDS);
             return result != null ? Long.parseLong(result) : 0;
         } catch (Exception e) {
-            log.warn("Redis GET failed for conversation {}: {} (return 0)",
-                    conversationId, e.getMessage());
-            return 0;
+            throw PersistenceExceptions.redis("get maximum message sequence", e);
         }
     }
 }

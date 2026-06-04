@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -55,6 +56,26 @@ class DeliveryConsumerTest {
         } finally {
             consumer.stop();
             sessionManager.clear();
+        }
+    }
+
+    @Test
+    void skipsExpiredRemoteRouteBinding() throws Exception {
+        TestMessageQueue queue = new TestMessageQueue();
+        TestRouteTable routeTable = new TestRouteTable("node-a");
+        RecordingClusterMessageBus bus = new RecordingClusterMessageBus();
+        routeTable.bindings.put("u2", List.of(new RouteBinding(
+                "u2", "node-b", PlatformID.IOS, "s1", System.currentTimeMillis() - 1)));
+        DeliveryConsumer consumer = new DeliveryConsumer(queue, new SessionManager(), routeTable, bus, "node-a");
+
+        try {
+            consumer.start();
+            queue.handler(MessageQueueTopics.DELIVER).onMessage(
+                    Message.createSingle("u1", "u2", "c1", 101, "{\"text\":\"hi\"}", 1));
+
+            assertNull(bus.awaitSent(), "expired route binding must not be forwarded");
+        } finally {
+            consumer.stop();
         }
     }
 
@@ -176,6 +197,44 @@ class DeliveryConsumerTest {
 
         @Override
         public void unsubscribe(String topic, com.im.api.ClusterMessageHandler handler) {
+        }
+    }
+
+    private static final class RecordingClusterMessageBus implements IClusterMessageBus {
+        private final CopyOnWriteArrayList<ClusterMessage> sent = new CopyOnWriteArrayList<>();
+
+        @Override
+        public void start() {
+        }
+
+        @Override
+        public void stop() {
+        }
+
+        @Override
+        public void sendToNode(ClusterMessage message, String targetNodeId) {
+            sent.add(message);
+        }
+
+        @Override
+        public void broadcast(ClusterMessage msg) {
+            sent.add(msg);
+        }
+
+        @Override
+        public void subscribe(String topic, com.im.api.ClusterMessageHandler handler) {
+        }
+
+        @Override
+        public void unsubscribe(String topic, com.im.api.ClusterMessageHandler handler) {
+        }
+
+        ClusterMessage awaitSent() throws InterruptedException {
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+            while (sent.isEmpty() && System.nanoTime() < deadline) {
+                Thread.sleep(10);
+            }
+            return sent.isEmpty() ? null : sent.getFirst();
         }
     }
 }

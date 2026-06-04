@@ -186,6 +186,26 @@ public class SessionManager implements ISessionManager {
         log.info("All sessions cleared");
     }
 
+    @Override
+    public void forceLogout(String userId) {
+        getSessionsByUserId(userId).forEach(session -> session.getConnection().close());
+    }
+
+    @Override
+    public void forceLogout(String userId, int platformId) {
+        getSessionsByUserId(userId).stream()
+                .filter(session -> platformId == -1 || session.getPlatformId() == platformId)
+                .forEach(session -> session.getConnection().close());
+    }
+
+    @Override
+    public void forceLogoutSession(String userId, int platformId, String sessionId) {
+        getSessionsByUserId(userId).stream()
+                .filter(session -> session.getPlatformId() == platformId)
+                .filter(session -> session.getSessionId().equals(sessionId))
+                .forEach(session -> session.getConnection().close());
+    }
+
     /**
      * 向被踢 session 发送踢出通知。
      * 格式：{"op":"kicked","code":0,"data":{"reason":"SAME_TERM_KICK"}}

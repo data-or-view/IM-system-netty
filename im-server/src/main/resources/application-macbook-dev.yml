@@ -27,7 +27,8 @@ im:
   redis:
     host: "127.0.0.1"
     port: 6379
-    password: ""
+    username: ""
+    password: "difyai123456"
     database: 0
 
   # ── MinIO ──
@@ -36,4 +37,3 @@ im:
     access-key: "myuser"
     secret-key: "mysecret123"
     bucket: "im-system"
-

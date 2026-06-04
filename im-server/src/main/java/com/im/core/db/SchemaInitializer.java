@@ -1,5 +1,6 @@
 package com.im.core.db;
 
+import com.im.common.exception.DatabasePersistenceException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -88,7 +89,7 @@ public final class SchemaInitializer {
                     missing.size(), String.join(", ", missing));
         } catch (Exception e) {
             log.error("Schema initialization failed", e);
-            throw new RuntimeException("Failed to initialize database schema", e);
+            throw new DatabasePersistenceException("Failed to initialize database schema", e);
         }
     }
 

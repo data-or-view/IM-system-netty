@@ -15,6 +15,11 @@
 
     <dependencies>
         <dependency>
+            <groupId>com.im</groupId>
+            <artifactId>im-infrastructure-common</artifactId>
+        </dependency>
+
+        <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>
         </dependency>
