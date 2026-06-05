@@ -3,7 +3,9 @@ package com.im.bootstrap.ws;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.im.api.ApiRequest;
+import com.im.api.ImHeaders;
 import com.im.api.Operation;
+import com.im.api.ProtocolFields;
 import com.im.api.ResponseWriter;
 import com.im.bootstrap.DispatchSubmitter;
 import com.im.common.trace.RequestIds;
@@ -78,7 +80,7 @@ public class WsRequestAdapter extends SimpleChannelInboundHandler<WebSocketFrame
         }
 
         // 提取操作名 → 解析为 Operation 枚举
-        String opStr = raw.containsKey("op") ? raw.get("op").toString() : null;
+        String opStr = raw.containsKey(ProtocolFields.OP) ? raw.get(ProtocolFields.OP).toString() : null;
         if (opStr == null || opStr.isBlank()) {
             log.warn("Missing 'op' in WS frame from {}", ctx.channel().remoteAddress());
             WsResponseWriter.writeProtocolError(ctx, "missing 'op' field");
@@ -93,7 +95,7 @@ public class WsRequestAdapter extends SimpleChannelInboundHandler<WebSocketFrame
 
         // 提取序列号
         int seq = 0;
-        Object seqObj = raw.get("seq");
+        Object seqObj = raw.get(ProtocolFields.SEQ);
         if (seqObj instanceof Number) {
             seq = ((Number) seqObj).intValue();
         }
@@ -108,10 +110,10 @@ public class WsRequestAdapter extends SimpleChannelInboundHandler<WebSocketFrame
 
         // 提取业务参数（移除 op/seq 后剩余字段）
         Map<String, Object> params = new HashMap<>(raw);
-        params.remove("op");
-        params.remove("seq");
-        Object requestIdObj = params.remove("_requestId");
-        Object traceIdObj = params.remove("_traceId");
+        params.remove(ProtocolFields.OP);
+        params.remove(ProtocolFields.SEQ);
+        Object requestIdObj = params.remove(ProtocolFields.CLIENT_REQUEST_ID);
+        Object traceIdObj = params.remove(ProtocolFields.CLIENT_TRACE_ID);
         String requestId = RequestIds.firstNonBlank(
                 requestIdObj != null ? requestIdObj.toString() : null,
                 traceIdObj != null ? traceIdObj.toString() : null);
@@ -121,11 +123,11 @@ public class WsRequestAdapter extends SimpleChannelInboundHandler<WebSocketFrame
 
         // 提取协议头部（Authorization 等）
         Map<String, String> headers = new HashMap<>();
-        if (params.containsKey("Authorization")) {
-            headers.put("Authorization", params.get("Authorization").toString());
-            params.remove("Authorization");
+        if (params.containsKey(ImHeaders.AUTHORIZATION)) {
+            headers.put(ImHeaders.AUTHORIZATION, params.get(ImHeaders.AUTHORIZATION).toString());
+            params.remove(ImHeaders.AUTHORIZATION);
         }
-        headers.put("X-Request-Id", requestId);
+        headers.put(ImHeaders.REQUEST_ID, requestId);
 
         // 创建 ResponseWriter + ApiRequest 并提交到虚拟线程
         ResponseWriter responseWriter = new WsResponseWriter(ctx, seq, operation.opName(), requestId);

@@ -2,6 +2,7 @@ package com.im.bootstrap.ws;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.im.api.Message;
+import com.im.api.ProtocolFields;
 import com.im.core.serialization.jackson.ObjectMapperProvider;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
@@ -47,21 +48,21 @@ public class MessageEncoder extends MessageToMessageEncoder<Message> {
     protected void encode(ChannelHandlerContext ctx, Message msg, List<Object> out) {
         try {
             Map<String, Object> data = new LinkedHashMap<>();
-            data.put("messageId", msg.getMessageId());
-            data.put("sequenceId", msg.getSequenceId());
-            data.put("timestamp", msg.getTimestamp());
-            data.put("fromUserId", msg.getFromUserId());
-            data.put("toUserId", msg.getToUserId());
-            data.put("groupId", msg.getGroupId());
-            data.put("conversationId", msg.getConversationId());
-            data.put("contentType", msg.getContentType());
-            data.put("content", msg.getContent());
-            data.put("messageSeq", msg.getMessageSeq());
-            data.put("status", msg.getStatus());
+            data.put(ProtocolFields.MESSAGE_ID, msg.getMessageId());
+            data.put(ProtocolFields.SEQUENCE_ID, msg.getSequenceId());
+            data.put(ProtocolFields.TIMESTAMP, msg.getTimestamp());
+            data.put(ProtocolFields.FROM_USER_ID, msg.getFromUserId());
+            data.put(ProtocolFields.TO_USER_ID, msg.getToUserId());
+            data.put(ProtocolFields.GROUP_ID, msg.getGroupId());
+            data.put(ProtocolFields.CONVERSATION_ID, msg.getConversationId());
+            data.put(ProtocolFields.CONTENT_TYPE, msg.getContentType());
+            data.put(ProtocolFields.CONTENT, msg.getContent());
+            data.put(ProtocolFields.MESSAGE_SEQ, msg.getMessageSeq());
+            data.put(ProtocolFields.STATUS, msg.getStatus());
 
             Map<String, Object> envelope = new LinkedHashMap<>();
-            envelope.put("op", "message");
-            envelope.put("data", data);
+            envelope.put(ProtocolFields.OP, ProtocolFields.OP_MESSAGE);
+            envelope.put(ProtocolFields.DATA, data);
 
             String json = MAPPER.writeValueAsString(envelope);
             out.add(new TextWebSocketFrame(json));

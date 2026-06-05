@@ -3,6 +3,7 @@ package com.im.core.handler.unified;
 import com.im.api.ApiRequest;
 import com.im.api.IAuthenticator;
 import com.im.api.IConnectionSession;
+import com.im.api.ImHeaders;
 import com.im.api.IRouteTable;
 import com.im.api.ISessionManager;
 import com.im.api.RequestHandler;
@@ -91,12 +92,12 @@ public class HeartbeatHandler implements RequestHandler {
         if (authenticator == null || routeTable == null || localNodeId == null) {
             return;
         }
-        String token = req.header("Authorization");
+        String token = req.header(ImHeaders.AUTHORIZATION);
         if (token == null || token.isBlank()) {
             return;
         }
-        if (token.startsWith("Bearer ")) {
-            token = token.substring(7).trim();
+        if (token.startsWith(ImHeaders.BEARER_PREFIX)) {
+            token = token.substring(ImHeaders.BEARER_PREFIX.length()).trim();
         }
 
         try {

@@ -5,6 +5,7 @@ import com.im.api.ConnectionRef;
 import com.im.api.IConnectionSession;
 import com.im.api.ISessionManager;
 import com.im.api.MultiLoginStrategy;
+import com.im.api.ProtocolFields;
 import com.im.core.serialization.jackson.ObjectMapperProvider;
 import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 import org.slf4j.Logger;
@@ -213,11 +214,11 @@ public class SessionManager implements ISessionManager {
     private void sendKickedNotification(ConnectionSession session, String reason) {
         try {
             Map<String, Object> data = new LinkedHashMap<>();
-            data.put("reason", reason);
+            data.put(ProtocolFields.REASON, reason);
             Map<String, Object> msg = new LinkedHashMap<>();
-            msg.put("op", "kicked");
-            msg.put("code", 0);
-            msg.put("data", data);
+            msg.put(ProtocolFields.OP, ProtocolFields.OP_KICKED);
+            msg.put(ProtocolFields.CODE, 0);
+            msg.put(ProtocolFields.DATA, data);
             String json = MAPPER.writeValueAsString(msg);
             session.getConnection().write(new TextWebSocketFrame(json));
         } catch (Exception e) {

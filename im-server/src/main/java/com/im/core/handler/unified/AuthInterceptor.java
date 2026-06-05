@@ -3,6 +3,7 @@ package com.im.core.handler.unified;
 import com.im.api.ApiInterceptor;
 import com.im.api.ApiRequest;
 import com.im.api.IAuthenticator;
+import com.im.api.ImHeaders;
 import com.im.api.Operation;
 import com.im.common.exception.ImException;
 import com.im.common.exception.UnauthorizedException;
@@ -30,7 +31,7 @@ public class AuthInterceptor implements ApiInterceptor {
 
     public static final int ORDER = Integer.MIN_VALUE + 100;
 
-    private static final String TOKEN_HEADER = "Authorization";
+    private static final String TOKEN_HEADER = ImHeaders.AUTHORIZATION;
 
     private final IAuthenticator authenticator;
 
@@ -64,8 +65,8 @@ public class AuthInterceptor implements ApiInterceptor {
             log.warn("Request without token: op={}", request.operation());
             throw new UnauthorizedException("missing token");
         }
-        if (token.startsWith("Bearer ")) {
-            token = token.substring(7).trim();
+        if (token.startsWith(ImHeaders.BEARER_PREFIX)) {
+            token = token.substring(ImHeaders.BEARER_PREFIX.length()).trim();
         }
 
         // 验证

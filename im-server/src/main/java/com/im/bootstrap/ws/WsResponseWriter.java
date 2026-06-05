@@ -1,6 +1,7 @@
 package com.im.bootstrap.ws;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.im.api.ProtocolFields;
 import com.im.api.ResponseWriter;
 import com.im.common.enums.ImErrorCode;
 import com.im.core.serialization.jackson.ObjectMapperProvider;
@@ -50,14 +51,14 @@ public class WsResponseWriter implements ResponseWriter {
             return;
         }
         Map<String, Object> envelope = new LinkedHashMap<>();
-        envelope.put("op", operation + "_ack");
-        envelope.put("seq", seq);
-        envelope.put("code", 0);
+        envelope.put(ProtocolFields.OP, operation + ProtocolFields.ACK_SUFFIX);
+        envelope.put(ProtocolFields.SEQ, seq);
+        envelope.put(ProtocolFields.CODE, 0);
         if (requestId != null && !requestId.isBlank()) {
-            envelope.put("requestId", requestId);
+            envelope.put(ProtocolFields.REQUEST_ID, requestId);
         }
         if (result != null) {
-            envelope.put("data", result);
+            envelope.put(ProtocolFields.DATA, result);
         }
         writeFrame(envelope);
     }
@@ -68,15 +69,15 @@ public class WsResponseWriter implements ResponseWriter {
             return;
         }
         Map<String, Object> envelope = new LinkedHashMap<>();
-        envelope.put("op", operation + "_ack");
-        envelope.put("seq", seq);
-        envelope.put("code", code.getCode());
-        envelope.put("msg", code.getMessage());
+        envelope.put(ProtocolFields.OP, operation + ProtocolFields.ACK_SUFFIX);
+        envelope.put(ProtocolFields.SEQ, seq);
+        envelope.put(ProtocolFields.CODE, code.getCode());
+        envelope.put(ProtocolFields.MSG, code.getMessage());
         if (requestId != null && !requestId.isBlank()) {
-            envelope.put("requestId", requestId);
+            envelope.put(ProtocolFields.REQUEST_ID, requestId);
         }
         if (detail != null && !detail.isEmpty()) {
-            envelope.put("detail", detail);
+            envelope.put(ProtocolFields.DETAIL, detail);
         }
         writeFrame(envelope);
     }
@@ -92,9 +93,9 @@ public class WsResponseWriter implements ResponseWriter {
      */
     public static void writeProtocolError(ChannelHandlerContext ctx, String message) {
         Map<String, Object> envelope = new LinkedHashMap<>();
-        envelope.put("op", "error");
-        envelope.put("code", 400);
-        envelope.put("msg", message);
+        envelope.put(ProtocolFields.OP, ProtocolFields.OP_ERROR);
+        envelope.put(ProtocolFields.CODE, 400);
+        envelope.put(ProtocolFields.MSG, message);
         writeRawFrame(ctx, envelope);
     }
 

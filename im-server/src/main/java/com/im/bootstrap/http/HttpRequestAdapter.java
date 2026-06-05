@@ -3,6 +3,7 @@ package com.im.bootstrap.http;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.im.api.ApiRequest;
+import com.im.api.ImHeaders;
 import com.im.api.Operation;
 import com.im.api.ResponseWriter;
 import com.im.bootstrap.DispatchSubmitter;
@@ -108,8 +109,8 @@ public class HttpRequestAdapter extends SimpleChannelInboundHandler<FullHttpRequ
                 bodyRaw = bytes;
             } else {
                 // JSON body → 合并到 params
-                String contentType = req.headers().get("Content-Type", "");
-                if (contentType.contains("application/json")) {
+                String contentType = req.headers().get(ImHeaders.CONTENT_TYPE, "");
+                if (contentType.contains(ImHeaders.APPLICATION_JSON)) {
                     try {
                         Map<String, Object> bodyMap = MAPPER.readValue(bytes, MAP_TYPE);
                         params.putAll(bodyMap);
@@ -124,19 +125,19 @@ public class HttpRequestAdapter extends SimpleChannelInboundHandler<FullHttpRequ
 
         // 协议头部
         Map<String, String> headers = new HashMap<>();
-        headers.put("Content-Type", req.headers().get("Content-Type", ""));
-        String auth = req.headers().get("Authorization");
+        headers.put(ImHeaders.CONTENT_TYPE, req.headers().get(ImHeaders.CONTENT_TYPE, ""));
+        String auth = req.headers().get(ImHeaders.AUTHORIZATION);
         if (auth != null) {
-            headers.put("Authorization", auth);
+            headers.put(ImHeaders.AUTHORIZATION, auth);
         }
         String requestId = RequestIds.firstNonBlank(
-                req.headers().get("X-Request-Id"),
-                req.headers().get("X-Trace-Id"),
-                req.headers().get("traceparent"));
+                req.headers().get(ImHeaders.REQUEST_ID),
+                req.headers().get(ImHeaders.TRACE_ID),
+                req.headers().get(ImHeaders.TRACEPARENT));
         if (requestId == null) {
             requestId = RequestIds.next();
         }
-        headers.put("X-Request-Id", requestId);
+        headers.put(ImHeaders.REQUEST_ID, requestId);
 
         // 创建 ResponseWriter + ApiRequest 并提交到虚拟线程
         ResponseWriter responseWriter = new HttpResponseWriter(ctx, requestId);

@@ -1,6 +1,7 @@
 package com.im.core.webhook;
 
 import com.im.api.IWebhookManager;
+import com.im.api.ImHeaders;
 import com.im.common.util.IMExecutors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -59,7 +60,7 @@ public class LocalWebhookManager implements IWebhookManager {
             String url = buildUrl(event);
             HttpRequest req = HttpRequest.newBuilder()
                     .uri(URI.create(url))
-                    .header("Content-Type", "application/json")
+                    .header(ImHeaders.CONTENT_TYPE, ImHeaders.APPLICATION_JSON)
                     .timeout(BEFORE_TIMEOUT)
                     .POST(HttpRequest.BodyPublishers.ofString(payload))
                     .build();
@@ -89,7 +90,7 @@ public class LocalWebhookManager implements IWebhookManager {
         String url = buildUrl(event);
         HttpRequest req = HttpRequest.newBuilder()
                 .uri(URI.create(url))
-                .header("Content-Type", "application/json")
+                .header(ImHeaders.CONTENT_TYPE, ImHeaders.APPLICATION_JSON)
                 .timeout(AFTER_TIMEOUT)
                 .POST(HttpRequest.BodyPublishers.ofString(payload))
                 .build();

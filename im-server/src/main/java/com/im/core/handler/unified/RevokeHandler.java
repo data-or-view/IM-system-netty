@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.im.api.ApiRequest;
 import com.im.api.IConnectionSession;
 import com.im.api.ISessionManager;
+import com.im.api.ProtocolFields;
 import com.im.api.RequestHandler;
 import com.im.common.exception.UnauthorizedException;
 import com.im.common.exception.ValidationException;
@@ -61,14 +62,14 @@ public class RevokeHandler implements RequestHandler {
 
     private void pushRevokeNotification(RevokeUseCase.RevokeResult result) {
         Map<String, Object> data = new LinkedHashMap<>();
-        data.put("conversationId", result.conversationId());
-        data.put("seq", result.seq());
-        data.put("revokerId", result.revokerId());
+        data.put(ProtocolFields.CONVERSATION_ID, result.conversationId());
+        data.put(ProtocolFields.SEQ, result.seq());
+        data.put(ProtocolFields.REVOKER_ID, result.revokerId());
 
         Map<String, Object> notification = new LinkedHashMap<>();
-        notification.put("op", "msg_revoke");
-        notification.put("code", 0);
-        notification.put("data", data);
+        notification.put(ProtocolFields.OP, ProtocolFields.OP_MESSAGE_REVOKED);
+        notification.put(ProtocolFields.CODE, 0);
+        notification.put(ProtocolFields.DATA, data);
 
         String json;
         try {

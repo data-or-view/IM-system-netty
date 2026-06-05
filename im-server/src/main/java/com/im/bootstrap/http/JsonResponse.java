@@ -2,6 +2,7 @@ package com.im.bootstrap.http;
 
 import com.im.common.enums.ImErrorCode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.im.api.ImHeaders;
 import com.im.core.serialization.jackson.ObjectMapperProvider;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
@@ -20,8 +21,13 @@ import static io.netty.handler.codec.http.HttpHeaderValues.APPLICATION_JSON;
 public class JsonResponse {
 
     private static final ObjectMapper MAPPER = ObjectMapperProvider.get();
-    private static final String CORS_ALLOW_HEADERS = "Content-Type, Authorization, X-Request-Id, X-Trace-Id";
-    private static final String CORS_EXPOSE_HEADERS = "X-Request-Id";
+    private static final String CORS_ALLOW_METHODS = "GET, POST, PUT, DELETE, OPTIONS";
+    private static final String CORS_ALLOW_HEADERS = String.join(", ",
+            ImHeaders.CONTENT_TYPE,
+            ImHeaders.AUTHORIZATION,
+            ImHeaders.REQUEST_ID,
+            ImHeaders.TRACE_ID);
+    private static final String CORS_EXPOSE_HEADERS = ImHeaders.REQUEST_ID;
 
     public static void ok(ChannelHandlerContext ctx, Object data) {
         write(ctx, HttpResponseStatus.OK, data, null);
@@ -116,11 +122,11 @@ public class JsonResponse {
         resp.headers().set(HttpHeaderNames.CONTENT_TYPE, APPLICATION_JSON);
         resp.headers().set(HttpHeaderNames.CONTENT_LENGTH, content.readableBytes());
         resp.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
-        resp.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_METHODS, "GET, POST, PUT, DELETE, OPTIONS");
+        resp.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_METHODS, CORS_ALLOW_METHODS);
         resp.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_HEADERS, CORS_ALLOW_HEADERS);
         resp.headers().set(HttpHeaderNames.ACCESS_CONTROL_EXPOSE_HEADERS, CORS_EXPOSE_HEADERS);
         if (requestId != null && !requestId.isBlank()) {
-            resp.headers().set("X-Request-Id", requestId);
+            resp.headers().set(ImHeaders.REQUEST_ID, requestId);
         }
         ctx.writeAndFlush(resp).addListener(ChannelFutureListener.CLOSE);
     }
