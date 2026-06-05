@@ -70,18 +70,6 @@ public interface IAuthenticator {
     // ── 双 token 续期 ──
 
     /**
-     * Token 刷新结果。
-     *
-     * @param accessToken  新的 access token
-     * @param refreshToken 新的 refresh token（为 null 表示不轮换）
-     */
-    record TokenRefreshResult(String accessToken, String refreshToken) {
-        public boolean hasNewRefreshToken() {
-            return refreshToken != null && !refreshToken.isEmpty();
-        }
-    }
-
-    /**
      * 签发 refresh token（用于双 token 续期）。
      *
      * <p>refresh token 的有效期通常远长于 access token（如 30 天），

@@ -1,6 +1,7 @@
 package com.im.core.auth;
 
 import com.im.api.IAuthenticator;
+import com.im.api.TokenRefreshResult;
 import com.im.common.exception.UnauthorizedException;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtParser;

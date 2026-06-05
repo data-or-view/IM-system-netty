@@ -1,10 +1,12 @@
 package com.im.core.handler.unified;
 
 import com.im.api.ApiRequest;
-import com.im.api.IFileStorageService.PartInfo;
+import com.im.api.PartInfo;
 import com.im.api.RequestHandler;
 import com.im.common.exception.ValidationException;
 import com.im.common.exception.NotFoundException;
+import com.im.infrastructure.storage.usecase.MultipartUploadCompleteResult;
+import com.im.infrastructure.storage.usecase.MultipartUploadInitResult;
 import com.im.infrastructure.storage.usecase.MultipartUploadUseCase;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -45,7 +47,7 @@ public class FileMultipartHandler implements RequestHandler {
         if (fileName == null || mimeType == null) {
             throw new ValidationException("fileName and mimeType are required");
         }
-        MultipartUploadUseCase.InitResult result = multipartUploadUseCase.initiateUpload(fileName, mimeType);
+        MultipartUploadInitResult result = multipartUploadUseCase.initiateUpload(fileName, mimeType);
         log.info("Multipart init: fileId={}, uploadId={}", result.fileId(), result.uploadId());
         return Map.of("uploadId", result.uploadId(), "fileId", result.fileId());
     }
@@ -74,7 +76,7 @@ public class FileMultipartHandler implements RequestHandler {
         List<PartInfo> parts = partsMap.stream()
                 .map(this::toPartInfo)
                 .toList();
-        MultipartUploadUseCase.CompleteResult result = multipartUploadUseCase.completeUpload(uploadId, parts);
+        MultipartUploadCompleteResult result = multipartUploadUseCase.completeUpload(uploadId, parts);
         log.info("Multipart complete: fileId={}, url={}", result.fileId(), result.fileUrl());
         return Map.of(
                 "fileUrl", result.fileUrl(),

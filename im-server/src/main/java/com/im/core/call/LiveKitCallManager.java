@@ -2,6 +2,7 @@ package com.im.core.call;
 
 import com.im.api.ICallManager;
 import com.im.api.RoomInformation;
+import com.im.common.id.IdGenerator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -11,7 +12,6 @@ import java.nio.charset.StandardCharsets;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
 import java.util.Base64;
-import java.util.UUID;
 
 /**
  * LiveKit 通话管理实现。
@@ -54,7 +54,7 @@ public class LiveKitCallManager implements ICallManager {
     @Override
     public RoomInformation createRoom(String callerId, String calleeId, String roomId) {
         if (roomId == null || roomId.isBlank()) {
-            roomId = "room_" + UUID.randomUUID().toString().substring(0, 8);
+            roomId = IdGenerator.roomId();
         }
 
         String callerToken = signLiveKitToken(callerId, roomId);

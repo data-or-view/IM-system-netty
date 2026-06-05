@@ -1,6 +1,7 @@
 package com.im.bootstrap;
 
 import com.im.api.IAuthenticator;
+import com.im.api.TokenRefreshResult;
 import com.im.api.ICallManager;
 import com.im.api.IClusterMessageBus;
 import com.im.api.IConversationManager;
@@ -50,12 +51,12 @@ class DispatcherFactoryTest {
                 .forEach(op -> assertTrue(registered.contains(op), "missing handler for operation: " + op));
     }
 
-    private static DispatcherFactory.Dependencies dependencies() {
+    private static DispatcherDependencies dependencies() {
         SessionManager sessionManager = new SessionManager();
         IAuthenticator authenticator = new TestAuthenticator();
         IUserManager userManager = fake(IUserManager.class);
 
-        return new DispatcherFactory.Dependencies(
+        return new DispatcherDependencies(
                 "node-test",
                 new ServerComponentsFactory.RuntimeDependencies(
                         sessionManager,

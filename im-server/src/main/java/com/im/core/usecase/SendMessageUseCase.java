@@ -9,16 +9,14 @@ import com.im.api.Message;
 import com.im.api.MessageQueueTopics;
 import com.im.api.content.IMessageContent;
 import com.im.common.exception.ForbiddenException;
+import com.im.common.id.IdGenerator;
 import com.im.core.handler.ContentSerializer;
 import com.im.core.handler.WebhookService;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicLong;
 
 public class SendMessageUseCase {
-
-    private static final AtomicLong msgIdCounter = new AtomicLong(System.currentTimeMillis());
 
     private final IMessageQueue messageQueue;
     private final ISequenceManager sequenceManager;
@@ -40,9 +38,6 @@ public class SendMessageUseCase {
         this.webhookService = webhookService;
         this.sendPolicy = sendPolicy;
     }
-
-    public record SendMessageResult(String conversationId, long seq, String responseType) {}
-
     // ── 新接口：统一 handler 使用 ──
 
     /**
@@ -126,8 +121,7 @@ public class SendMessageUseCase {
                                   String toUserId, String groupId, IMessageContent content,
                                   String conversationId, long seq) {
         Message msg = new Message();
-        String serverMid = "srv_" + msgIdCounter.incrementAndGet();
-        msg.setMessageId(serverMid);
+        msg.setMessageId(IdGenerator.messageId());
         msg.setFromUserId(fromUserId);
         msg.setToUserId(toUserId);
         msg.setGroupId(groupId);

@@ -5,13 +5,14 @@ import { cn } from "@/lib/utils";
 
 interface LoginPageProps {
   onLogin: (userId: string, password?: string) => void;
-  onRegister: (userId: string, password?: string) => void;
+  onRegister: (params: { nickname?: string; password?: string }) => void;
   connecting: boolean;
   statusMsg: string;
 }
 
 export default function LoginPage({ onLogin, onRegister, connecting, statusMsg }: LoginPageProps) {
   const [userId, setUserId] = useState("");
+  const [nickname, setNickname] = useState("");
   const [password, setPassword] = useState("");
   const [mode, setMode] = useState<"login" | "register">("login");
 
@@ -19,11 +20,13 @@ export default function LoginPage({ onLogin, onRegister, connecting, statusMsg }
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!userId.trim() || connecting) return;
+    if (connecting) return;
     if (isLogin) {
+      if (!userId.trim()) return;
       onLogin(userId.trim(), password);
     } else {
-      onRegister(userId.trim(), password);
+      if (!password.trim()) return;
+      onRegister({ nickname: nickname.trim() || undefined, password });
     }
   };
 
@@ -33,7 +36,7 @@ export default function LoginPage({ onLogin, onRegister, connecting, statusMsg }
         <div className="mb-6 text-center">
           <h1 className="text-2xl font-bold">IM System</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {isLogin ? "输入用户 ID 登录" : "注册新用户"}
+            {isLogin ? "输入用户 ID 登录" : "注册后由服务器生成用户 ID"}
           </p>
         </div>
 
@@ -62,17 +65,26 @@ export default function LoginPage({ onLogin, onRegister, connecting, statusMsg }
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          <Input
-            placeholder="用户 ID"
-            value={userId}
-            onChange={(e) => setUserId(e.target.value)}
-            disabled={connecting}
-          />
+          {isLogin ? (
+            <Input
+              placeholder="用户 ID"
+              value={userId}
+              onChange={(e) => setUserId(e.target.value)}
+              disabled={connecting}
+            />
+          ) : (
+            <Input
+              placeholder="昵称（可选）"
+              value={nickname}
+              onChange={(e) => setNickname(e.target.value)}
+              disabled={connecting}
+            />
+          )}
 
           {!isLogin && (
             <Input
               type="password"
-              placeholder="密码（可选）"
+              placeholder="密码"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               disabled={connecting}
@@ -97,7 +109,7 @@ export default function LoginPage({ onLogin, onRegister, connecting, statusMsg }
           <Button
             type="submit"
             className="w-full"
-            disabled={!userId.trim() || connecting}
+            disabled={(isLogin ? !userId.trim() : !password.trim()) || connecting}
           >
             {connecting ? "处理中..." : isLogin ? "登录" : "注册"}
           </Button>

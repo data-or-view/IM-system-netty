@@ -6,6 +6,7 @@ import com.im.api.MessageQueueTopics;
 import com.im.api.content.ContentType;
 import com.im.api.content.SignalingContent;
 import com.im.api.SignalingAction;
+import com.im.common.id.IdGenerator;
 import com.im.common.util.IMExecutors;
 import com.im.core.handler.ContentSerializer;
 import org.slf4j.Logger;
@@ -16,7 +17,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * 通话超时管理器。
@@ -30,7 +30,6 @@ public class CallStateManager {
 
     private static final Logger log = LoggerFactory.getLogger(CallStateManager.class);
     private static final String SYSTEM_USER_ID = "im-system";
-    private static final AtomicLong msgIdCounter = new AtomicLong(System.currentTimeMillis());
 
     private final ConcurrentHashMap<String, CallSession> activeCalls = new ConcurrentHashMap<>();
     private final ScheduledExecutorService timeoutExecutor;
@@ -125,14 +124,14 @@ public class CallStateManager {
             // 发给主叫
             Message callerMsg = Message.createSingle(SYSTEM_USER_ID, callerId, null,
                     ContentType.SIGNAL.getId(), contentStr, 0);
-            callerMsg.setMessageId("srv_timeout_" + roomId + "_" + callerId);
+            callerMsg.setMessageId(IdGenerator.messageId());
             callerMsg.setTimestamp(now);
             messageQueue.publishAsync(MessageQueueTopics.DELIVER, callerMsg);
 
             // 发给被叫
             Message calleeMsg = Message.createSingle(SYSTEM_USER_ID, calleeId, null,
                     ContentType.SIGNAL.getId(), contentStr, 0);
-            calleeMsg.setMessageId("srv_timeout_" + roomId + "_" + calleeId);
+            calleeMsg.setMessageId(IdGenerator.messageId());
             calleeMsg.setTimestamp(now);
             messageQueue.publishAsync(MessageQueueTopics.DELIVER, calleeMsg);
 

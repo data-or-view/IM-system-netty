@@ -1,6 +1,7 @@
 package com.im.core.usecase;
 
 import com.im.api.IAuthenticator;
+import com.im.api.TokenRefreshResult;
 import com.im.api.IMessageStore;
 import com.im.api.IUserManager;
 import com.im.api.Message;
@@ -30,16 +31,16 @@ class LoginUseCaseCredentialTest {
         PasswordHasher hasher = new PasswordHasher();
         RegisterUseCase register = new RegisterUseCase(new UserManager(), credentials, hasher);
 
-        register.execute("alice", "Alice", "", "secret123");
+        RegisterResult registerResult = register.execute(null, "Alice", "", "secret123");
 
-        String storedHash = credentials.passwordHash("alice");
+        String storedHash = credentials.passwordHash(registerResult.userId());
         assertFalse(storedHash.contains("secret123"));
         assertTrue(hasher.matches("secret123", storedHash));
 
         LoginUseCase login = new LoginUseCase(new StubAuthenticator(), new EmptyMessageStore(), credentials, hasher);
 
-        assertThrows(UnauthorizedException.class, () -> login.execute("alice", "bad-password", 1, 0));
-        assertEquals("token-alice", login.execute("alice", "secret123", 1, 0).token());
+        assertThrows(UnauthorizedException.class, () -> login.execute(registerResult.userId(), "bad-password", 1, 0));
+        assertEquals("token-" + registerResult.userId(), login.execute(registerResult.userId(), "secret123", 1, 0).token());
     }
 
     @Test
@@ -50,17 +51,18 @@ class LoginUseCaseCredentialTest {
     }
 
     @Test
-    void existingUserWithoutHashCanInitializePasswordByRegisteringAgain() {
+    void generatedUserIdPreventsClientSideExistingUserTakeover() {
         UserManager users = new UserManager();
         users.register("alice", "Alice", "", null);
         CredentialStore credentials = new CredentialStore();
         PasswordHasher hasher = new PasswordHasher();
         RegisterUseCase register = new RegisterUseCase(users, credentials, hasher);
 
-        RegisterUseCase.RegisterResult result = register.execute("alice", "Alice", "", "secret123");
+        RegisterResult result = register.execute("alice", "Alice", "", "secret123");
 
-        assertTrue(result.alreadyExists());
-        assertTrue(hasher.matches("secret123", credentials.passwordHash("alice")));
+        assertFalse(result.alreadyExists());
+        assertTrue(result.userId().matches("usr_[0-9a-z]+_[0-9a-z]{8}"));
+        assertTrue(hasher.matches("secret123", credentials.passwordHash(result.userId())));
     }
 
     @Test

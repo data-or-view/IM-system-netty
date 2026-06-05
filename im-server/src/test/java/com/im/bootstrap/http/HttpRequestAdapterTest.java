@@ -1,6 +1,10 @@
 package com.im.bootstrap.http;
 
 import com.im.core.dispatcher.ApiDispatcher;
+import com.im.bootstrap.RequestAdmission;
+import com.im.bootstrap.RequestScope;
+import com.im.common.enums.ImErrorCode;
+import com.im.common.exception.InfrastructureException;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.handler.codec.http.DefaultFullHttpRequest;
@@ -112,6 +116,24 @@ class HttpRequestAdapterTest {
         assertEquals(HttpResponseStatus.SERVICE_UNAVAILABLE, response.status());
     }
 
+    @Test
+    void closedAdmissionReturnsServiceUnavailable() {
+        ApiDispatcher dispatcher = new ApiDispatcher();
+        EmbeddedChannel channel = new EmbeddedChannel(new HttpRequestAdapter(
+                dispatcher, new DirectExecutorService(), new ClosedAdmission()));
+        DefaultFullHttpRequest request = new DefaultFullHttpRequest(
+                HttpVersion.HTTP_1_1,
+                HttpMethod.GET,
+                "/api/user/info"
+        );
+
+        assertFalse(channel.writeInbound(request));
+
+        FullHttpResponse response = channel.readOutbound();
+        assertNotNull(response);
+        assertEquals(HttpResponseStatus.SERVICE_UNAVAILABLE, response.status());
+    }
+
     private static class DirectExecutorService extends AbstractExecutorService {
         @Override
         public void shutdown() {
@@ -147,6 +169,26 @@ class HttpRequestAdapterTest {
         @Override
         public void execute(Runnable command) {
             throw new RejectedExecutionException("executor stopped");
+        }
+    }
+
+    private static class ClosedAdmission implements RequestAdmission {
+        @Override
+        public RequestScope enter() {
+            throw new InfrastructureException(ImErrorCode.MQ_UNAVAILABLE, "closed");
+        }
+
+        @Override
+        public void open() {
+        }
+
+        @Override
+        public void closeAndDrain(java.time.Duration timeout) {
+        }
+
+        @Override
+        public boolean isOpen() {
+            return false;
         }
     }
 }

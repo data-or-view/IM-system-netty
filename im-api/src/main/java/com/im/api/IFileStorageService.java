@@ -100,9 +100,4 @@ public interface IFileStorageService {
     default void abortMultipartUpload(String bucket, String objectId, String uploadId) {
         throw new UnsupportedOperationException("abortMultipartUpload not implemented");
     }
-
-    /**
-     * 分片信息。
-     */
-    record PartInfo(int partNumber, String etag) {}
 }

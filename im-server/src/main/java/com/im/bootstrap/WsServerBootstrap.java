@@ -46,13 +46,15 @@ public class WsServerBootstrap {
      * @param connectionEventHandler 连接事件处理器
      * @param dispatcher             统一请求调度器
      * @param virtualExecutor        虚拟线程执行器
+     * @param requestAdmission       请求准入器
      * @return 绑定后的 Channel
      */
     public static Channel start(EventLoopGroup bossGroup, EventLoopGroup workerGroup,
                                 int port, boolean useEpoll,
                                 ChannelHandler connectionEventHandler,
                                 ApiDispatcher dispatcher,
-                                ExecutorService virtualExecutor) throws InterruptedException {
+                                ExecutorService virtualExecutor,
+                                RequestAdmission requestAdmission) throws InterruptedException {
         ServerBootstrap wsBootstrap = new ServerBootstrap()
                 .group(bossGroup, workerGroup)
                 .channel(useEpoll ? EpollServerSocketChannel.class : NioServerSocketChannel.class)
@@ -70,7 +72,7 @@ public class WsServerBootstrap {
                                 "/ws", null, true, 65536));
                         p.addLast(connectionEventHandler);
                         p.addLast(new MessageEncoder());
-                        p.addLast(new WsRequestAdapter(dispatcher, virtualExecutor));
+                        p.addLast(new WsRequestAdapter(dispatcher, virtualExecutor, requestAdmission));
                     }
                 });
 

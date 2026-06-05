@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class SendMessageUseCasePolicyTest {
@@ -59,13 +60,14 @@ class SendMessageUseCasePolicyTest {
         SendMessageUseCase useCase = new SendMessageUseCase(
                 queue, new FixedSequenceManager(), new WebhookService(null), policy);
 
-        SendMessageUseCase.SendMessageResult result = useCase.execute(
+        SendMessageResult result = useCase.execute(
                 Map.of(), "alice", "bob", null, new TextContent("hi"));
 
         assertEquals("single_alice_bob", result.conversationId());
         assertEquals(2, queue.published.size());
         assertEquals(MessageQueueTopics.PERSIST, queue.published.get(0).topic);
         assertEquals(MessageQueueTopics.DELIVER, queue.published.get(1).topic);
+        assertTrue(queue.published.get(0).message().getMessageId().matches("msg_[0-9a-z]+_[0-9a-z]{8}"));
     }
 
     private static final class RecordingPolicy implements IChatSendPolicy {

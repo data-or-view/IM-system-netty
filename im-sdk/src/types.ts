@@ -603,6 +603,13 @@ export interface TokenPair {
   expiresIn?: number;
 }
 
+export interface RegisterResult {
+  userId: string;
+  nickname: string;
+  faceUrl?: string;
+  status?: string;
+}
+
 export interface FileUploadResult {
   fileUrl: string;
   fileId: string;

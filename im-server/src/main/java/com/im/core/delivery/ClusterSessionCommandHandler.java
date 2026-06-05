@@ -2,6 +2,7 @@ package com.im.core.delivery;
 
 import com.im.api.ClusterCommand;
 import com.im.api.ClusterMessage;
+import com.im.api.ClusterMessageKind;
 import com.im.api.ClusterMessageHandler;
 import com.im.api.ISessionManager;
 import org.slf4j.Logger;
@@ -22,7 +23,7 @@ public class ClusterSessionCommandHandler implements ClusterMessageHandler {
 
     @Override
     public void handle(ClusterMessage msg) {
-        if (msg == null || msg.getKind() != ClusterMessage.Kind.CLUSTER_COMMAND || msg.getCommand() == null) {
+        if (msg == null || msg.getKind() != ClusterMessageKind.CLUSTER_COMMAND || msg.getCommand() == null) {
             return;
         }
 

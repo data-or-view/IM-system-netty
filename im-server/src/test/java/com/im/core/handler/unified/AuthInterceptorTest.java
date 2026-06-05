@@ -2,6 +2,7 @@ package com.im.core.handler.unified;
 
 import com.im.api.ApiRequest;
 import com.im.api.IAuthenticator;
+import com.im.api.TokenRefreshResult;
 import com.im.api.Operation;
 import com.im.api.ResponseWriter;
 import com.im.common.enums.ImErrorCode;

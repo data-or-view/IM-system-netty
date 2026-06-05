@@ -13,6 +13,7 @@ import com.im.common.exception.ValidationException;
 import com.im.common.exception.ForbiddenException;
 import com.im.core.call.CallStateManager;
 import com.im.core.handler.ContentParser;
+import com.im.core.usecase.SendMessageResult;
 import com.im.core.usecase.SendMessageUseCase;
 
 import java.util.Map;
@@ -76,7 +77,7 @@ public class ChatHandler implements RequestHandler {
         }
 
         // ── 普通消息发送 ──
-        SendMessageUseCase.SendMessageResult result = sendMessageUseCase.execute(
+        SendMessageResult result = sendMessageUseCase.execute(
                 req.params(), uid, toUserId, groupId, content);
 
         if (result == null) {

@@ -2,6 +2,7 @@ package com.im.core.handler.unified;
 
 import com.im.api.ApiRequest;
 import com.im.api.IAuthenticator;
+import com.im.api.TokenRefreshResult;
 import com.im.api.IConnectionSession;
 import com.im.api.IRouteTable;
 import com.im.api.Operation;

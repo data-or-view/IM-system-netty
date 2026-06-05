@@ -1,5 +1,9 @@
 package com.im.bootstrap.ws;
 
+import com.im.bootstrap.RequestAdmission;
+import com.im.bootstrap.RequestScope;
+import com.im.common.enums.ImErrorCode;
+import com.im.common.exception.InfrastructureException;
 import com.im.core.dispatcher.ApiDispatcher;
 import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
@@ -38,6 +42,21 @@ class WsRequestAdapterTest {
     void rejectedDispatchReturnsServiceUnavailableAck() {
         ApiDispatcher dispatcher = new ApiDispatcher();
         EmbeddedChannel channel = new EmbeddedChannel(new WsRequestAdapter(dispatcher, new RejectingExecutorService()));
+
+        assertFalse(channel.writeInbound(new TextWebSocketFrame("{\"op\":\"heartbeat\",\"seq\":7}")));
+
+        TextWebSocketFrame response = channel.readOutbound();
+        assertNotNull(response);
+        assertTrue(response.text().contains("\"op\":\"heartbeat_ack\""));
+        assertTrue(response.text().contains("\"seq\":7"));
+        assertTrue(response.text().contains("\"code\":503"));
+    }
+
+    @Test
+    void closedAdmissionReturnsServiceUnavailableAck() {
+        ApiDispatcher dispatcher = new ApiDispatcher();
+        EmbeddedChannel channel = new EmbeddedChannel(new WsRequestAdapter(
+                dispatcher, new DirectExecutorService(), new ClosedAdmission()));
 
         assertFalse(channel.writeInbound(new TextWebSocketFrame("{\"op\":\"heartbeat\",\"seq\":7}")));
 
@@ -122,6 +141,26 @@ class WsRequestAdapterTest {
         @Override
         public void execute(Runnable command) {
             throw new RejectedExecutionException("executor stopped");
+        }
+    }
+
+    private static class ClosedAdmission implements RequestAdmission {
+        @Override
+        public RequestScope enter() {
+            throw new InfrastructureException(ImErrorCode.MQ_UNAVAILABLE, "closed");
+        }
+
+        @Override
+        public void open() {
+        }
+
+        @Override
+        public void closeAndDrain(java.time.Duration timeout) {
+        }
+
+        @Override
+        public boolean isOpen() {
+            return false;
         }
     }
 }

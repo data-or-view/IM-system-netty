@@ -9,6 +9,7 @@ import com.im.api.RequestHandler;
 import com.im.common.exception.UnauthorizedException;
 import com.im.common.exception.ValidationException;
 import com.im.core.serialization.jackson.ObjectMapperProvider;
+import com.im.core.usecase.RevokeResult;
 import com.im.core.usecase.RevokeUseCase;
 import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 
@@ -48,7 +49,7 @@ public class RevokeHandler implements RequestHandler {
             throw new ValidationException("conversationId and messageSeq are required");
         }
 
-        RevokeUseCase.RevokeResult result = revokeUseCase.execute(userId, conversationId, seq, groupId);
+        RevokeResult result = revokeUseCase.execute(userId, conversationId, seq, groupId);
 
         // 推送撤回通知给在线接收方
         pushRevokeNotification(result);
@@ -60,7 +61,7 @@ public class RevokeHandler implements RequestHandler {
         );
     }
 
-    private void pushRevokeNotification(RevokeUseCase.RevokeResult result) {
+    private void pushRevokeNotification(RevokeResult result) {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put(ProtocolFields.CONVERSATION_ID, result.conversationId());
         data.put(ProtocolFields.SEQ, result.seq());

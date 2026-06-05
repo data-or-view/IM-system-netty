@@ -2,7 +2,6 @@ package com.im.core.db;
 
 import org.junit.jupiter.api.Test;
 
-import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
@@ -12,7 +11,7 @@ class MessageStateSchemaTest {
 
     @Test
     void schemaSqlDefinesReadStateAndVisibilityTablesWithComments() throws Exception {
-        String schema = Files.readString(Path.of("src/main/resources/db/schema.sql"));
+        String schema = readSchema();
 
         assertContainsComments(schema, "im_message_read_states");
         assertContainsComments(schema, "im_message_visibility");
@@ -23,28 +22,22 @@ class MessageStateSchemaTest {
     }
 
     @Test
-    void initializerDefinesReadStateAndVisibilityTablesWithComments() throws Exception {
-        Method method = SchemaInitializer.class.getDeclaredMethod("getCreateTableDDL", String.class);
-        method.setAccessible(true);
-
-        String readStateDdl = (String) method.invoke(null, "im_message_read_states");
-        String visibilityDdl = (String) method.invoke(null, "im_message_visibility");
-
-        assertContainsComments(readStateDdl, "im_message_read_states");
-        assertContainsComments(visibilityDdl, "im_message_visibility");
-        assertTrue(readStateDdl.contains("COMMENT='消息已读状态表'"));
-        assertTrue(visibilityDdl.contains("COMMENT='消息用户可见性表'"));
+    void messageTableDoesNotContainLegacyReadOrDeleteColumns() throws Exception {
+        assertNoLegacyColumns(readSchema());
     }
 
     @Test
-    void messageTableDoesNotContainLegacyReadOrDeleteColumns() throws Exception {
-        String schema = Files.readString(Path.of("src/main/resources/db/schema.sql"));
-        Method method = SchemaInitializer.class.getDeclaredMethod("getCreateTableDDL", String.class);
-        method.setAccessible(true);
-        String initializerDdl = (String) method.invoke(null, "im_messages");
+    void schemaSqlDefinesSyncTablesWithComments() throws Exception {
+        String schema = readSchema();
 
-        assertNoLegacyColumns(schema);
-        assertNoLegacyColumns(initializerDdl);
+        assertContainsComments(schema, "im_sync_versions");
+        assertContainsComments(schema, "im_sync_changes");
+        assertTrue(schema.contains("COMMENT='增量同步版本表'"));
+        assertTrue(schema.contains("COMMENT='增量同步变更日志表'"));
+    }
+
+    private static String readSchema() throws Exception {
+        return Files.readString(Path.of("src/main/resources/db/schema.sql"));
     }
 
     private static void assertNoLegacyColumns(String ddl) {

@@ -7,6 +7,7 @@ import com.im.api.ImHeaders;
 import com.im.api.IRouteTable;
 import com.im.api.ISessionManager;
 import com.im.api.RequestHandler;
+import com.im.api.TokenRefreshResult;
 import com.im.core.usecase.HeartbeatUseCase;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -72,7 +73,7 @@ public class HeartbeatHandler implements RequestHandler {
         String refreshToken = req.getString("refreshToken");
         if (refreshToken != null && !refreshToken.isBlank() && authenticator != null) {
             try {
-                IAuthenticator.TokenRefreshResult refreshResult =
+                TokenRefreshResult refreshResult =
                         authenticator.refreshAccessToken(refreshToken);
                 if (refreshResult != null) {
                     result.put("token", refreshResult.accessToken());

@@ -87,10 +87,4 @@ public class RevokeUseCase {
             return Set.of(ids.substring(revokerId.length() + 1));
         }
         return Set.of();
-    }
-
-    /**
-     * 撤回结果，包含通知所需的接收方信息。
-     */
-    public record RevokeResult(String conversationId, long seq, String revokerId, Set<String> targetUserIds) {}
-}
+    }}

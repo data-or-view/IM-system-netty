@@ -3,8 +3,7 @@ package com.im.infrastructure.storage.usecase;
 import com.im.api.IFileStorageService;
 import com.im.common.enums.ImErrorCode;
 import com.im.common.exception.ImException;
-
-import java.util.UUID;
+import com.im.common.id.IdGenerator;
 
 public class FileUploadUseCase {
 
@@ -21,9 +20,6 @@ public class FileUploadUseCase {
         this.fileStorage = fileStorage;
         this.maxFileSize = maxFileSize;
     }
-
-    public record FileUploadResult(String fileUrl, String fileId, String fileName, String mimeType, long fileSize) {}
-
     public FileUploadResult execute(String fileName, String mimeType, byte[] body) {
         if (body == null || body.length == 0) {
             throw new ImException(ImErrorCode.BAD_REQUEST, "file body is empty");
@@ -34,7 +30,7 @@ public class FileUploadUseCase {
         }
 
         String ext = extractExtension(fileName);
-        String fileId = UUID.randomUUID().toString().replace("-", "");
+        String fileId = IdGenerator.fileId();
         String objectId = "uploads/" + fileId + (ext != null ? ext : "");
 
         String fileUrl = fileStorage.upload(DEFAULT_BUCKET, objectId, body, mimeType);

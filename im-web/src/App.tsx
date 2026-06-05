@@ -91,7 +91,7 @@ function AuthGate() {
   );
 
   const handleRegister = useCallback(
-    async (userId: string, password?: string) => {
+    async (params: { nickname?: string; password?: string }) => {
       if (connectingRef.current) return;
       connectingRef.current = true;
       setConnecting(true);
@@ -110,8 +110,8 @@ function AuthGate() {
       try {
         await Promise.race([waitConnected(), timeoutPromise]);
         setStatusMsg("注册中...");
-        await storeRegister(userId, password);
-        setStatusMsg("");
+        const generatedUserId = await storeRegister(params);
+        setStatusMsg(`注册成功，你的用户 ID：${generatedUserId}`);
       } catch {
         setStatusMsg("注册失败");
       } finally {

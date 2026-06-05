@@ -7,6 +7,7 @@ import com.im.api.UserInformation;
 import com.im.common.exception.UnauthorizedException;
 import com.im.common.exception.ValidationException;
 import com.im.common.exception.NotFoundException;
+import com.im.core.usecase.RegisterResult;
 import com.im.core.usecase.RegisterUseCase;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -47,16 +48,12 @@ public class UserHandler implements RequestHandler {
     }
 
     private Object handleRegister(ApiRequest req) {
-        String userId = req.getString("userId");
-        String nickname = req.getString("nickname", userId);
+        String nickname = req.getString("nickname");
         String faceUrl = req.getString("faceUrl", "");
         String password = req.getString("password", "");
 
-        if (userId == null || userId.isBlank()) {
-            throw new ValidationException("userId is required");
-        }
-        RegisterUseCase.RegisterResult result = registerUseCase.execute(userId, nickname, faceUrl, password);
-        return Map.of("userId", userId, "nickname", result.nickname(), "status", "OK");
+        RegisterResult result = registerUseCase.execute(null, nickname, faceUrl, password);
+        return Map.of("userId", result.userId(), "nickname", result.nickname(), "status", "OK");
     }
 
     private Object handleInfo(ApiRequest req) {

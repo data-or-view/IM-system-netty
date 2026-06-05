@@ -7,6 +7,7 @@ import com.im.api.ImHeaders;
 import com.im.api.Operation;
 import com.im.api.ResponseWriter;
 import com.im.bootstrap.DispatchSubmitter;
+import com.im.bootstrap.RequestAdmission;
 import com.im.common.enums.ImErrorCode;
 import com.im.common.trace.RequestIds;
 import com.im.core.dispatcher.ApiDispatcher;
@@ -50,10 +51,18 @@ public class HttpRequestAdapter extends SimpleChannelInboundHandler<FullHttpRequ
 
     private final ApiDispatcher dispatcher;
     private final ExecutorService virtualExecutor;
+    private final RequestAdmission requestAdmission;
 
     public HttpRequestAdapter(ApiDispatcher dispatcher, ExecutorService virtualExecutor) {
+        this(dispatcher, virtualExecutor, null);
+    }
+
+    public HttpRequestAdapter(ApiDispatcher dispatcher,
+                              ExecutorService virtualExecutor,
+                              RequestAdmission requestAdmission) {
         this.dispatcher = dispatcher;
         this.virtualExecutor = virtualExecutor;
+        this.requestAdmission = requestAdmission;
     }
 
     @Override
@@ -143,7 +152,11 @@ public class HttpRequestAdapter extends SimpleChannelInboundHandler<FullHttpRequ
         ResponseWriter responseWriter = new HttpResponseWriter(ctx, requestId);
         ApiRequest request = new ApiRequest(operation, params, headers, responseWriter, bodyRaw);
         request.setAttribute(ApiRequest.ATTR_REQUEST_ID, requestId);
-        DispatchSubmitter.submit(dispatcher, virtualExecutor, request, log);
+        if (requestAdmission == null) {
+            DispatchSubmitter.submit(dispatcher, virtualExecutor, request, log);
+        } else {
+            DispatchSubmitter.submit(dispatcher, virtualExecutor, requestAdmission, request, log);
+        }
     }
 
     private static String decodeURI(String s) {

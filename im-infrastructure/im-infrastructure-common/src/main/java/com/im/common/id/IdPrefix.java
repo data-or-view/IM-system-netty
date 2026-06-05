@@ -6,6 +6,8 @@ package com.im.common.id;
 public final class IdPrefix {
 
     public static final String GROUP = "grp";
+    public static final String USER = "usr";
+    public static final String FILE = "file";
     public static final String ROOM = "room";
     public static final String MESSAGE = "msg";
     public static final String SESSION = "sess";

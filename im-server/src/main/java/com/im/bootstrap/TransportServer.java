@@ -35,6 +35,7 @@ final class TransportServer implements Lifecycle {
     private final ConnectionEventHandler connectionEventHandler;
     private final ApiDispatcher dispatcher;
     private final ExecutorService virtualExecutor;
+    private final RequestAdmission requestAdmission;
 
     private EventLoopGroup bossGroup;
     private EventLoopGroup workerGroup;
@@ -47,11 +48,21 @@ final class TransportServer implements Lifecycle {
                     ConnectionEventHandler connectionEventHandler,
                     ApiDispatcher dispatcher,
                     ExecutorService virtualExecutor) {
+        this(config, sessionManager, connectionEventHandler, dispatcher, virtualExecutor, null);
+    }
+
+    TransportServer(Config config,
+                    ISessionManager sessionManager,
+                    ConnectionEventHandler connectionEventHandler,
+                    ApiDispatcher dispatcher,
+                    ExecutorService virtualExecutor,
+                    RequestAdmission requestAdmission) {
         this.config = config;
         this.sessionManager = sessionManager;
         this.connectionEventHandler = connectionEventHandler;
         this.dispatcher = dispatcher;
         this.virtualExecutor = virtualExecutor;
+        this.requestAdmission = requestAdmission;
     }
 
     @Override
@@ -107,7 +118,7 @@ final class TransportServer implements Lifecycle {
         }
         wsChannel = WsServerBootstrap.start(bossGroup, workerGroup,
                 config.getInt("im.ws.port", 8081), useEpoll,
-                connectionEventHandler, dispatcher, virtualExecutor);
+                connectionEventHandler, dispatcher, virtualExecutor, requestAdmission);
     }
 
     private void startHttpIfEnabled(boolean useEpoll) throws Exception {
@@ -116,7 +127,7 @@ final class TransportServer implements Lifecycle {
         }
         httpChannel = HttpServerBootstrap.start(bossGroup, workerGroup,
                 config.getInt("im.http.port", 8082), useEpoll,
-                new com.im.bootstrap.http.HttpRequestAdapter(dispatcher, virtualExecutor));
+                new com.im.bootstrap.http.HttpRequestAdapter(dispatcher, virtualExecutor, requestAdmission));
     }
 
     private void closeChannels() {

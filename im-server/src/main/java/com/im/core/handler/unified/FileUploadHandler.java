@@ -3,6 +3,7 @@ package com.im.core.handler.unified;
 import com.im.api.ApiRequest;
 import com.im.api.RequestHandler;
 import com.im.common.exception.ValidationException;
+import com.im.infrastructure.storage.usecase.FileUploadResult;
 import com.im.infrastructure.storage.usecase.FileUploadUseCase;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -42,7 +43,7 @@ public class FileUploadHandler implements RequestHandler {
             throw new ValidationException("mimeType is required");
         }
 
-        FileUploadUseCase.FileUploadResult result = fileUploadUseCase.execute(fileName, mimeType, body);
+        FileUploadResult result = fileUploadUseCase.execute(fileName, mimeType, body);
 
         log.info("File uploaded: fileId={}, fileName={}, size={}, url={}",
                 result.fileId(), result.fileName(), result.fileSize(), result.fileUrl());

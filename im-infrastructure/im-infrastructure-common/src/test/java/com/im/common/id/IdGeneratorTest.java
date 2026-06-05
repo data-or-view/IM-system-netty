@@ -15,6 +15,15 @@ class IdGeneratorTest {
     }
 
     @Test
+    void userFileMessageRoomAndSessionIdsUseCentralizedPrefixes() {
+        assertTrue(IdGenerator.userId().matches("usr_[0-9a-z]+_[0-9a-z]{8}"));
+        assertTrue(IdGenerator.fileId().matches("file_[0-9a-z]+_[0-9a-z]{8}"));
+        assertTrue(IdGenerator.messageId().matches("msg_[0-9a-z]+_[0-9a-z]{8}"));
+        assertTrue(IdGenerator.roomId().matches("room_[0-9a-z]+_[0-9a-z]{8}"));
+        assertTrue(IdGenerator.sessionId().matches("sess_[0-9a-z]+_[0-9a-z]{8}"));
+    }
+
+    @Test
     void generatedIdsAreNotConstant() {
         assertNotEquals(IdGenerator.groupId(), IdGenerator.groupId());
     }

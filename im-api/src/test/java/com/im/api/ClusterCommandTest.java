@@ -12,7 +12,7 @@ class ClusterCommandTest {
         ClusterCommand command = ClusterCommand.kickSession("u1", PlatformID.IOS, "s1", "SAME_TERM_KICK");
         ClusterMessage message = ClusterMessage.fromCommand("node-a", command);
 
-        assertEquals(ClusterMessage.Kind.CLUSTER_COMMAND, message.getKind());
+        assertEquals(ClusterMessageKind.CLUSTER_COMMAND, message.getKind());
         assertEquals("CLUSTER_COMMAND", message.getTopic());
         assertEquals("u1", message.getCommand().userId());
         assertEquals(PlatformID.IOS, message.getCommand().platformId());

@@ -1,12 +1,11 @@
 package com.im.infrastructure.storage.usecase;
 
 import com.im.api.IFileStorageService;
-import com.im.api.IFileStorageService.PartInfo;
-import com.im.infrastructure.storage.usecase.MultipartUploadUseCase.UploadContext;
+import com.im.api.PartInfo;
+import com.im.common.id.IdGenerator;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -44,16 +43,16 @@ public class MultipartUploadUseCase {
      * @param mimeType MIME 类型
      * @return {uploadId, fileId}
      */
-    public InitResult initiateUpload(String fileName, String mimeType) {
+    public MultipartUploadInitResult initiateUpload(String fileName, String mimeType) {
         String ext = extractExtension(fileName);
-        String fileId = UUID.randomUUID().toString().replace("-", "");
+        String fileId = IdGenerator.fileId();
         String objectId = "uploads/" + fileId + (ext != null ? ext : "");
         String bucket = DEFAULT_BUCKET;
 
         String uploadId = fileStorage.initiateMultipartUpload(bucket, objectId);
         uploads.put(uploadId, new UploadContext(bucket, objectId, fileId, fileName, mimeType));
 
-        return new InitResult(uploadId, fileId);
+        return new MultipartUploadInitResult(uploadId, fileId);
     }
 
     /**
@@ -79,7 +78,7 @@ public class MultipartUploadUseCase {
      * @param parts    分片列表（需包含所有已上传的分片）
      * @return 可访问的文件 URL
      */
-    public CompleteResult completeUpload(String uploadId, List<PartInfo> parts) {
+    public MultipartUploadCompleteResult completeUpload(String uploadId, List<PartInfo> parts) {
         UploadContext ctx = uploads.remove(uploadId);
         if (ctx == null) {
             throw new IllegalArgumentException("upload not found: " + uploadId);
@@ -92,7 +91,7 @@ public class MultipartUploadUseCase {
         fileStorage.completeMultipartUpload(ctx.bucket(), ctx.objectId(), uploadId, sorted);
         String fileUrl = fileStorage.getUrl(ctx.bucket(), ctx.objectId());
 
-        return new CompleteResult(fileUrl, ctx.fileId(), ctx.fileName(), ctx.mimeType());
+        return new MultipartUploadCompleteResult(fileUrl, ctx.fileId(), ctx.fileName(), ctx.mimeType());
     }
 
     /**
@@ -112,8 +111,4 @@ public class MultipartUploadUseCase {
         int dot = fileName.lastIndexOf('.');
         if (dot < 0 || dot == fileName.length() - 1) return null;
         return fileName.substring(dot).toLowerCase();
-    }
-
-    public record InitResult(String uploadId, String fileId) {}
-    public record CompleteResult(String fileUrl, String fileId, String fileName, String mimeType) {}
-}
+    }}

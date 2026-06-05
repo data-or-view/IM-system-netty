@@ -3,7 +3,9 @@ package com.im.core.delivery;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.im.api.ClusterCommand;
+import com.im.api.ClusterCommandType;
 import com.im.api.ClusterMessage;
+import com.im.api.ClusterMessageKind;
 import com.im.api.ClusterMessageHandler;
 import com.im.api.IClusterMessageBus;
 import com.im.api.Message;
@@ -201,7 +203,7 @@ public class RedisClusterMessageBus implements IClusterMessageBus {
         root.put("kind", msg.getKind().name());
         root.put("fromNodeId", msg.getFromNodeId());
         root.put("ttl", msg.getTtl());
-        if (msg.getKind() == ClusterMessage.Kind.CLUSTER_COMMAND) {
+        if (msg.getKind() == ClusterMessageKind.CLUSTER_COMMAND) {
             root.put("command", commandToMap(msg.getCommand()));
         } else {
             Message message = msg.getMessage();
@@ -221,8 +223,8 @@ public class RedisClusterMessageBus implements IClusterMessageBus {
         String fromNodeId = (String) root.get("fromNodeId");
         int ttl = ((Number) root.get("ttl")).intValue();
 
-        ClusterMessage.Kind kind = ClusterMessage.Kind.valueOf(kindStr);
-        if (kind == ClusterMessage.Kind.CLUSTER_COMMAND) {
+        ClusterMessageKind kind = ClusterMessageKind.valueOf(kindStr);
+        if (kind == ClusterMessageKind.CLUSTER_COMMAND) {
             @SuppressWarnings("unchecked")
             Map<String, Object> commandMap = (Map<String, Object>) root.get("command");
             return new ClusterMessage(kind, fromNodeId, commandFromMap(commandMap), ttl);
@@ -244,7 +246,7 @@ public class RedisClusterMessageBus implements IClusterMessageBus {
     }
 
     private static ClusterCommand commandFromMap(Map<String, Object> map) {
-        ClusterCommand.Type type = ClusterCommand.Type.valueOf((String) map.get("type"));
+        ClusterCommandType type = ClusterCommandType.valueOf((String) map.get("type"));
         String userId = (String) map.get("userId");
         int platformId = ((Number) map.getOrDefault("platformId", -1)).intValue();
         String sessionId = (String) map.getOrDefault("sessionId", "default");

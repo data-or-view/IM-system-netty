@@ -3,9 +3,9 @@ package com.im.core.session;
 import com.im.api.IConnectionSession;
 import com.im.api.ConnectionRef;
 import com.im.api.PlatformID;
+import com.im.common.id.IdGenerator;
 
 import java.util.Objects;
-import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -33,7 +33,7 @@ public class ConnectionSession implements IConnectionSession {
     private final AtomicLong lastActiveTime;
 
     public ConnectionSession(ConnectionRef connection) {
-        this.sessionId = UUID.randomUUID().toString();
+        this.sessionId = IdGenerator.sessionId();
         this.connection = Objects.requireNonNull(connection, "connection must not be null");
         this.remoteAddress = connection.remoteAddress();
         this.creationTime = System.currentTimeMillis();

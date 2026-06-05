@@ -23,6 +23,14 @@ public final class IdGenerator {
         return next(IdPrefix.GROUP);
     }
 
+    public static String userId() {
+        return next(IdPrefix.USER);
+    }
+
+    public static String fileId() {
+        return next(IdPrefix.FILE);
+    }
+
     public static String roomId() {
         return next(IdPrefix.ROOM);
     }

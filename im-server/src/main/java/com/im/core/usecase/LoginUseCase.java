@@ -37,9 +37,6 @@ public class LoginUseCase {
         this.credentialStore = credentialStore;
         this.passwordHasher = passwordHasher;
     }
-
-    public record LoginResult(String token, String refreshToken, int platformId, List<Message> offlineMessages) {}
-
     public LoginResult execute(String userId, int platformId, int appManagerLevel) {
         return execute(userId, null, platformId, appManagerLevel);
     }

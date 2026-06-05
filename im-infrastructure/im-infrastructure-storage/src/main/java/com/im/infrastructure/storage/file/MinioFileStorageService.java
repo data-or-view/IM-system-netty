@@ -1,6 +1,7 @@
 package com.im.infrastructure.storage.file;
 
 import com.im.api.IFileStorageService;
+import com.im.api.PartInfo;
 import com.im.common.exception.FileStorageException;
 import io.minio.*;
 import io.minio.errors.*;

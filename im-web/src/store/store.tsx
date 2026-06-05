@@ -348,7 +348,7 @@ interface StoreContextType {
   state: State;
   dispatch: React.Dispatch<Action>;
   login: (userId: string, password?: string) => Promise<void>;
-  register: (userId: string, password?: string) => Promise<void>;
+  register: (params: { password?: string; nickname?: string; faceUrl?: string }) => Promise<string>;
   logout: () => void;
   sendMessage: (toUserId: string, content: string) => Promise<Message | undefined>;
   fetchConversations: () => Promise<void>;
@@ -602,10 +602,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     await hydrateAfterAuth();
   }, [hydrateAfterAuth]);
 
-  const register = useCallback(async (userId: string, password?: string) => {
-    localStorage.setItem("im_userId", userId);
-    await im.user.register(userId, password);
-    await login(userId, password);
+  const register = useCallback(async (params: { password?: string; nickname?: string; faceUrl?: string }) => {
+    const result = await im.user.register(params);
+    localStorage.setItem("im_userId", result.userId);
+    await login(result.userId, params.password);
+    return result.userId;
   }, [login]);
 
   const logout = useCallback(() => {

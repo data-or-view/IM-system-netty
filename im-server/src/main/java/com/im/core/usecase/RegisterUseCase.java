@@ -3,6 +3,7 @@ package com.im.core.usecase;
 import com.im.api.IUserManager;
 import com.im.common.exception.ImException;
 import com.im.common.exception.ValidationException;
+import com.im.common.id.IdGenerator;
 import com.im.core.auth.IPasswordHasher;
 import com.im.core.auth.IUserCredentialStore;
 
@@ -21,10 +22,10 @@ public class RegisterUseCase {
         this.credentialStore = credentialStore;
         this.passwordHasher = passwordHasher;
     }
-
-    public record RegisterResult(String userId, String nickname, String faceUrl, boolean alreadyExists) {}
-
     public RegisterResult execute(String userId, String nickname, String faceUrl, String password) {
+        userId = IdGenerator.userId();
+        nickname = nickname != null && !nickname.isBlank() ? nickname : userId;
+
         if (userManager == null) {
             return new RegisterResult(userId, nickname != null ? nickname : userId, faceUrl != null ? faceUrl : "", false);
         }

@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class GroupHandlerApplyTest {
@@ -73,6 +74,20 @@ class GroupHandlerApplyTest {
         assertEquals(true, manager.respondAgreed);
     }
 
+    @Test
+    void createGroupGeneratesGroupIdOnServerAndIgnoresClientGroupId() {
+        RecordingGroupManager manager = new RecordingGroupManager();
+        GroupHandler handler = new GroupHandler(manager);
+        ApiRequest request = request(Operation.GROUP_CREATE,
+                Map.of("groupId", "client-picked", "groupName", "demo"), "owner");
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> response = (Map<String, Object>) handler.handle(request);
+
+        assertTrue(manager.createdGroupId.matches("grp_[0-9a-z]+_[0-9a-z]{8}"));
+        assertEquals(manager.createdGroupId, response.get("groupId"));
+    }
+
     private static ApiRequest request(Operation operation, Map<String, Object> params, String userId) {
         ApiRequest request = new ApiRequest(operation, params, Map.of(), null, null);
         request.setAttribute("_uid", userId);
@@ -90,8 +105,11 @@ class GroupHandlerApplyTest {
         String respondOperatorId;
         String respondHandleMsg;
         boolean respondAgreed;
+        String createdGroupId;
 
-        @Override public void createGroup(String groupId, String ownerId, String groupName, String faceUrl, List<String> members, int groupType, int needVerification) {}
+        @Override public void createGroup(String groupId, String ownerId, String groupName, String faceUrl, List<String> members, int groupType, int needVerification) {
+            createdGroupId = groupId;
+        }
         @Override public void disbandGroup(String groupId, String operatorId) {}
         @Override public void setGroupInformation(String groupId, String groupName, String notification, String introduction, String faceUrl, int needVerification, int lookMemberInfo, int applyMemberFriend, String notificationUserId) {}
         @Override public void addMember(String groupId, String userId) {}

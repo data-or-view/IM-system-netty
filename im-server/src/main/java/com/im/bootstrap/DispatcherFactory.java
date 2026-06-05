@@ -44,7 +44,7 @@ final class DispatcherFactory {
     private DispatcherFactory() {
     }
 
-    static ApiDispatcher create(Config config, Dependencies dependencies) {
+    static ApiDispatcher create(Config config, DispatcherDependencies dependencies) {
         LoginUseCase loginUseCase = new LoginUseCase(
                 dependencies.business().authenticator(), dependencies.storage().messageStore(),
                 dependencies.business().credentialStore(), dependencies.business().passwordHasher());
@@ -84,7 +84,7 @@ final class DispatcherFactory {
     }
 
     private static void registerBusinessHandlers(ApiDispatcher dispatcher,
-                                                 Dependencies dependencies,
+                                                 DispatcherDependencies dependencies,
                                                  LoginUseCase loginUseCase,
                                                  RegisterUseCase registerUseCase,
                                                  ConversationAccessChecker conversationAccessChecker) {
@@ -115,7 +115,7 @@ final class DispatcherFactory {
     }
 
     private static void registerMessagingHandlers(ApiDispatcher dispatcher,
-                                                  Dependencies dependencies,
+                                                  DispatcherDependencies dependencies,
                                                   SendMessageUseCase sendMessageUseCase,
                                                   RevokeUseCase revokeUseCase,
                                                   ConversationAccessChecker conversationAccessChecker) {
@@ -140,13 +140,5 @@ final class DispatcherFactory {
         dispatcher.registerHandlers(new FileMultipartHandler(new MultipartUploadUseCase(fileStorage)),
                 Operation.FILE_MULTIPART_INIT, Operation.FILE_MULTIPART_UPLOAD,
                 Operation.FILE_MULTIPART_COMPLETE, Operation.FILE_MULTIPART_ABORT);
-    }
-
-    record Dependencies(String nodeId,
-                        ServerComponentsFactory.RuntimeDependencies runtime,
-                        ServerComponentsFactory.ClusterDependencies cluster,
-                        ServerComponentsFactory.BusinessDependencies business,
-                        ServerComponentsFactory.StorageDependencies storage,
-                        ServerComponentsFactory.CallDependencies call) {
     }
 }

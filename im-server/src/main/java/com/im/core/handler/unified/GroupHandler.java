@@ -51,14 +51,13 @@ public class GroupHandler implements RequestHandler {
     }
 
     private Object handleCreate(ApiRequest req) {
-        String groupId = req.getString("groupId");
+        String groupId = IdGenerator.groupId();
         String groupName = req.getString("groupName");
         String ownerId = req.currentUserId();
         if (ownerId == null) throw new UnauthorizedException("not authenticated");
         if (groupName == null || groupName.isBlank()) {
             throw new ValidationException("groupName is required");
         }
-        if (groupId == null || groupId.isBlank()) groupId = IdGenerator.groupId();
         String faceUrl = req.getString("faceUrl", "");
         int groupType = req.getInt("groupType", 0);
         int needVerification = req.getInt("needVerification", 0);

@@ -2,7 +2,7 @@ package com.im.core.handler.unified;
 
 import com.im.api.ApiRequest;
 import com.im.api.RequestHandler;
-import com.im.common.exception.ValidationException;
+import com.im.core.usecase.RegisterResult;
 import com.im.core.usecase.RegisterUseCase;
 
 import java.util.Map;
@@ -20,19 +20,14 @@ public class RegisterHandler implements RequestHandler {
 
     @Override
     public Object handle(ApiRequest req) {
-        String userId = req.getString("userId");
-        if (userId == null || userId.isBlank()) {
-            throw new ValidationException("userId is required");
-        }
-
-        String nickname = req.getString("nickname", userId);
+        String nickname = req.getString("nickname");
         String faceUrl = req.getString("faceUrl", "");
         String password = req.getString("password", "");
 
-        RegisterUseCase.RegisterResult result = registerUseCase.execute(userId, nickname, faceUrl, password);
+        RegisterResult result = registerUseCase.execute(null, nickname, faceUrl, password);
 
         return Map.of("status", "OK",
-                "userId", userId,
+                "userId", result.userId(),
                 "nickname", result.nickname() != null ? result.nickname() : "",
                 "faceUrl", result.faceUrl() != null ? result.faceUrl() : "");
     }

@@ -8,6 +8,7 @@ import com.im.api.Operation;
 import com.im.api.ProtocolFields;
 import com.im.api.ResponseWriter;
 import com.im.bootstrap.DispatchSubmitter;
+import com.im.bootstrap.RequestAdmission;
 import com.im.common.trace.RequestIds;
 import com.im.core.dispatcher.ApiDispatcher;
 import com.im.core.serialization.jackson.ObjectMapperProvider;
@@ -51,10 +52,18 @@ public class WsRequestAdapter extends SimpleChannelInboundHandler<WebSocketFrame
 
     private final ApiDispatcher dispatcher;
     private final ExecutorService virtualExecutor;
+    private final RequestAdmission requestAdmission;
 
     public WsRequestAdapter(ApiDispatcher dispatcher, ExecutorService virtualExecutor) {
+        this(dispatcher, virtualExecutor, null);
+    }
+
+    public WsRequestAdapter(ApiDispatcher dispatcher,
+                            ExecutorService virtualExecutor,
+                            RequestAdmission requestAdmission) {
         this.dispatcher = dispatcher;
         this.virtualExecutor = virtualExecutor;
+        this.requestAdmission = requestAdmission;
     }
 
     @Override
@@ -135,6 +144,10 @@ public class WsRequestAdapter extends SimpleChannelInboundHandler<WebSocketFrame
         request.setAttribute(ApiRequest.ATTR_CONNECTION_ID, NettyConnectionRef.connectionId(ctx.channel()));
         request.setAttribute(ApiRequest.ATTR_REQUEST_ID, requestId);
         request.setAttribute(ApiRequest.ATTR_WS_SEQ, seq);
-        DispatchSubmitter.submit(dispatcher, virtualExecutor, request, log);
+        if (requestAdmission == null) {
+            DispatchSubmitter.submit(dispatcher, virtualExecutor, request, log);
+        } else {
+            DispatchSubmitter.submit(dispatcher, virtualExecutor, requestAdmission, request, log);
+        }
     }
 }

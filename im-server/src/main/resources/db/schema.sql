@@ -340,7 +340,37 @@ CREATE TABLE IF NOT EXISTS im_objects (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='文件对象表';
 
 -- ============================================================
--- 15. 消息状态机说明
+-- 15. 增量同步版本表
+--
+-- 每个用户对每类实体维护一个版本号。
+-- 客户端用 lastVersion 拉取变更，避免每次全量刷新好友、群组、会话等列表。
+-- ============================================================
+CREATE TABLE IF NOT EXISTS im_sync_versions (
+    user_id      VARCHAR(64) NOT NULL COMMENT '用户ID',
+    entity_type  VARCHAR(32) NOT NULL COMMENT '实体类型: friend/group/conversation 等',
+    version      BIGINT      NOT NULL DEFAULT 0 COMMENT '该用户该实体类型的最新同步版本号',
+    PRIMARY KEY (user_id, entity_type)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='增量同步版本表';
+
+-- ============================================================
+-- 16. 增量同步变更日志表
+--
+-- 只记录“发生过变化”的实体ID和版本，让客户端按版本窗口增量追数据。
+-- 真正的实体详情仍然从对应业务表读取，避免同步日志变成第二份业务数据。
+-- ============================================================
+CREATE TABLE IF NOT EXISTS im_sync_changes (
+    id           BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '物理主键',
+    user_id      VARCHAR(64)  NOT NULL COMMENT '用户ID',
+    entity_type  VARCHAR(32)  NOT NULL COMMENT '实体类型: friend/group/conversation 等',
+    entity_id    VARCHAR(128) NOT NULL COMMENT '发生变化的业务实体ID',
+    version      BIGINT       NOT NULL DEFAULT 0 COMMENT '本次变更对应的同步版本号',
+    action       VARCHAR(8)   NOT NULL DEFAULT 'insert' COMMENT '变更动作: insert/update/delete',
+    created_at   BIGINT       NOT NULL DEFAULT 0 COMMENT '变更记录创建时间(毫秒)',
+    INDEX idx_sync_lookup (user_id, entity_type, version)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='增量同步变更日志表';
+
+-- ============================================================
+-- 17. 消息状态机说明
 -- ============================================================
 -- im_messages.status:
 --   0 = 正常

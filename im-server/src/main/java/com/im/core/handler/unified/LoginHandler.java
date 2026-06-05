@@ -14,6 +14,7 @@ import com.im.api.RequestHandler;
 import com.im.api.RouteBinding;
 import com.im.common.exception.ValidationException;
 import com.im.core.serialization.jackson.ObjectMapperProvider;
+import com.im.core.usecase.LoginResult;
 import com.im.core.usecase.LoginUseCase;
 import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 import org.slf4j.Logger;
@@ -66,7 +67,7 @@ public class LoginHandler implements RequestHandler {
         String password = req.getString("password", "");
 
         // ① 签发 token + 拉取离线消息（不注册路由）
-        LoginUseCase.LoginResult result = loginUseCase.execute(userId, password, platformId, 0);
+        LoginResult result = loginUseCase.execute(userId, password, platformId, 0);
 
         // ② 绑定 session（会触发多端登录策略检查，可能踢旧 session）
         //    HTTP 场景没有连接态，跳过 WS session 绑定。

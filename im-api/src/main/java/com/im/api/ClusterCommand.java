@@ -5,13 +5,7 @@ import java.util.Objects;
 /**
  * Cluster-scoped control command.
  */
-public record ClusterCommand(Type type, String userId, int platformId, String sessionId, String reason) {
-
-    public enum Type {
-        KICK_USER,
-        KICK_PLATFORM,
-        KICK_SESSION
-    }
+public record ClusterCommand(ClusterCommandType type, String userId, int platformId, String sessionId, String reason) {
 
     public ClusterCommand {
         Objects.requireNonNull(type, "type");
@@ -25,14 +19,14 @@ public record ClusterCommand(Type type, String userId, int platformId, String se
     }
 
     public static ClusterCommand kickUser(String userId, String reason) {
-        return new ClusterCommand(Type.KICK_USER, userId, -1, "default", reason);
+        return new ClusterCommand(ClusterCommandType.KICK_USER, userId, -1, "default", reason);
     }
 
     public static ClusterCommand kickPlatform(String userId, int platformId, String reason) {
-        return new ClusterCommand(Type.KICK_PLATFORM, userId, platformId, "default", reason);
+        return new ClusterCommand(ClusterCommandType.KICK_PLATFORM, userId, platformId, "default", reason);
     }
 
     public static ClusterCommand kickSession(String userId, int platformId, String sessionId, String reason) {
-        return new ClusterCommand(Type.KICK_SESSION, userId, platformId, sessionId, reason);
+        return new ClusterCommand(ClusterCommandType.KICK_SESSION, userId, platformId, sessionId, reason);
     }
 }

@@ -16,6 +16,7 @@ import com.im.api.ISequenceManager;
 import com.im.api.ISingleMessageStore;
 import com.im.api.IUserManager;
 import com.im.api.MultiLoginStrategy;
+import com.im.api.NodeInformation;
 import com.im.common.retry.RetryExecutor;
 import com.im.common.util.IMExecutors;
 import com.im.config.Config;
@@ -55,6 +56,9 @@ import com.im.infrastructure.storage.file.MinioFileStorageService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.net.InetAddress;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 
 /**
@@ -95,22 +99,28 @@ final class ServerComponentsFactory {
         ConsumerDependencies consumers = createConsumers(nodeId, runtime, cluster, storage, business);
         ConnectionEventHandler connectionEventHandler = new ConnectionEventHandler(
                 runtime.sessionManager(), runtime.pendingAcknowledgementManager(), cluster.routeTable(), nodeId);
-        ApiDispatcher dispatcher = DispatcherFactory.create(config, new DispatcherFactory.Dependencies(
+        RequestAdmission requestAdmission = new DefaultRequestAdmission();
+        ApiDispatcher dispatcher = DispatcherFactory.create(config, new DispatcherDependencies(
                 nodeId, runtime, cluster, business, storage, call));
         TransportServer transportServer = new TransportServer(
-                config, runtime.sessionManager(), connectionEventHandler, dispatcher, runtime.virtualExecutor());
+                config, runtime.sessionManager(), connectionEventHandler, dispatcher,
+                runtime.virtualExecutor(), requestAdmission);
 
         return new ServerComponents(new ServerRuntime(
                 cluster.nodeDiscovery(),
+                buildNodeInformation(config, nodeId),
+                requestAdmission,
+                config.getDuration("im.server.request-drain-timeout")
+                        .orElse(java.time.Duration.ofSeconds(30)),
                 cluster.clusterMessageBus(),
                 storage.messageQueue(),
                 consumers.persistenceConsumer(),
                 consumers.deliveryConsumer(),
                 transportServer,
-                connectionEventHandler,
                 call.callStateManager(),
-                runtime.pendingAcknowledgementManager(),
-                runtime.sessionManager(),
+                connectionEventHandler::shutdown,
+                runtime.pendingAcknowledgementManager()::shutdown,
+                runtime.sessionManager()::clear,
                 redisConfig,
                 runtime.virtualExecutor()));
     }
@@ -272,6 +282,20 @@ final class ServerComponentsFactory {
     private static boolean dbEnabled(Config config) {
         if (databaseFailed) return false;
         return config.getBoolean("im.db.enabled").orElse(false);
+    }
+
+    private static NodeInformation buildNodeInformation(Config config, String nodeId) {
+        String host = "127.0.0.1";
+        try {
+            host = InetAddress.getLocalHost().getHostAddress();
+        } catch (Exception ignored) {
+            // Keep startup tolerant in local/dev networks where host discovery can fail;
+            // Redis node discovery still needs a stable fallback address.
+        }
+        int servicePort = config.getBoolean("im.ws.enabled", true) ? config.getInt("im.ws.port", 8081) : 0;
+        Map<String, String> attrs = new HashMap<>();
+        attrs.put("webSocketPort", String.valueOf(servicePort));
+        return new NodeInformation(nodeId, host, servicePort, attrs);
     }
 
     record RuntimeDependencies(SessionManager sessionManager,
