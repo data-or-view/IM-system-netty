@@ -7,6 +7,7 @@ import com.im.api.UserInformation;
 import com.im.common.exception.UnauthorizedException;
 import com.im.common.exception.ValidationException;
 import com.im.common.exception.NotFoundException;
+import com.im.core.usecase.RegisterUseCase;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -23,9 +24,15 @@ public class UserHandler implements RequestHandler {
     private static final Logger log = LoggerFactory.getLogger(UserHandler.class);
 
     private final IUserManager userManager;
+    private final RegisterUseCase registerUseCase;
 
     public UserHandler(IUserManager userManager) {
+        this(userManager, new RegisterUseCase(userManager));
+    }
+
+    public UserHandler(IUserManager userManager, RegisterUseCase registerUseCase) {
         this.userManager = userManager;
+        this.registerUseCase = registerUseCase;
     }
 
     @Override
@@ -48,29 +55,8 @@ public class UserHandler implements RequestHandler {
         if (userId == null || userId.isBlank()) {
             throw new ValidationException("userId is required");
         }
-
-        boolean exists = false;
-        try {
-            var existing = userManager.getUserInformation(userId);
-            exists = existing != null;
-        } catch (NotFoundException e) {
-            exists = false;
-        }
-
-        if (!exists) {
-            userManager.register(userId, nickname, faceUrl, null);
-        }
-        if (!password.isBlank()) {
-            try {
-                var user = userManager.getUserInformation(userId);
-                if (user != null && user.getPassword() == null) {
-                    user.setPassword(password);
-                }
-            } catch (Exception e) {
-                log.warn("Failed to set password for {}: {}", userId, e.getMessage());
-            }
-        }
-        return Map.of("userId", userId, "nickname", nickname, "status", "OK");
+        RegisterUseCase.RegisterResult result = registerUseCase.execute(userId, nickname, faceUrl, password);
+        return Map.of("userId", userId, "nickname", result.nickname(), "status", "OK");
     }
 
     private Object handleInfo(ApiRequest req) {

@@ -21,13 +21,28 @@ class WsRequestAdapterTest {
         ApiDispatcher dispatcher = new ApiDispatcher();
         EmbeddedChannel channel = new EmbeddedChannel(new WsRequestAdapter(dispatcher, new RejectingExecutorService()));
 
-        assertFalse(channel.writeInbound(new TextWebSocketFrame("{\"op\":\"user.info\",\"seq\":7,\"Authorization\":\"token\"}")));
+        assertFalse(channel.writeInbound(new TextWebSocketFrame("{\"op\":\"heartbeat\",\"seq\":7}")));
+
+        TextWebSocketFrame response = channel.readOutbound();
+        assertNotNull(response);
+        assertTrue(response.text().contains("\"op\":\"heartbeat_ack\""));
+        assertTrue(response.text().contains("\"seq\":7"));
+        assertTrue(response.text().contains("\"code\":503"));
+    }
+
+
+    @Test
+    void httpOnlyOperationIsRejectedOnWebSocketBeforeDispatch() {
+        ApiDispatcher dispatcher = new ApiDispatcher();
+        EmbeddedChannel channel = new EmbeddedChannel(new WsRequestAdapter(dispatcher, new RejectingExecutorService()));
+
+        assertFalse(channel.writeInbound(new TextWebSocketFrame("{\"op\":\"user.info\",\"seq\":9,\"Authorization\":\"token\"}")));
 
         TextWebSocketFrame response = channel.readOutbound();
         assertNotNull(response);
         assertTrue(response.text().contains("\"op\":\"user.info_ack\""));
-        assertTrue(response.text().contains("\"seq\":7"));
-        assertTrue(response.text().contains("\"code\":503"));
+        assertTrue(response.text().contains("\"seq\":9"));
+        assertTrue(response.text().contains("only supports HTTP"));
     }
 
     private static class RejectingExecutorService extends AbstractExecutorService {

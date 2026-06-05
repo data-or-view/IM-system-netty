@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS im_users (
     ex                   TEXT                   COMMENT '扩展字段（JSON字符串，给开发者自定义）',
     app_manger_level     TINYINT      NOT NULL DEFAULT 0  COMMENT '管理员级别: 0=普通, 1=管理员, 2=超管',
     global_recv_msg_opt  TINYINT      NOT NULL DEFAULT 0  COMMENT '全局消息接收: 0=正常, 1=免打扰, 2=不接收',
+    password_hash        VARCHAR(255) NOT NULL DEFAULT '' COMMENT '密码哈希（PBKDF2/可升级格式）',
     status               TINYINT      NOT NULL DEFAULT 1  COMMENT '状态: 0=禁用, 1=正常',
     created_at           BIGINT       NOT NULL DEFAULT 0  COMMENT '创建时间(毫秒)',
     updated_at           BIGINT       NOT NULL DEFAULT 0  COMMENT '更新时间(毫秒)',

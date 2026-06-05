@@ -25,6 +25,8 @@ public class SignalingContent implements IMessageContent {
 
     /** 信令动作 */
     private SignalingAction action;
+    /** 通话类型：voice / video */
+    private String callType;
     /** 房间 ID */
     private String roomId;
     /** SFU room token */
@@ -50,6 +52,12 @@ public class SignalingContent implements IMessageContent {
         this.duration = duration;
     }
 
+    public SignalingContent(SignalingAction action, String callType, String roomId, String token,
+                            String sdp, String ice, int duration) {
+        this(action, roomId, token, sdp, ice, duration);
+        this.callType = callType;
+    }
+
     public SignalingContent(SignalingAction action, String roomId, String token) {
         this(action, roomId, token, null, null, 0);
     }
@@ -67,6 +75,7 @@ public class SignalingContent implements IMessageContent {
     }
 
     public SignalingAction getAction() { return action; }
+    public String getCallType() { return callType; }
     public String getRoomId() { return roomId; }
     public String getToken() { return token; }
     public String getSdp() { return sdp; }
@@ -74,6 +83,7 @@ public class SignalingContent implements IMessageContent {
     public int getDuration() { return duration; }
 
     public void setAction(SignalingAction action) { this.action = action; }
+    public void setCallType(String callType) { this.callType = callType; }
     public void setRoomId(String roomId) { this.roomId = roomId; }
     public void setToken(String token) { this.token = token; }
     public void setSdp(String sdp) { this.sdp = sdp; }

@@ -3,6 +3,9 @@ package com.im.core.usecase;
 import com.im.api.IAuthenticator;
 import com.im.api.IMessageStore;
 import com.im.api.Message;
+import com.im.common.exception.UnauthorizedException;
+import com.im.core.auth.IPasswordHasher;
+import com.im.core.auth.IUserCredentialStore;
 
 import java.time.Duration;
 import java.util.List;
@@ -20,15 +23,30 @@ public class LoginUseCase {
 
     private final IAuthenticator authenticator;
     private final IMessageStore messageStore;
+    private final IUserCredentialStore credentialStore;
+    private final IPasswordHasher passwordHasher;
 
     public LoginUseCase(IAuthenticator authenticator, IMessageStore messageStore) {
+        this(authenticator, messageStore, null, null);
+    }
+
+    public LoginUseCase(IAuthenticator authenticator, IMessageStore messageStore,
+                        IUserCredentialStore credentialStore, IPasswordHasher passwordHasher) {
         this.authenticator = authenticator;
         this.messageStore = messageStore;
+        this.credentialStore = credentialStore;
+        this.passwordHasher = passwordHasher;
     }
 
     public record LoginResult(String token, String refreshToken, int platformId, List<Message> offlineMessages) {}
 
     public LoginResult execute(String userId, int platformId, int appManagerLevel) {
+        return execute(userId, null, platformId, appManagerLevel);
+    }
+
+    public LoginResult execute(String userId, String password, int platformId, int appManagerLevel) {
+        verifyPassword(userId, password);
+
         String token = null;
         String refreshToken = null;
         if (authenticator != null) {
@@ -42,5 +60,18 @@ public class LoginUseCase {
         }
 
         return new LoginResult(token, refreshToken, platformId, offline);
+    }
+
+    private void verifyPassword(String userId, String password) {
+        if (credentialStore == null || passwordHasher == null) {
+            return;
+        }
+        if (password == null || password.isBlank()) {
+            throw new UnauthorizedException("invalid credentials");
+        }
+        String passwordHash = credentialStore.getPasswordHash(userId);
+        if (passwordHash == null || passwordHash.isBlank() || !passwordHasher.matches(password, passwordHash)) {
+            throw new UnauthorizedException("invalid credentials");
+        }
     }
 }

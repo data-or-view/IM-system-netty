@@ -3,6 +3,7 @@ package com.im.core.handler.unified;
 import com.im.api.ApiRequest;
 import com.im.api.IAuthenticator;
 import com.im.api.IConnectionSession;
+import com.im.api.IRouteTable;
 import com.im.api.ISessionManager;
 import com.im.api.RequestHandler;
 import com.im.core.usecase.HeartbeatUseCase;
@@ -30,12 +31,21 @@ public class HeartbeatHandler implements RequestHandler {
     private final HeartbeatUseCase heartbeatUseCase;
     private final ISessionManager sessionManager;
     private final IAuthenticator authenticator;
+    private final IRouteTable routeTable;
+    private final String localNodeId;
 
     public HeartbeatHandler(HeartbeatUseCase heartbeatUseCase, ISessionManager sessionManager,
                             IAuthenticator authenticator) {
+        this(heartbeatUseCase, sessionManager, authenticator, null, null);
+    }
+
+    public HeartbeatHandler(HeartbeatUseCase heartbeatUseCase, ISessionManager sessionManager,
+                            IAuthenticator authenticator, IRouteTable routeTable, String localNodeId) {
         this.heartbeatUseCase = heartbeatUseCase;
         this.sessionManager = sessionManager;
         this.authenticator = authenticator;
+        this.routeTable = routeTable;
+        this.localNodeId = localNodeId;
     }
 
     @Override
@@ -47,6 +57,8 @@ public class HeartbeatHandler implements RequestHandler {
                 session.touch();
                 if (session.isAuthenticated()) {
                     heartbeatUseCase.execute(session.getUserId(), session.getPlatformId(), session.getSessionId());
+                } else {
+                    bindSessionFromToken(req, connectionId);
                 }
             }
         }
@@ -73,5 +85,35 @@ public class HeartbeatHandler implements RequestHandler {
         }
 
         return result;
+    }
+
+    private void bindSessionFromToken(ApiRequest req, String connectionId) {
+        if (authenticator == null || routeTable == null || localNodeId == null) {
+            return;
+        }
+        String token = req.header("Authorization");
+        if (token == null || token.isBlank()) {
+            return;
+        }
+        if (token.startsWith("Bearer ")) {
+            token = token.substring(7).trim();
+        }
+
+        try {
+            String userId = authenticator.authenticate(token);
+            int platformId = req.getInt("platformId", com.im.api.PlatformID.WEB);
+            sessionManager.bindUser(connectionId, userId, platformId);
+            IConnectionSession bound = sessionManager.getByConnectionId(connectionId);
+            if (bound == null || !bound.isAuthenticated()) {
+                log.warn("Heartbeat token binding rejected: userId={}, platform={}", userId, platformId);
+                return;
+            }
+            routeTable.online(userId, localNodeId, bound.getPlatformId(), bound.getSessionId());
+            routeTable.setOnline(userId, bound.getPlatformId());
+            log.info("Heartbeat restored online route: userId={}, platform={}, session={}",
+                    userId, bound.getPlatformId(), bound.getSessionId());
+        } catch (Exception e) {
+            log.warn("Heartbeat token binding failed: {}", e.getMessage());
+        }
     }
 }

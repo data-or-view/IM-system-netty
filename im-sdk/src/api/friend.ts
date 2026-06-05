@@ -64,6 +64,13 @@ export class FriendAPI {
       .then((data) => data.applies ?? []);
   }
 
+  /** 收到的好友申请列表 */
+  receivedApplyList(onlyPending = true): Promise<FriendApply[]> {
+    return requireHttp(this.transport).get<{ applies?: FriendApply[] }>("/api/friend/apply/received", {
+      onlyPending,
+    }).then((data) => data.applies ?? []);
+  }
+
   /** 未处理的好友申请数量 */
   unhandledApplyCount(): Promise<number> {
     return requireHttp(this.transport).get<{ count?: number } | number>("/api/friend/apply/unhandled/count")

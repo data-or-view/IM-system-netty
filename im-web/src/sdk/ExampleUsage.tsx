@@ -29,8 +29,8 @@ export async function sdkExample() {
     // 发消息
     const msg = await im.message.send({
       toUserId: "user_002",
-      contentType: "1",
-      content: "Hello!",
+      contentType: "text",
+      content: { text: "Hello!" },
     });
     console.log("Sent:", msg);
 

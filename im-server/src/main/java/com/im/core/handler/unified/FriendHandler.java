@@ -35,6 +35,7 @@ public class FriendHandler implements RequestHandler {
             case "friend.black" -> handleAddBlack(req);
             case "friend.unblack" -> handleRemoveBlack(req);
             case "friend.blacklist" -> handleBlackList(req);
+            case "friend.get_apply_list" -> handleReceivedApplyList(req);
             case "friend.get_sent_apply_list" -> handleSentApplyList(req);
             case "friend.get_apply_detail" -> handleApplyDetail(req);
             case "friend.get_unhandled_apply_count" -> handleUnhandledApplyCount(req);
@@ -108,6 +109,14 @@ public class FriendHandler implements RequestHandler {
         if (userId == null) throw new UnauthorizedException("not authenticated");
         var applies = friendManager.getSentFriendApplyList(userId);
         return Map.of("applies", applies, "count", applies.size());
+    }
+
+    private Object handleReceivedApplyList(ApiRequest req) {
+        String userId = req.currentUserId();
+        if (userId == null) throw new UnauthorizedException("not authenticated");
+        boolean onlyPending = req.getBoolean("onlyPending", true);
+        var applies = friendManager.getFriendApplyList(userId, onlyPending);
+        return Map.of("userId", userId, "applies", applies, "count", applies.size());
     }
 
     private Object handleApplyDetail(ApiRequest req) {

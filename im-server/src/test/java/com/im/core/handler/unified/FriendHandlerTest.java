@@ -24,6 +24,32 @@ class FriendHandlerTest {
         assertThrows(UnauthorizedException.class, () -> handler.handle(request));
     }
 
+
+    @Test
+    void receivedApplyListReturnsPendingAppliesForCurrentUser() {
+        RecordingFriendManager manager = new RecordingFriendManager();
+        FriendApply pending = new FriendApply();
+        pending.setFromUserId("alice");
+        pending.setToUserId("bob");
+        pending.setHandleResult(0);
+        manager.receivedApplies = List.of(pending);
+        FriendHandler handler = new FriendHandler(manager);
+        ApiRequest request = new ApiRequest(Operation.FRIEND_APPLY_RECEIVED,
+                Map.of("onlyPending", true), Map.of(), null, null);
+        request.setAttribute("_uid", "bob");
+
+        Object response = handler.handle(request);
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> body = (Map<String, Object>) response;
+        @SuppressWarnings("unchecked")
+        List<FriendApply> applies = (List<FriendApply>) body.get("applies");
+        org.junit.jupiter.api.Assertions.assertEquals("bob", body.get("userId"));
+        org.junit.jupiter.api.Assertions.assertEquals(1, body.get("count"));
+        org.junit.jupiter.api.Assertions.assertEquals("alice", applies.get(0).getFromUserId());
+        org.junit.jupiter.api.Assertions.assertTrue(manager.onlyPending);
+    }
+
     private static class NoopFriendManager implements IFriendManager {
         @Override public void applyAddFriend(String fromUserId, String toUserId, String reqMsg) {}
         @Override public void respondFriendApply(String userId, String fromUserId, String handleMsg, boolean agreed) {}
@@ -38,4 +64,16 @@ class FriendHandlerTest {
         @Override public List<String> getBlackList(String userId) { return List.of(); }
         @Override public boolean isBlocked(String fromUserId, String toUserId) { return false; }
     }
+
+    private static class RecordingFriendManager extends NoopFriendManager {
+        List<FriendApply> receivedApplies = List.of();
+        boolean onlyPending;
+
+        @Override
+        public List<FriendApply> getFriendApplyList(String userId, boolean onlyPending) {
+            this.onlyPending = onlyPending;
+            return receivedApplies;
+        }
+    }
+
 }

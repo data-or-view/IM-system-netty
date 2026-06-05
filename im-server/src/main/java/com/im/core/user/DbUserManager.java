@@ -9,6 +9,7 @@ import com.im.api.UserInformation;
 import com.im.core.db.MyBatisPlusFactory;
 import com.im.core.db.entity.UserEntity;
 import com.im.core.db.mapper.UserMapper;
+import com.im.core.auth.IUserCredentialStore;
 import com.im.common.retry.RetryConfig;
 import com.im.common.retry.RetryExecutor;
 import com.im.common.retry.RetryStrategies;
@@ -26,7 +27,7 @@ import java.util.Map;
  *
  * <p>基于 MyBatis-Plus，所有用户数据读写 {@code im_users} 表。</p>
  */
-public class DbUserManager implements IUserManager {
+public class DbUserManager implements IUserManager, IUserCredentialStore {
 
     private static final Logger log = LoggerFactory.getLogger(DbUserManager.class);
     private static final RetryConfig CFG = RetryStrategies.DB_WRITE;
@@ -136,6 +137,38 @@ public class DbUserManager implements IUserManager {
                         .toList();
             }
         });
+    }
+
+    @Override
+    public String getPasswordHash(String userId) {
+        return PersistenceExceptions.runDatabase("get user password hash", () -> {
+            try (SqlSession session = MyBatisPlusFactory.openSession()) {
+                UserMapper mapper = session.getMapper(UserMapper.class);
+                UserEntity entity = mapper.selectById(userId);
+                if (entity == null) {
+                    throw new NotFoundException("User not found: " + userId);
+                }
+                return entity.getPasswordHash();
+            }
+        });
+    }
+
+    @Override
+    public void setPasswordHash(String userId, String passwordHash) {
+        PersistenceExceptions.runDatabase("set user password hash", () -> retryExecutor.execute(CFG, () -> {
+            try (SqlSession session = MyBatisPlusFactory.openSession()) {
+                UserMapper mapper = session.getMapper(UserMapper.class);
+                UserEntity entity = mapper.selectById(userId);
+                if (entity == null) {
+                    throw new NotFoundException("User not found: " + userId);
+                }
+                entity.setPasswordHash(passwordHash);
+                entity.setUpdatedAt(System.currentTimeMillis());
+                mapper.updateById(entity);
+                session.commit();
+            }
+            return null;
+        }));
     }
 
     private UserInformation toUserInformation(UserEntity entity) {

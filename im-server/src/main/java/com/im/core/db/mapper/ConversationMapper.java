@@ -27,9 +27,11 @@ public interface ConversationMapper extends BaseMapper<ConversationEntity> {
 
     @Insert("INSERT INTO im_conversations (owner_user_id, conversation_id, conversation_type, " +
             "user_id, group_id, attached_info, max_seq, unread_count, updated_at) " +
-            "VALUES (#{ownerUserId}, #{conversationId}, #{convType}, #{userId}, #{groupId}, " +
+            "VALUES (#{ownerUserId}, #{conversationId}, #{convType}, COALESCE(#{userId}, ''), COALESCE(#{groupId}, ''), " +
             "#{attachedInfo}, #{newSeq}, 0, #{now}) " +
             "ON DUPLICATE KEY UPDATE " +
+            "user_id = VALUES(user_id), " +
+            "group_id = VALUES(group_id), " +
             "max_seq = VALUES(max_seq), " +
             "attached_info = VALUES(attached_info), " +
             "updated_at = VALUES(updated_at)")

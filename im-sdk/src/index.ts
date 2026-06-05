@@ -23,8 +23,8 @@
  * // 发消息
  * const msg = await im.message.send({
  *   toUserId: "user_002",
- *   contentType: "1",
- *   content: "Hello!",
+ *   contentType: "text",
+ *   content: { text: "Hello!" },
  * });
  * ```
  *
@@ -70,10 +70,16 @@ export class IMSDK {
   private accessToken: string | null = null;
   private refreshTokenValue: string | null = null;
   private bus = new EventBus();
+  private messageBatch: Message[] = [];
+  private messageBatchTimer: ReturnType<typeof setTimeout> | null = null;
+  private messageBatchInterval: number;
+  private messageBatchSize: number;
 
   constructor(private opts: IMOptions) {
     this.getToken = () => this.accessToken ?? opts.getToken?.() ?? null;
     this.getRefreshToken = () => this.refreshTokenValue ?? opts.getRefreshToken?.() ?? null;
+    this.messageBatchInterval = opts.messageBatchInterval ?? 16;
+    this.messageBatchSize = Math.max(1, opts.messageBatchSize ?? 100);
     this.transport = new WsTransport({
       getToken: this.getToken,
       getRefreshToken: this.getRefreshToken,
@@ -99,7 +105,7 @@ export class IMSDK {
       const push = raw as WSPush;
       this.bus.emit("push", push);
       if (push.op === PUSH_OP.MESSAGE) {
-        this.bus.emit("message", push.data as Message);
+        this.emitMessage(push.data as Message);
       } else if (push.op === PUSH_OP.FRIEND_APPLY) {
         this.bus.emit("friendRequest", push.data as FriendApply);
       } else if (push.op === PUSH_OP.MESSAGE_REVOKED) {
@@ -159,6 +165,7 @@ export class IMSDK {
 
   /** 断开连接 */
   disconnect(): void {
+    this.flushMessageBatch();
     this.transport.disconnect();
   }
 
@@ -177,6 +184,31 @@ export class IMSDK {
     this.opts.onTokenChanged?.(current);
     this.bus.emit("tokenChanged", current);
     return current;
+  }
+
+  private emitMessage(msg: Message): void {
+    this.bus.emit("message", msg);
+    this.messageBatch.push(msg);
+    if (this.messageBatch.length >= this.messageBatchSize || this.messageBatchInterval <= 0) {
+      this.flushMessageBatch();
+      return;
+    }
+    if (!this.messageBatchTimer) {
+      this.messageBatchTimer = setTimeout(() => this.flushMessageBatch(), this.messageBatchInterval);
+    }
+  }
+
+  private flushMessageBatch(): void {
+    if (this.messageBatchTimer) {
+      clearTimeout(this.messageBatchTimer);
+      this.messageBatchTimer = null;
+    }
+    if (this.messageBatch.length === 0) {
+      return;
+    }
+    const batch = this.messageBatch;
+    this.messageBatch = [];
+    this.bus.emit("messageBatch", batch);
   }
 }
 

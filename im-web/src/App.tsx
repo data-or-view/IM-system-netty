@@ -9,6 +9,8 @@ import ChatArea from "@/components/ChatArea";
 import CreateGroupPage from "@/pages/CreateGroupPage";
 import GroupInfoPage from "@/pages/GroupInfoPage";
 import UserProfilePage from "@/pages/UserProfilePage";
+import { CallProvider } from "@/components/call/CallProvider";
+import { CallDialog } from "@/components/call/CallDialog";
 
 function AuthGate() {
   const { state, login: storeLogin, register: storeRegister } = useStore();
@@ -92,6 +94,7 @@ function AuthGate() {
   }
 
   return (
+    <CallProvider>
     <Routes>
       <Route path="/chat" element={<ChatLayout />}>
         <Route index element={<ChatArea />} />
@@ -101,6 +104,8 @@ function AuthGate() {
       </Route>
       <Route path="*" element={<Navigate to="/chat" replace />} />
     </Routes>
+      <CallDialog />
+    </CallProvider>
   );
 }
 

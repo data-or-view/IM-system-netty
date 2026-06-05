@@ -14,7 +14,8 @@ import React, {
   type ReactNode,
 } from "react";
 import { im } from "@/sdk/im-sdk";
-import type { Message as SDKMessage, TokenPair } from "im-sdk";
+import { toMessageContentType } from "im-sdk";
+import type { Message as SDKMessage, OutgoingMessageContentTypeValue, SendMessageAck, TokenPair } from "im-sdk";
 
 // ========== 类型（与 SDK 类型一致） ==========
 
@@ -86,6 +87,8 @@ export interface GroupMember {
 
 // ========== State ==========
 
+const MAX_MESSAGES_PER_CONVERSATION = 500;
+
 interface State {
   token: string | null;
   refreshToken: string | null;
@@ -150,6 +153,47 @@ type Action =
   | { type: "SET_GROUP_INFO"; groupId: string; info: GroupInfo }
   | { type: "SET_USER_PROFILE"; userId: string; info: UserInfo };
 
+function messageKey(msg: Message): string {
+  if (msg.messageId) return `id:${msg.messageId}`;
+  if (msg.seq > 0) return `seq:${msg.seq}`;
+  return `tmp:${msg.senderUserId}:${msg.createTime}:${msg.content}`;
+}
+
+function mergeConversationMessages(existing: Message[], incoming: Message[]): Message[] {
+  if (incoming.length === 0) return existing;
+
+  const byKey = new Map<string, Message>();
+  for (const msg of existing) {
+    byKey.set(messageKey(msg), msg);
+  }
+
+  let changed = false;
+  for (const msg of incoming) {
+    const key = messageKey(msg);
+    const current = byKey.get(key);
+    if (!current) {
+      byKey.set(key, msg);
+      changed = true;
+      continue;
+    }
+    if (current.status !== msg.status || current.content !== msg.content || current.contentType !== msg.contentType) {
+      byKey.set(key, { ...current, ...msg });
+      changed = true;
+    }
+  }
+
+  if (!changed) return existing;
+
+  const merged = Array.from(byKey.values()).sort(
+    (a, b) => a.seq - b.seq || a.createTime - b.createTime,
+  );
+
+  if (merged.length <= MAX_MESSAGES_PER_CONVERSATION) {
+    return merged;
+  }
+  return merged.slice(merged.length - MAX_MESSAGES_PER_CONVERSATION);
+}
+
 function reducer(state: State, action: Action): State {
   switch (action.type) {
     case "SET_CONNECTED":
@@ -173,23 +217,22 @@ function reducer(state: State, action: Action): State {
       return { ...state, conversations: action.list };
     case "APPEND_MESSAGE": {
       const existing = state.messages[action.conversationId] || [];
-      if (existing.some((m) => m.messageId === action.msg.messageId || (m.seq > 0 && m.seq === action.msg.seq))) return state;
+      const merged = mergeConversationMessages(existing, [action.msg]);
+      if (merged === existing) return state;
       return {
         ...state,
-        messages: { ...state.messages, [action.conversationId]: [...existing, action.msg] },
+        messages: { ...state.messages, [action.conversationId]: merged },
       };
     }
     case "ADD_MESSAGES": {
       const existing = state.messages[action.conversationId] || [];
-      const newMsgs = action.msgs.filter(
-        (m) => !existing.some((e) => e.messageId === m.messageId || (e.seq > 0 && e.seq === m.seq))
-      );
-      if (newMsgs.length === 0) return state;
+      const merged = mergeConversationMessages(existing, action.msgs);
+      if (merged === existing) return state;
       return {
         ...state,
         messages: {
           ...state.messages,
-          [action.conversationId]: [...existing, ...newMsgs].sort((a, b) => a.seq - b.seq || a.createTime - b.createTime),
+          [action.conversationId]: merged,
         },
       };
     }
@@ -309,6 +352,28 @@ function toViewMessage(sdkMsg: SDKMessage): Message {
   };
 }
 
+function toOutgoingMessageContent(raw: unknown): string {
+  return typeof raw === "string" ? raw : JSON.stringify(raw);
+}
+
+function toOptimisticMessage(
+  ack: SendMessageAck,
+  currentUserId: string,
+  contentType: OutgoingMessageContentTypeValue,
+  content: unknown,
+): Message {
+  return {
+    messageId: "",
+    seq: ack.seq ?? 0,
+    senderUserId: currentUserId,
+    conversationId: ack.conversationId,
+    contentType: toMessageContentType(contentType),
+    content: toOutgoingMessageContent(content),
+    createTime: Date.now(),
+    status: 1,
+  };
+}
+
 function groupInfoFromConversation(list: Conversation[]): GroupInfo[] {
   return list
     .filter((c) => c.conversationType === 2)
@@ -379,17 +444,27 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
     });
 
-    const unsubMessage = im.on("message", (sdkMsg) => {
-      const msg = toViewMessage(sdkMsg);
-      if (!msg.conversationId) return;
-      dispatch({ type: "APPEND_MESSAGE", conversationId: msg.conversationId, msg });
-      dispatch({
-        type: "UPDATE_CONVERSATION_LATEST",
-        conversationId: msg.conversationId,
-        latestMsg: msg.content,
-        latestMsgSendTime: msg.createTime,
-        incoming: msg.senderUserId !== localStorage.getItem("im_userId"),
-      });
+    const unsubMessageBatch = im.on("messageBatch", (sdkMsgs) => {
+      const grouped = new Map<string, Message[]>();
+      for (const sdkMsg of sdkMsgs) {
+        const msg = toViewMessage(sdkMsg);
+        if (!msg.conversationId) continue;
+        grouped.set(msg.conversationId, [...(grouped.get(msg.conversationId) || []), msg]);
+      }
+
+      for (const [conversationId, msgs] of grouped) {
+        dispatch({ type: "ADD_MESSAGES", conversationId, msgs });
+        const latest = msgs.reduce((prev, current) =>
+          current.createTime >= prev.createTime ? current : prev,
+        );
+        dispatch({
+          type: "UPDATE_CONVERSATION_LATEST",
+          conversationId,
+          latestMsg: latest.content,
+          latestMsgSendTime: latest.createTime,
+          incoming: latest.senderUserId !== localStorage.getItem("im_userId"),
+        });
+      }
     });
 
     const unsubRevoke = im.on("messageRevoked", (event) => {
@@ -413,7 +488,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
     return () => {
       unsubConnection();
-      unsubMessage();
+      unsubMessageBatch();
       unsubRevoke();
       unsubFriendRequest();
       unsubTokenChanged();
@@ -451,8 +526,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const sendMessage = useCallback(async (toUserId: string, content: string) => {
-    const sdkMsg = await im.message.send({ toUserId, contentType: "1", content });
-    const msg = toViewMessage(sdkMsg);
+    const messageContent = { text: content };
+    const ack = await im.message.send({ toUserId, contentType: "text", content: messageContent });
+    const currentUserId = localStorage.getItem("im_userId") || state.userId || "";
+    const msg = toOptimisticMessage(ack, currentUserId, "text", messageContent);
     if (msg.conversationId) {
       dispatch({ type: "APPEND_MESSAGE", conversationId: msg.conversationId, msg });
       dispatch({

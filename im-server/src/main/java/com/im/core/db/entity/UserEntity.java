@@ -31,6 +31,9 @@ public class UserEntity {
     @TableField("global_recv_msg_opt")
     private int globalRecvMsgOpt;
 
+    @TableField("password_hash")
+    private String passwordHash;
+
     @TableField("status")
     private int status;
 
@@ -57,6 +60,9 @@ public class UserEntity {
 
     public int getGlobalRecvMsgOpt() { return globalRecvMsgOpt; }
     public void setGlobalRecvMsgOpt(int globalRecvMsgOpt) { this.globalRecvMsgOpt = globalRecvMsgOpt; }
+
+    public String getPasswordHash() { return passwordHash; }
+    public void setPasswordHash(String passwordHash) { this.passwordHash = passwordHash; }
 
     public int getStatus() { return status; }
     public void setStatus(int status) { this.status = status; }

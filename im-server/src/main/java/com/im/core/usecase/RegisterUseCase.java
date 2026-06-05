@@ -1,15 +1,25 @@
 package com.im.core.usecase;
 
 import com.im.api.IUserManager;
-import com.im.api.UserInformation;
 import com.im.common.exception.ImException;
+import com.im.common.exception.ValidationException;
+import com.im.core.auth.IPasswordHasher;
+import com.im.core.auth.IUserCredentialStore;
 
 public class RegisterUseCase {
 
     private final IUserManager userManager;
+    private final IUserCredentialStore credentialStore;
+    private final IPasswordHasher passwordHasher;
 
     public RegisterUseCase(IUserManager userManager) {
+        this(userManager, null, null);
+    }
+
+    public RegisterUseCase(IUserManager userManager, IUserCredentialStore credentialStore, IPasswordHasher passwordHasher) {
         this.userManager = userManager;
+        this.credentialStore = credentialStore;
+        this.passwordHasher = passwordHasher;
     }
 
     public record RegisterResult(String userId, String nickname, String faceUrl, boolean alreadyExists) {}
@@ -17,6 +27,9 @@ public class RegisterUseCase {
     public RegisterResult execute(String userId, String nickname, String faceUrl, String password) {
         if (userManager == null) {
             return new RegisterResult(userId, nickname != null ? nickname : userId, faceUrl != null ? faceUrl : "", false);
+        }
+        if (credentialStore != null && passwordHasher != null && (password == null || password.isBlank())) {
+            throw new ValidationException("password is required");
         }
 
         boolean exists = false;
@@ -29,6 +42,12 @@ public class RegisterUseCase {
 
         if (exists) {
             var existing = userManager.getUserInformation(userId);
+            if (credentialStore != null && passwordHasher != null) {
+                String existingHash = credentialStore.getPasswordHash(userId);
+                if (existingHash == null || existingHash.isBlank()) {
+                    credentialStore.setPasswordHash(userId, passwordHasher.hash(password));
+                }
+            }
             return new RegisterResult(userId,
                     existing != null && existing.getNickname() != null ? existing.getNickname() : nickname,
                     existing != null && existing.getFaceUrl() != null ? existing.getFaceUrl() : "",
@@ -37,13 +56,8 @@ public class RegisterUseCase {
 
         userManager.register(userId, nickname, faceUrl, null);
 
-        if (password != null && !password.isBlank()) {
-            try {
-                var user = userManager.getUserInformation(userId);
-                if (user != null && user.getPassword() == null) {
-                    user.setPassword(password);
-                }
-            } catch (Exception ignored) {}
+        if (credentialStore != null && passwordHasher != null) {
+            credentialStore.setPasswordHash(userId, passwordHasher.hash(password));
         }
 
         return new RegisterResult(userId, nickname != null ? nickname : userId, faceUrl != null ? faceUrl : "", false);

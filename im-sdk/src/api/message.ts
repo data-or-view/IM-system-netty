@@ -1,4 +1,16 @@
-import { OP, type Message, type RevokeMessageParam, type SearchMessagesParam, type SearchMessagesResult, type SendMessageParam } from "../types.js";
+import {
+  OP,
+  SignalingAction,
+  type Message,
+  type OutgoingMessageContentTypeValue,
+  type RevokeMessageParam,
+  type SearchMessagesParam,
+  type SearchMessagesResult,
+  type SendMessageAck,
+  type SendMessageParam,
+  type StartCallAck,
+  type StartCallParam,
+} from "../types.js";
 import type { WsTransport } from "../transport/ws.js";
 import { type HttpAPI, requireHttp } from "./http-api.js";
 
@@ -9,21 +21,46 @@ export class MessageAPI {
   constructor(private wsTransport: WsTransport, private httpTransport?: HttpAPI) {}
 
   /** 发送单聊消息：实时链路，走 WS */
-  send(param: SendMessageParam): Promise<Message> {
+  send(param: SendMessageParam): Promise<SendMessageAck> {
     return this.wsTransport.request(OP.CHAT_SEND, {
       toUserId: param.toUserId,
-      contentType: param.contentType,
+      _ct: param.contentType,
       content: param.content,
-    }).then((r) => r.data as Message);
+    }).then((r) => r.data as SendMessageAck);
   }
 
   /** 发送群聊消息：实时链路，走 WS */
-  sendGroup(groupId: string, contentType: string, content: string): Promise<Message> {
+  sendGroup(groupId: string, contentType: OutgoingMessageContentTypeValue, content: unknown): Promise<SendMessageAck> {
     return this.wsTransport.request(OP.CHAT_SEND_GROUP, {
       groupId,
-      contentType,
+      _ct: contentType,
       content,
-    }).then((r) => r.data as Message);
+    }).then((r) => r.data as SendMessageAck);
+  }
+
+  /** 发起语音/视频通话：信令走 WS，媒体走服务端返回的 SFU。 */
+  startCall(param: StartCallParam): Promise<StartCallAck> {
+    return this.wsTransport.request(OP.CHAT_SEND, {
+      toUserId: param.toUserId,
+      _ct: "signal",
+      content: {
+        action: SignalingAction.INVITE,
+        callType: param.callType,
+      },
+    }).then((r) => r.data as StartCallAck);
+  }
+
+  /** 发送通话信令：接听、拒绝、取消、挂断等。 */
+  sendCallSignal(toUserId: string, action: string, roomId: string, duration?: number): Promise<SendMessageAck> {
+    return this.send({
+      toUserId,
+      contentType: "signal",
+      content: {
+        action,
+        roomId,
+        ...(duration !== undefined ? { duration } : {}),
+      },
+    });
   }
 
   /** 拉取历史消息 */

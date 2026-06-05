@@ -29,11 +29,8 @@ export default function FriendRequestDialog({ open, onOpenChange }: Props) {
   const loadApplies = useCallback(async () => {
     setLoading(true);
     try {
-      const list = await im.friend.sentApplyList();
-      // 过滤出发给当前用户且未处理的申请
-      const pending = (list as unknown as ApplyItem[])
-        .filter((a) => a.toUserId === state.userId && a.handleResult === 0);
-      setApplies(pending);
+      const list = await im.friend.receivedApplyList(true);
+      setApplies(list as unknown as ApplyItem[]);
     } catch (err) {
       console.error("load friend applies failed:", err);
     } finally {

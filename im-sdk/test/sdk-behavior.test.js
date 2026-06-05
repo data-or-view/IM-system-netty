@@ -8,7 +8,7 @@ import { GroupAPI } from "../dist/api/group.js";
 import { createIM } from "../dist/index.js";
 import { HttpTransport } from "../dist/transport/http.js";
 import { WsTransport } from "../dist/transport/ws.js";
-import { IMError } from "../dist/types.js";
+import { IMError, MessageContentType, normalizeSignalingContent, parseMessageContent } from "../dist/types.js";
 
 function createCapturingTransport(responseData) {
   const sentFrames = [];
@@ -171,8 +171,9 @@ function createHttpCapture(responseData) {
   return { http, calls };
 }
 
-test("resource APIs use HTTP while realtime message send stays on websocket", async () => {
-  const { transport: ws, sentFrames } = createCapturingTransport({ messageId: "m1" });
+test("resource APIs use HTTP while realtime message send stays on websocket and returns send ack", async () => {
+  const sendAck = { status: "RECEIVED", conversationId: "single_u1_u2", seq: 7 };
+  const { transport: ws, sentFrames } = createCapturingTransport(sendAck);
   const { http, calls } = createHttpCapture((method, path, payload) => {
     if (path === "/api/group/list") return { groups: [{ groupId: "g1", groupName: "研发群" }] };
     if (path === "/api/msg/pull") return { messages: [{ messageId: "m2" }] };
@@ -184,11 +185,51 @@ test("resource APIs use HTTP while realtime message send stays on websocket", as
 
   assert.deepEqual(await groupApi.list(), [{ groupId: "g1", groupName: "研发群" }]);
   assert.deepEqual(await messageApi.pull("c1", 1), [{ messageId: "m2" }]);
-  await messageApi.send({ toUserId: "u2", contentType: "1", content: "hi" });
+  const ack = await messageApi.send({ toUserId: "u2", contentType: "text", content: { text: "hi" } });
 
+  assert.deepEqual(ack, sendAck);
   assert.deepEqual(calls.map((c) => `${c.method} ${c.path}`), ["GET /api/group/list", "POST /api/msg/pull"]);
   assert.deepEqual(calls[1].body, { conversationId: "c1", startSeq: 1 });
   assert.equal(sentFrames[0].op, "chat.send");
+  assert.equal(sentFrames[0]._ct, "text");
+  assert.deepEqual(sentFrames[0].content, { text: "hi" });
+  assert.equal(sentFrames[0].contentType, undefined);
+});
+
+test("message.startCall sends invite signaling over websocket", async () => {
+  const calling = {
+    status: "CALLING",
+    roomId: "room_1",
+    token: "caller-token",
+    sfuEndpoint: "ws://localhost:7880",
+  };
+  const { transport: ws, sentFrames } = createCapturingTransport(calling);
+  const messageApi = new MessageAPI(ws);
+
+  const result = await messageApi.startCall({ toUserId: "u2", callType: "video" });
+
+  assert.deepEqual(result, calling);
+  assert.equal(sentFrames[0].op, "chat.send");
+  assert.equal(sentFrames[0].toUserId, "u2");
+  assert.equal(sentFrames[0]._ct, "signal");
+  assert.deepEqual(sentFrames[0].content, {
+    action: "INVITE",
+    callType: "video",
+  });
+});
+
+test("normalizeSignalingContent keeps call type for incoming call UI", () => {
+  const signal = normalizeSignalingContent({
+    action: "CALLING",
+    roomId: "room_1",
+    token: "callee-token",
+    callType: "video",
+  });
+
+  assert.equal(signal?.action, "CALLING");
+  assert.equal(signal?.roomId, "room_1");
+  assert.equal(signal?.token, "callee-token");
+  assert.equal(signal?.callType, "video");
 });
 
 test("HTTP resource APIs require httpUrl instead of falling back to websocket", async () => {
@@ -198,6 +239,21 @@ test("HTTP resource APIs require httpUrl instead of falling back to websocket", 
     () => im.group.list(),
     (err) => err instanceof IMError && err.message === "HTTP API requires httpUrl",
   );
+});
+
+
+test("friend receivedApplyList uses received apply endpoint with pending filter", async () => {
+  const { http, calls } = createHttpCapture({ applies: [{ fromUserId: "alice", toUserId: "bob", handleResult: 0 }] });
+  const friendApi = new FriendAPI(http);
+
+  const applies = await friendApi.receivedApplyList();
+
+  assert.deepEqual(applies, [{ fromUserId: "alice", toUserId: "bob", handleResult: 0 }]);
+  assert.deepEqual(calls[0], {
+    method: "GET",
+    path: "/api/friend/apply/received",
+    query: { onlyPending: true },
+  });
 });
 
 test("friend and group mutation payloads match backend HTTP contract", async () => {
@@ -341,6 +397,51 @@ test("sdk treats offline bare message payloads as message pushes", () => {
   assert.equal(rawPushes[0].data.messageId, "m-offline");
 });
 
+
+
+test("parseMessageContent exposes typed message content contracts", () => {
+  const text = parseMessageContent({ contentType: MessageContentType.TEXT, content: JSON.stringify({ text: "hello" }) });
+  const image = parseMessageContent({
+    contentType: MessageContentType.IMAGE,
+    content: JSON.stringify({
+      sourcePicture: { url: "http://img/source.png", width: 640, height: 480, type: "image/png", fileSize: 100 },
+      snapshotPicture: { url: "http://img/thumb.png", width: 160, height: 120, type: "image/png", fileSize: 20 },
+    }),
+  });
+  const broken = parseMessageContent({ contentType: MessageContentType.FILE, content: "{bad-json" });
+
+  assert.equal(text.type, MessageContentType.TEXT);
+  assert.equal(text.content.text, "hello");
+  assert.equal(image.type, MessageContentType.IMAGE);
+  assert.equal(image.content.snapshotPicture.url, "http://img/thumb.png");
+  assert.equal(broken.type, "unknown");
+  assert.equal(broken.raw, "{bad-json");
+});
+
+
+test("sdk batches websocket message pushes before emitting messageBatch", async () => {
+  const im = createIM({ wsUrl: "ws://example.test/ws" });
+  const batches = [];
+  const singles = [];
+  im.on("messageBatch", (msgs) => batches.push(msgs));
+  im.on("message", (msg) => singles.push(msg));
+
+  im.transport.handleMessage(JSON.stringify({
+    op: "message",
+    data: { messageId: "m1", conversationId: "c1", messageSeq: 1, content: "one" },
+  }));
+  im.transport.handleMessage(JSON.stringify({
+    op: "message",
+    data: { messageId: "m2", conversationId: "c1", messageSeq: 2, content: "two" },
+  }));
+
+  assert.equal(batches.length, 0);
+  await new Promise((resolve) => setTimeout(resolve, 25));
+
+  assert.equal(batches.length, 1);
+  assert.deepEqual(batches[0].map((m) => m.messageId), ["m1", "m2"]);
+  assert.deepEqual(singles.map((m) => m.messageId), ["m1", "m2"]);
+});
 
 
 test("http transport calls default fetch with the global object binding", async () => {

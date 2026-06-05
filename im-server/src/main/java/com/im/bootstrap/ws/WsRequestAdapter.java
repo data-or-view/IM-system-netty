@@ -97,6 +97,14 @@ public class WsRequestAdapter extends SimpleChannelInboundHandler<WebSocketFrame
             seq = ((Number) seqObj).intValue();
         }
 
+        if (!operation.supportsWebSocket()) {
+            log.warn("Operation '{}' is not allowed on WebSocket from {}", opStr, ctx.channel().remoteAddress());
+            new WsResponseWriter(ctx, seq, operation.opName())
+                    .writeError(com.im.common.enums.ImErrorCode.BAD_REQUEST,
+                            "operation only supports HTTP: " + operation.opName());
+            return;
+        }
+
         // 提取业务参数（移除 op/seq 后剩余字段）
         Map<String, Object> params = new HashMap<>(raw);
         params.remove("op");

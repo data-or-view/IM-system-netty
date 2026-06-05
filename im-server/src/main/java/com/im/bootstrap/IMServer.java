@@ -7,6 +7,9 @@ import com.im.config.Config;
 import com.im.core.access.ConversationAccessChecker;
 import com.im.core.access.DefaultChatSendPolicy;
 import com.im.core.auth.JwtAuthenticator;
+import com.im.core.auth.IPasswordHasher;
+import com.im.core.auth.IUserCredentialStore;
+import com.im.core.auth.Pbkdf2PasswordHasher;
 import com.im.core.call.CallStateManager;
 import com.im.core.call.LiveKitCallManager;
 import com.im.core.conversation.DbConversationManager;
@@ -158,7 +161,9 @@ public class IMServer implements Lifecycle {
                                   IGroupManager groupManager,
                                   IConversationManager conversationManager,
                                   IFriendManager friendManager,
-                                  IUserManager userManager) {}
+                                  IUserManager userManager,
+                                  IUserCredentialStore credentialStore,
+                                  IPasswordHasher passwordHasher) {}
 
     private record StorageModule(ISequenceManager sequenceManager,
                                  IMessageStore messageStore,
@@ -203,9 +208,11 @@ public class IMServer implements Lifecycle {
         IGroupManager groupManager = new DbGroupManager(retryExecutor);
         IConversationManager conversationManager = new DbConversationManager(retryExecutor);
         IFriendManager friendManager = new DbFriendManager(retryExecutor);
-        IUserManager userManager = new DbUserManager(retryExecutor, routeTable);
+        DbUserManager userManager = new DbUserManager(retryExecutor, routeTable);
+        IPasswordHasher passwordHasher = new Pbkdf2PasswordHasher();
         return new BusinessModule(
-                authenticator, retryExecutor, groupManager, conversationManager, friendManager, userManager);
+                authenticator, retryExecutor, groupManager, conversationManager, friendManager,
+                userManager, userManager, passwordHasher);
     }
 
     private StorageModule initStorageModule(Config config, RedisConfiguration redisConfig,
@@ -264,7 +271,8 @@ public class IMServer implements Lifecycle {
                                          BusinessModule business,
                                          StorageModule storage,
                                          CallModule call) {
-        LoginUseCase loginUseCase = new LoginUseCase(business.authenticator, storage.messageStore);
+        LoginUseCase loginUseCase = new LoginUseCase(
+                business.authenticator, storage.messageStore, business.credentialStore, business.passwordHasher);
         WebhookService webhookService = new WebhookService(new LocalWebhookManager(
                 config.getString("im.webhook.url").orElse("")));
         DefaultChatSendPolicy chatSendPolicy = new DefaultChatSendPolicy(
@@ -282,12 +290,16 @@ public class IMServer implements Lifecycle {
         dispatcher.addInterceptor(new com.im.core.handler.unified.TelemetryInterceptor());
         dispatcher.addInterceptor(new AuthInterceptor(business.authenticator));
 
-        dispatcher.registerHandlers(new com.im.core.handler.unified.UserHandler(business.userManager),
+        RegisterUseCase registerUseCase = new RegisterUseCase(
+                business.userManager, business.credentialStore, business.passwordHasher);
+
+        dispatcher.registerHandlers(new com.im.core.handler.unified.UserHandler(business.userManager, registerUseCase),
                 Operation.USER_REGISTER, Operation.USER_INFO, Operation.USER_SEARCH, Operation.USER_UPDATE);
         dispatcher.registerHandlers(new com.im.core.handler.unified.FriendHandler(business.friendManager),
                 Operation.FRIEND_APPLY, Operation.FRIEND_APPROVE, Operation.FRIEND_REMOVE, Operation.FRIEND_LIST,
                 Operation.FRIEND_BLACK, Operation.FRIEND_UNBLACK, Operation.FRIEND_BLACKLIST,
-                Operation.FRIEND_APPLY_SENT, Operation.FRIEND_APPLY_DETAIL, Operation.FRIEND_APPLY_UNHANDLED_COUNT);
+                Operation.FRIEND_APPLY_RECEIVED, Operation.FRIEND_APPLY_SENT,
+                Operation.FRIEND_APPLY_DETAIL, Operation.FRIEND_APPLY_UNHANDLED_COUNT);
         dispatcher.registerHandlers(new com.im.core.handler.unified.GroupHandler(business.groupManager),
                 Operation.GROUP_CREATE, Operation.GROUP_JOIN, Operation.GROUP_QUIT, Operation.GROUP_KICK,
                 Operation.GROUP_DISBAND, Operation.GROUP_INFO_UPDATE, Operation.GROUP_INFO,
@@ -309,9 +321,10 @@ public class IMServer implements Lifecycle {
                 new LoginHandler(loginUseCase, sessionManager, routeTable, nodeId,
                         clusterMessageBus, sessionManager.getLoginStrategy()));
         dispatcher.registerHandler(Operation.REGISTER,
-                new RegisterHandler(new RegisterUseCase(business.userManager)));
+                new RegisterHandler(registerUseCase));
         dispatcher.registerHandler(Operation.HEARTBEAT,
-                new HeartbeatHandler(new HeartbeatUseCase(routeTable), sessionManager, business.authenticator));
+                new HeartbeatHandler(new HeartbeatUseCase(routeTable), sessionManager, business.authenticator,
+                        routeTable, nodeId));
         dispatcher.registerHandler(Operation.FILE_UPLOAD,
                 new com.im.core.handler.unified.FileUploadHandler(
                         new FileUploadUseCase(storage.fileStorage,

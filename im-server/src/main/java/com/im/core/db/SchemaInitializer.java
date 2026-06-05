@@ -79,6 +79,9 @@ public final class SchemaInitializer {
             }
 
             List<String> missing = rebuild ? TABLE_NAMES : findMissingTables(conn);
+            if (!rebuild) {
+                applyLightweightMigrations(conn, stmt);
+            }
             if (missing.isEmpty()) {
                 log.info("All tables already exist, skipping");
                 return;
@@ -133,6 +136,32 @@ public final class SchemaInitializer {
         return missing;
     }
 
+    private static void applyLightweightMigrations(Connection conn, Statement stmt) throws Exception {
+        ensureColumn(conn, stmt, "im_users", "password_hash",
+                "ALTER TABLE im_users ADD COLUMN password_hash VARCHAR(255) NOT NULL DEFAULT '' AFTER global_recv_msg_opt");
+    }
+
+    private static void ensureColumn(Connection conn, Statement stmt, String table, String column, String ddl) throws Exception {
+        if (tableExists(conn, table) && !columnExists(conn, table, column)) {
+            stmt.execute(ddl);
+            log.info("Schema migrated: added {}.{}", table, column);
+        }
+    }
+
+    private static boolean tableExists(Connection conn, String table) throws Exception {
+        DatabaseMetaData meta = conn.getMetaData();
+        try (ResultSet rs = meta.getTables(null, null, table, new String[]{"TABLE"})) {
+            return rs.next();
+        }
+    }
+
+    private static boolean columnExists(Connection conn, String table, String column) throws Exception {
+        DatabaseMetaData meta = conn.getMetaData();
+        try (ResultSet rs = meta.getColumns(null, null, table, column)) {
+            return rs.next();
+        }
+    }
+
     // ── DDL ──
 
     private static String getCreateTableDDL(String table) {
@@ -145,7 +174,7 @@ public final class SchemaInitializer {
                         ex              VARCHAR(1024)   NOT NULL DEFAULT '',
                         app_manger_level INT            NOT NULL DEFAULT 0,
                         global_recv_msg_opt INT         NOT NULL DEFAULT 0,
-                        password        VARCHAR(255)    NOT NULL DEFAULT '',
+                        password_hash   VARCHAR(255)    NOT NULL DEFAULT '',
                         status          INT             NOT NULL DEFAULT 1,
                         created_at      BIGINT          NOT NULL DEFAULT 0,
                         updated_at      BIGINT          NOT NULL DEFAULT 0

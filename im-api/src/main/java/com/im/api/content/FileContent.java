@@ -1,6 +1,7 @@
 package com.im.api.content;
 
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * 文件传输内容。
@@ -12,7 +13,7 @@ public class FileContent implements IMessageContent {
     public static final long MAX_FILE_SIZE = 500L * 1024 * 1024;
 
     /** 允许的文件扩展名列表 */
-    private static final java.util.Set<String> ALLOWED_EXTENSIONS = java.util.Set.of(
+    private static final java.util.Set<String> ALLOWED_EXTENSIONS = Set.of(
             "txt", "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
             "zip", "rar", "7z", "tar", "gz",
             "png", "jpg", "jpeg", "gif", "bmp", "webp",

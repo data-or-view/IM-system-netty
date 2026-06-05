@@ -22,6 +22,7 @@ import org.slf4j.LoggerFactory;
 public class HttpServerBootstrap {
 
     private static final Logger log = LoggerFactory.getLogger(HttpServerBootstrap.class);
+    private static final int MAX_HTTP_CONTENT_LENGTH = 100 * 1024 * 1024;
 
     private HttpServerBootstrap() {}
 
@@ -49,7 +50,7 @@ public class HttpServerBootstrap {
                     protected void initChannel(SocketChannel ch) {
                         ChannelPipeline p = ch.pipeline();
                         p.addLast(new HttpServerCodec());
-                        p.addLast(new HttpObjectAggregator(65536));
+                        p.addLast(new HttpObjectAggregator(MAX_HTTP_CONTENT_LENGTH));
                         p.addLast(httpHandler);
                     }
                 });
