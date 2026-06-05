@@ -16,6 +16,7 @@ export class RequestManager {
     { resolve: (resp: WSResponse) => void; reject: (err: IMError) => void; timer: ReturnType<typeof setTimeout> }
   >();
   private requestTimeout: number;
+  requestIdFactory?: () => string;
 
   constructor(requestTimeout = 30000) {
     this.requestTimeout = requestTimeout;
@@ -24,7 +25,7 @@ export class RequestManager {
   /** 创建一个 WS 请求帧，返回 Promise */
   createRequest(op: string, params: Record<string, unknown> = {}): { frame: WSRequest; promise: Promise<WSResponse> } {
     const seq = ++this.seq;
-    const frame: WSRequest = { op, seq, ...params };
+    const frame: WSRequest = { op, seq, _requestId: this.nextRequestId(), ...params };
 
     const promise = new Promise<WSResponse>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -77,4 +78,13 @@ export class RequestManager {
   get pendingCount(): number {
     return this.pending.size;
   }
+
+  nextRequestId(): string {
+    return (this.requestIdFactory ?? defaultRequestId)();
+  }
+}
+
+function defaultRequestId(): string {
+  const random = Math.random().toString(36).slice(2, 10);
+  return `req_${Date.now().toString(36)}_${random}`;
 }

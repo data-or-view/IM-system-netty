@@ -12,6 +12,7 @@ import com.im.core.db.mapper.GroupMemberMapper;
 import com.im.core.db.mapper.GroupRequestMapper;
 import com.im.core.db.mapper.UserMapper;
 import com.im.core.sync.DbIncrementalSync;
+import com.im.common.exception.ForbiddenException;
 import com.im.common.exception.PersistenceExceptions;
 import com.im.common.retry.RetryConfig;
 import com.im.common.retry.RetryExecutor;
@@ -34,6 +35,10 @@ public class DbGroupManager implements IGroupManager {
 
     private static final Logger log = LoggerFactory.getLogger(DbGroupManager.class);
     private static final RetryConfig CFG = RetryStrategies.DB_WRITE;
+    public static final int GROUP_STATUS_DISBANDED = 0;
+    public static final int GROUP_STATUS_NORMAL = 1;
+    private static final int GROUP_ROLE_ADMIN = 100;
+    private static final int GROUP_ROLE_OWNER = 200;
 
     private final RetryExecutor retryExecutor;
     private final DbIncrementalSync sync;
@@ -62,7 +67,7 @@ public class DbGroupManager implements IGroupManager {
             entity.setFaceUrl(faceUrl);
             entity.setOwnerUserId(ownerId);
             entity.setMemberCount(1);
-            entity.setStatus(1);
+            entity.setStatus(GROUP_STATUS_NORMAL);
             entity.setGroupType(groupType);
             entity.setNeedVerification(needVerification);
             entity.setCreatedAt(now);
@@ -125,7 +130,7 @@ public class DbGroupManager implements IGroupManager {
                 log.warn("Only owner can disband group: groupId={}, operator={}", groupId, operatorId);
                 return null;
             }
-            entity.setStatus(0);
+            entity.setStatus(GROUP_STATUS_DISBANDED);
             entity.setUpdatedAt(System.currentTimeMillis());
             groupMapper.updateById(entity);
             LambdaQueryWrapper<GroupMemberEntity> qw = new LambdaQueryWrapper<>();
@@ -396,6 +401,11 @@ public class DbGroupManager implements IGroupManager {
         PersistenceExceptions.runDatabase("respond join request", () -> retryExecutor.execute(CFG, () -> {
         try (SqlSession session = MyBatisPlusFactory.openSession()) {
             GroupRequestMapper mapper = session.getMapper(GroupRequestMapper.class);
+            GroupMemberMapper memberMapper = session.getMapper(GroupMemberMapper.class);
+            GroupMemberEntity operator = getMemberInSession(memberMapper, groupId, operatorId);
+            if (operator == null || operator.getRoleLevel() < GROUP_ROLE_ADMIN) {
+                throw new ForbiddenException("only group owner or admin can approve join request");
+            }
             LambdaQueryWrapper<GroupRequestEntity> qw = new LambdaQueryWrapper<>();
             qw.eq(GroupRequestEntity::getGroupId, groupId)
                     .eq(GroupRequestEntity::getUserId, userId)
@@ -432,6 +442,35 @@ public class DbGroupManager implements IGroupManager {
                 }
                 qw.orderByDesc(GroupRequestEntity::getCreatedAt);
                 return mapper.selectList(qw).stream()
+                        .map(this::toGroupApply)
+                        .toList();
+            }
+        });
+    }
+
+    @Override
+    public List<GroupApply> getManageableJoinRequests(String operatorId, boolean onlyPending) {
+        return PersistenceExceptions.runDatabase("get manageable group join requests", () -> {
+            try (SqlSession session = MyBatisPlusFactory.openSession()) {
+                GroupMemberMapper memberMapper = session.getMapper(GroupMemberMapper.class);
+                GroupRequestMapper requestMapper = session.getMapper(GroupRequestMapper.class);
+
+                List<String> manageableGroupIds = memberMapper.selectList(
+                        new LambdaQueryWrapper<GroupMemberEntity>()
+                                .eq(GroupMemberEntity::getUserId, operatorId)
+                                .ge(GroupMemberEntity::getRoleLevel, GROUP_ROLE_ADMIN)
+                                .select(GroupMemberEntity::getGroupId)
+                ).stream().map(GroupMemberEntity::getGroupId).toList();
+
+                if (manageableGroupIds.isEmpty()) return List.of();
+
+                LambdaQueryWrapper<GroupRequestEntity> qw = new LambdaQueryWrapper<>();
+                qw.in(GroupRequestEntity::getGroupId, manageableGroupIds);
+                if (onlyPending) {
+                    qw.eq(GroupRequestEntity::getHandleResult, 0);
+                }
+                qw.orderByDesc(GroupRequestEntity::getCreatedAt);
+                return requestMapper.selectList(qw).stream()
                         .map(this::toGroupApply)
                         .toList();
             }
@@ -476,8 +515,8 @@ public class DbGroupManager implements IGroupManager {
         GroupMemberEntity member = getMemberInSession(null, groupId, userId);
         if (member == null) return null;
         return switch (member.getRoleLevel()) {
-            case 200 -> "owner";
-            case 100 -> "admin";
+            case GROUP_ROLE_OWNER -> "owner";
+            case GROUP_ROLE_ADMIN -> "admin";
             default -> "member";
         };
     }
@@ -514,7 +553,7 @@ public class DbGroupManager implements IGroupManager {
                 return groupMapper.selectList(
                                 new LambdaQueryWrapper<GroupEntity>()
                                         .in(GroupEntity::getGroupId, groupIds)
-                                        .eq(GroupEntity::getStatus, 1)
+                                        .eq(GroupEntity::getStatus, GROUP_STATUS_NORMAL)
                                         .orderByDesc(GroupEntity::getUpdatedAt)
                         ).stream()
                         .map(this::toGroupInfo)
@@ -658,12 +697,16 @@ public class DbGroupManager implements IGroupManager {
                 GroupMapper mapper = session.getMapper(GroupMapper.class);
                 var qw = new LambdaQueryWrapper<GroupEntity>()
                         .like(GroupEntity::getGroupName, keyword)
-                        .eq(GroupEntity::getStatus, 0)
+                        .eq(GroupEntity::getStatus, searchableGroupStatus())
                         .orderByDesc(GroupEntity::getCreatedAt)
                         .last("LIMIT " + limit);
                 List<GroupEntity> entities = mapper.selectList(qw);
                 return entities.stream().map(this::toGroupInfo).collect(Collectors.toList());
             }
         });
+    }
+
+    static int searchableGroupStatus() {
+        return GROUP_STATUS_NORMAL;
     }
 }

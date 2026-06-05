@@ -31,6 +31,48 @@ public interface MessageMapper extends BaseMapper<MessageEntity> {
                                           @Param("from") long from,
                                           @Param("to") long to);
 
+    @Select("""
+            SELECT m.* FROM im_messages m
+            LEFT JOIN im_message_read_states rs
+              ON rs.user_id = #{userId}
+             AND rs.conversation_id = m.conversation_id
+            WHERE m.recv_id = #{userId}
+              AND m.status = 0
+              AND m.seq > COALESCE(rs.delivered_seq, 0)
+              AND NOT EXISTS (
+                  SELECT 1 FROM im_message_visibility v
+                  WHERE v.user_id = #{userId}
+                    AND v.conversation_id = m.conversation_id
+                    AND v.seq = m.seq
+                    AND v.visibility_state <> 0
+              )
+            ORDER BY m.sent_at ASC
+            LIMIT #{limit}
+            """)
+    List<MessageEntity> selectUndeliveredSingleMessages(@Param("userId") String userId,
+                                                        @Param("limit") int limit);
+
+    @Select("<script>" +
+            "SELECT * FROM im_messages WHERE client_msg_id IN " +
+            "<foreach item='id' collection='clientMsgIds' open='(' separator=',' close=')'>#{id}</foreach>" +
+            "</script>")
+    List<MessageEntity> selectByClientMsgIds(@Param("clientMsgIds") List<String> clientMsgIds);
+
+    @Select("""
+            SELECT * FROM im_messages
+            WHERE recv_id = #{userId}
+              AND seq < #{seq}
+              AND status = 0
+              AND NOT EXISTS (
+                  SELECT 1 FROM im_message_visibility v
+                  WHERE v.user_id = #{userId}
+                    AND v.conversation_id = im_messages.conversation_id
+                    AND v.seq = im_messages.seq
+                    AND v.visibility_state <> 0
+              )
+            """)
+    List<MessageEntity> selectSingleMessagesBefore(@Param("userId") String userId, @Param("seq") long seq);
+
     @Update("UPDATE im_messages SET revoke_user_id = #{revokerId}, revoke_role = #{role}, " +
             "revoke_nickname = #{nickname}, revoke_time = #{time}, status = 1 " +
             "WHERE conversation_id = #{conversationId} AND seq = #{seq}")

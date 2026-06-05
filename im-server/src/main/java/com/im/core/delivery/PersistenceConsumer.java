@@ -11,7 +11,7 @@ import java.util.Set;
  * 消息持久化消费者。
  *
  * 从 IMessageQueue 的 "persist" topic 消费消息：
- *   ① 写入 IMessageStore（完整消息存储）
+ *   ① 写入单聊/群聊消息存储端口（当前可委托到统一消息表）
  *   ② 更新 IConversationManager（会话最后一条消息 + 未读数）
  *
  * 与 ChatHandler 的 write-ahead save 构成双层持久化：
@@ -23,26 +23,34 @@ public class PersistenceConsumer implements Lifecycle {
     private static final Logger log = LoggerFactory.getLogger(PersistenceConsumer.class);
 
     private final IMessageQueue messageQueue;
-    private final IMessageStore messageStore;
+    private final ISingleMessageStore singleMessageStore;
+    private final IGroupMessageStore groupMessageStore;
     private final IConversationManager conversationManager;
     private final IGroupManager groupManager;
 
     private volatile IMessageQueue.MessageHandler handler;
 
-    public PersistenceConsumer(IMessageQueue messageQueue, IMessageStore messageStore) {
-        this(messageQueue, messageStore, null, null);
+    public PersistenceConsumer(IMessageQueue messageQueue,
+                               ISingleMessageStore singleMessageStore,
+                               IGroupMessageStore groupMessageStore) {
+        this(messageQueue, singleMessageStore, groupMessageStore, null, null);
     }
 
-    public PersistenceConsumer(IMessageQueue messageQueue, IMessageStore messageStore,
+    public PersistenceConsumer(IMessageQueue messageQueue,
+                               ISingleMessageStore singleMessageStore,
+                               IGroupMessageStore groupMessageStore,
                                IConversationManager conversationManager) {
-        this(messageQueue, messageStore, conversationManager, null);
+        this(messageQueue, singleMessageStore, groupMessageStore, conversationManager, null);
     }
 
-    public PersistenceConsumer(IMessageQueue messageQueue, IMessageStore messageStore,
+    public PersistenceConsumer(IMessageQueue messageQueue,
+                               ISingleMessageStore singleMessageStore,
+                               IGroupMessageStore groupMessageStore,
                                IConversationManager conversationManager,
                                IGroupManager groupManager) {
         this.messageQueue = messageQueue;
-        this.messageStore = messageStore;
+        this.singleMessageStore = singleMessageStore;
+        this.groupMessageStore = groupMessageStore;
         this.conversationManager = conversationManager;
         this.groupManager = groupManager;
     }
@@ -53,27 +61,8 @@ public class PersistenceConsumer implements Lifecycle {
             String messageId = msg.getMessageId();
             String fromUserId = msg.getFromUserId();
 
-            // ① 持久化消息（ChatHandler 已做 write-ahead 保存，此处为最终存储，允许重复）
-            if (messageStore != null) {
-                try {
-                    messageStore.save(msg);
-                } catch (Exception e) {
-                    // 遍历异常链查找是否是重复键
-                    boolean isDup = false;
-                    for (Throwable t = e; t != null; t = t.getCause()) {
-                        String m = t.getMessage();
-                        if (m != null && m.contains("Duplicate entry")) {
-                            isDup = true;
-                            break;
-                        }
-                    }
-                    if (isDup) {
-                        log.debug("Msg already saved (dup), seqId={}, mid={}", msg.getMessageSeq(), messageId);
-                    } else {
-                        log.warn("Persistence save failed: seqId={}, err={}", msg.getMessageSeq(), e.getMessage());
-                    }
-                }
-            }
+            // ① 持久化消息：业务链路面向单聊/群聊端口，物理存储仍可由统一表承接。
+            tryPersist(msg, messageId);
 
             // ② 更新会话
             if (conversationManager != null) {
@@ -119,6 +108,35 @@ public class PersistenceConsumer implements Lifecycle {
 
         messageQueue.subscribe(MessageQueueTopics.PERSIST, handler);
         log.info("PersistenceConsumer subscribed to topic '{}'", MessageQueueTopics.PERSIST);
+    }
+
+    private void tryPersist(Message msg, String messageId) {
+        try {
+            String groupId = msg.getGroupId();
+            if (groupId != null && !groupId.isBlank()) {
+                if (groupMessageStore != null) {
+                    groupMessageStore.saveGroupMessage(msg);
+                }
+            } else if (singleMessageStore != null) {
+                singleMessageStore.saveSingleMessage(msg);
+            }
+        } catch (Exception e) {
+            if (isDuplicateEntry(e)) {
+                log.debug("Msg already saved (dup), seqId={}, mid={}", msg.getMessageSeq(), messageId);
+            } else {
+                log.warn("Persistence save failed: seqId={}, err={}", msg.getMessageSeq(), e.getMessage());
+            }
+        }
+    }
+
+    private boolean isDuplicateEntry(Throwable error) {
+        for (Throwable t = error; t != null; t = t.getCause()) {
+            String message = t.getMessage();
+            if (message != null && message.contains("Duplicate entry")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @Override

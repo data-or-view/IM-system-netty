@@ -7,6 +7,7 @@ import com.im.api.ClusterMessage;
 import com.im.api.ClusterMessageHandler;
 import com.im.api.IClusterMessageBus;
 import com.im.api.Message;
+import com.im.common.util.IMExecutors;
 import com.im.core.serialization.jackson.ObjectMapperProvider;
 import com.im.core.redis.RedisConfiguration;
 import io.lettuce.core.pubsub.RedisPubSubListener;
@@ -22,7 +23,6 @@ import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 /**
  * Redis Pub/Sub 集群消息总线。
@@ -63,8 +63,7 @@ public class RedisClusterMessageBus implements IClusterMessageBus {
     public RedisClusterMessageBus(RedisConfiguration redisConfig, String nodeId) {
         this.redisConfig = redisConfig;
         this.nodeId = nodeId;
-        this.dispatchExecutor = Executors.newThreadPerTaskExecutor(
-                Thread.ofVirtual().name("redis-bus-", 0).factory());
+        this.dispatchExecutor = IMExecutors.newVirtualThreadExecutor("redis-bus");
     }
 
     @Override

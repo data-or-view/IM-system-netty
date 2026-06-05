@@ -19,7 +19,15 @@ export const im = createIM({
   getToken: () => localStorage.getItem("im_token"),
   getRefreshToken: () => localStorage.getItem("im_refreshToken"),
   onTokenChanged: (tokens) => {
-    if (tokens.token) localStorage.setItem("im_token", tokens.token);
-    if (tokens.refreshToken) localStorage.setItem("im_refreshToken", tokens.refreshToken);
+    if (tokens.token) {
+      localStorage.setItem("im_token", tokens.token);
+    } else {
+      localStorage.removeItem("im_token");
+    }
+    if (tokens.refreshToken) {
+      localStorage.setItem("im_refreshToken", tokens.refreshToken);
+    } else {
+      localStorage.removeItem("im_refreshToken");
+    }
   },
 });

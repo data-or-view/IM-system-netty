@@ -48,6 +48,7 @@ export class WsTransport {
       maxReconnect?: number;
       heartbeatInterval?: number;
       requestTimeout?: number;
+      requestIdFactory?: () => string;
     },
   ) {
     this.getToken = opts.getToken || (() => null);
@@ -56,6 +57,7 @@ export class WsTransport {
     this.maxReconnect = opts.maxReconnect ?? 10;
     this.heartbeatInterval = opts.heartbeatInterval ?? 7000;
     this.reqManager = new RequestManager(opts.requestTimeout);
+    this.reqManager.requestIdFactory = opts.requestIdFactory;
   }
 
   get state(): ConnectionState {
@@ -221,7 +223,7 @@ export class WsTransport {
 
   private startHeartbeat(): void {
     this.heartbeatTimer = setInterval(() => {
-      this.send({ op: "heartbeat", seq: 0 });
+      this.send({ op: "heartbeat", seq: 0, _requestId: this.reqManager.nextRequestId() });
     }, this.heartbeatInterval);
   }
 

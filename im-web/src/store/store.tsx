@@ -85,6 +85,19 @@ export interface GroupMember {
   joinTime: number;
 }
 
+export interface GroupApply {
+  groupId: string;
+  userId: string;
+  reqMsg?: string;
+  handledMsg?: string;
+  handlerUserId?: string;
+  handleResult: number;
+  joinSource?: number;
+  inviterUserId?: string;
+  createTime: number;
+  handledTime?: number;
+}
+
 // ========== State ==========
 
 const MAX_MESSAGES_PER_CONVERSATION = 500;
@@ -103,6 +116,7 @@ interface State {
   searchUsers: UserInfo[];
   searchGroups: GroupInfo[];
   unhandledApplyCount: number;
+  unhandledGroupApplyCount: number;
 
   activeConversationId: string | null;
   groupMembers: Record<string, GroupMember[]>;
@@ -122,6 +136,7 @@ const initialState: State = {
   searchUsers: [],
   searchGroups: [],
   unhandledApplyCount: 0,
+  unhandledGroupApplyCount: 0,
   activeConversationId: null,
   groupMembers: {},
   groupInfoCache: {},
@@ -144,11 +159,13 @@ type Action =
   | { type: "SET_SEARCH_USERS"; list: UserInfo[] }
   | { type: "SET_SEARCH_GROUPS"; list: GroupInfo[] }
   | { type: "SET_UNHANDLED_APPLY_COUNT"; count: number }
+  | { type: "SET_UNHANDLED_GROUP_APPLY_COUNT"; count: number }
   | { type: "SET_ACTIVE_CONVERSATION"; conversationId: string | null }
   | { type: "ADD_FRIEND"; friend: FriendInfo }
   | { type: "REMOVE_FRIEND"; friendUserId: string }
   | { type: "ADD_CONVERSATION"; conversation: Conversation }
   | { type: "UPDATE_CONVERSATION_LATEST"; conversationId: string; latestMsg: string; latestMsgSendTime: number; incoming?: boolean }
+  | { type: "UPDATE_CONVERSATION_UNREAD"; conversationId: string; unreadCount: number }
   | { type: "SET_GROUP_MEMBERS"; groupId: string; members: GroupMember[] }
   | { type: "SET_GROUP_INFO"; groupId: string; info: GroupInfo }
   | { type: "SET_USER_PROFILE"; userId: string; info: UserInfo };
@@ -213,8 +230,16 @@ function reducer(state: State, action: Action): State {
       };
     case "LOGOUT":
       return { ...initialState, token: null, refreshToken: null, userId: null, connected: false };
-    case "SET_CONVERSATIONS":
-      return { ...state, conversations: action.list };
+    case "SET_CONVERSATIONS": {
+      const activeExists = state.activeConversationId
+        ? action.list.some((c) => c.conversationId === state.activeConversationId)
+        : false;
+      return {
+        ...state,
+        conversations: action.list,
+        activeConversationId: activeExists ? state.activeConversationId : null,
+      };
+    }
     case "APPEND_MESSAGE": {
       const existing = state.messages[action.conversationId] || [];
       const merged = mergeConversationMessages(existing, [action.msg]);
@@ -259,6 +284,8 @@ function reducer(state: State, action: Action): State {
       return { ...state, searchGroups: action.list };
     case "SET_UNHANDLED_APPLY_COUNT":
       return { ...state, unhandledApplyCount: action.count };
+    case "SET_UNHANDLED_GROUP_APPLY_COUNT":
+      return { ...state, unhandledGroupApplyCount: action.count };
     case "SET_ACTIVE_CONVERSATION": {
       const cleared = action.conversationId
         ? state.conversations.map((c) =>
@@ -295,6 +322,15 @@ function reducer(state: State, action: Action): State {
         ),
       };
     }
+    case "UPDATE_CONVERSATION_UNREAD":
+      return {
+        ...state,
+        conversations: state.conversations.map((c) =>
+          c.conversationId === action.conversationId
+            ? { ...c, unreadCount: action.unreadCount }
+            : c
+        ),
+      };
     case "SET_GROUP_MEMBERS":
       return { ...state, groupMembers: { ...state.groupMembers, [action.groupId]: action.members } };
     case "SET_GROUP_INFO":
@@ -326,9 +362,12 @@ interface StoreContextType {
   fetchMyGroups: () => Promise<void>;
   approveFriend: (fromUserId: string, agreed: boolean) => Promise<void>;
   fetchUnhandledApplyCount: () => Promise<void>;
+  approveGroupApply: (groupId: string, userId: string, agreed: boolean) => Promise<void>;
+  fetchUnhandledGroupApplyCount: () => Promise<void>;
   fetchGroupMembers: (groupId: string) => Promise<void>;
   fetchGroupInfo: (groupId: string) => Promise<void>;
   fetchUserProfile: (userId: string) => Promise<void>;
+  markConversationRead: (conversationId: string, seq?: number) => Promise<void>;
 }
 
 const StoreContext = createContext<StoreContextType | null>(null);
@@ -336,6 +375,13 @@ const StoreContext = createContext<StoreContextType | null>(null);
 function persistTokens(tokens: TokenPair) {
   if (tokens.token) localStorage.setItem("im_token", tokens.token);
   if (tokens.refreshToken) localStorage.setItem("im_refreshToken", tokens.refreshToken);
+}
+
+function clearStoredAuth() {
+  localStorage.removeItem("im_userId");
+  localStorage.removeItem("im_token");
+  localStorage.removeItem("im_refreshToken");
+  im.clearTokens();
 }
 
 function toViewMessage(sdkMsg: SDKMessage): Message {
@@ -398,6 +444,23 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const markConversationRead = useCallback(async (conversationId: string, seq?: number) => {
+    const conversation = state.conversations.find((c) => c.conversationId === conversationId);
+    if (!conversation) {
+      return;
+    }
+    try {
+      const result = await im.conversation.read(conversationId, seq);
+      dispatch({
+        type: "UPDATE_CONVERSATION_UNREAD",
+        conversationId: result.conversationId || conversationId,
+        unreadCount: result.unreadCount ?? 0,
+      });
+    } catch (err) {
+      console.error("markConversationRead failed:", err);
+    }
+  }, [state.conversations, state.messages]);
+
   const fetchMyGroups = useCallback(async () => {
     try {
       const groups = await im.group.list();
@@ -431,9 +494,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const fetchUnhandledGroupApplyCount = useCallback(async () => {
+    try {
+      const count = await im.group.unhandledApplyCount();
+      dispatch({ type: "SET_UNHANDLED_GROUP_APPLY_COUNT", count });
+    } catch (err) {
+      console.error("fetchUnhandledGroupApplyCount failed:", err);
+    }
+  }, []);
+
   const hydrateAfterAuth = useCallback(async () => {
-    await Promise.all([fetchConversations(), fetchFriends(), fetchMyGroups(), fetchUnhandledApplyCount()]);
-  }, [fetchConversations, fetchFriends, fetchMyGroups, fetchUnhandledApplyCount]);
+    await Promise.all([
+      fetchConversations(),
+      fetchFriends(),
+      fetchMyGroups(),
+      fetchUnhandledApplyCount(),
+      fetchUnhandledGroupApplyCount(),
+    ]);
+  }, [fetchConversations, fetchFriends, fetchMyGroups, fetchUnhandledApplyCount, fetchUnhandledGroupApplyCount]);
 
   // ── SDK 事件监听 ──
   useEffect(() => {
@@ -457,6 +535,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const latest = msgs.reduce((prev, current) =>
           current.createTime >= prev.createTime ? current : prev,
         );
+        if (state.activeConversationId === conversationId) {
+          void markConversationRead(conversationId, latest.seq);
+        }
         dispatch({
           type: "UPDATE_CONVERSATION_LATEST",
           conversationId,
@@ -493,7 +574,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       unsubFriendRequest();
       unsubTokenChanged();
     };
-  }, [fetchUnhandledApplyCount, hydrateAfterAuth]);
+  }, [fetchUnhandledApplyCount, hydrateAfterAuth, markConversationRead, state.activeConversationId]);
+
+  useEffect(() => {
+    const conversationId = state.activeConversationId;
+    if (!conversationId) return;
+    const latestSeq = (state.messages[conversationId] || []).reduce(
+      (max, msg) => Math.max(max, msg.seq || 0),
+      0,
+    );
+    void markConversationRead(conversationId, latestSeq || undefined);
+  }, [markConversationRead, state.activeConversationId, state.messages]);
 
   useEffect(() => {
     if (state.token && state.userId && im.state === "disconnected") {
@@ -518,9 +609,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [login]);
 
   const logout = useCallback(() => {
-    localStorage.removeItem("im_userId");
-    localStorage.removeItem("im_token");
-    localStorage.removeItem("im_refreshToken");
+    clearStoredAuth();
     im.disconnect();
     dispatch({ type: "LOGOUT" });
   }, []);
@@ -606,6 +695,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, [fetchFriends, fetchUnhandledApplyCount]);
 
+  const approveGroupApply = useCallback(async (groupId: string, userId: string, agreed: boolean) => {
+    try {
+      await im.group.approveApply(groupId, userId, agreed);
+      await Promise.all([fetchMyGroups(), fetchUnhandledGroupApplyCount()]);
+    } catch (err) {
+      console.error("approveGroupApply failed:", err);
+      throw err;
+    }
+  }, [fetchMyGroups, fetchUnhandledGroupApplyCount]);
+
   const fetchGroupMembers = useCallback(async (groupId: string) => {
     try {
       const members = await im.group.members(groupId);
@@ -653,9 +752,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         fetchMyGroups,
         approveFriend,
         fetchUnhandledApplyCount,
+        approveGroupApply,
+        fetchUnhandledGroupApplyCount,
         fetchGroupMembers,
         fetchGroupInfo,
         fetchUserProfile,
+        markConversationRead,
       }}
     >
       {children}

@@ -1,10 +1,12 @@
 package com.im.core.handler.unified;
 
 import com.im.api.ApiRequest;
+import com.im.api.GroupApply;
 import com.im.api.GroupInformation;
 import com.im.api.GroupMemberInformation;
 import com.im.api.IGroupManager;
 import com.im.api.RequestHandler;
+import com.im.common.exception.ForbiddenException;
 import com.im.common.exception.UnauthorizedException;
 import com.im.common.exception.ValidationException;
 import com.im.common.exception.NotFoundException;
@@ -41,6 +43,9 @@ public class GroupHandler implements RequestHandler {
             case "group.search" -> handleSearch(req);
             case "group.members" -> handleMembers(req);
             case "group.mute_all" -> handleMuteAll(req);
+            case "group.apply.list" -> handleApplyList(req);
+            case "group.apply.unhandled.count" -> handleApplyUnhandledCount(req);
+            case "group.apply.approve" -> handleApplyApprove(req);
             default -> throw new NotFoundException("unsupported: " + req.operation());
         };
     }
@@ -157,5 +162,42 @@ public class GroupHandler implements RequestHandler {
         if (groupId == null) throw new ValidationException("groupId is required");
         groupManager.muteGroupAll(groupId, operatorId, mute);
         return Map.of("status", "OK", "mute", mute);
+    }
+
+    private Object handleApplyList(ApiRequest req) {
+        String operatorId = req.currentUserId();
+        if (operatorId == null) throw new UnauthorizedException("not authenticated");
+        boolean onlyPending = req.getBoolean("onlyPending", true);
+        List<GroupApply> applies = groupManager.getManageableJoinRequests(operatorId, onlyPending);
+        return Map.of("operatorId", operatorId, "applies", applies, "count", applies.size());
+    }
+
+    private Object handleApplyUnhandledCount(ApiRequest req) {
+        String operatorId = req.currentUserId();
+        if (operatorId == null) throw new UnauthorizedException("not authenticated");
+        int count = groupManager.getManageableJoinRequests(operatorId, true).size();
+        return Map.of("count", count);
+    }
+
+    private Object handleApplyApprove(ApiRequest req) {
+        String operatorId = req.currentUserId();
+        String groupId = req.getString("groupId");
+        String userId = req.getString("userId");
+        boolean agreed = req.getBoolean("agreed", true);
+        String handleMsg = req.getString("handleMsg", "");
+        if (operatorId == null) throw new UnauthorizedException("not authenticated");
+        if (groupId == null || userId == null) {
+            throw new ValidationException("groupId and userId are required");
+        }
+        requireGroupAdmin(groupId, operatorId);
+        groupManager.respondJoinRequest(groupId, userId, operatorId, handleMsg, agreed);
+        return Map.of("status", "OK");
+    }
+
+    private void requireGroupAdmin(String groupId, String operatorId) {
+        String role = groupManager.getRole(groupId, operatorId);
+        if (!"owner".equals(role) && !"admin".equals(role)) {
+            throw new ForbiddenException("only group owner or admin can operate group apply");
+        }
     }
 }

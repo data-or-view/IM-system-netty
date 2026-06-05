@@ -6,6 +6,7 @@ export interface HttpTransportOptions {
   baseUrl: string;
   getToken?: () => string | null;
   fetchImpl?: FetchLike;
+  requestIdFactory?: () => string;
 }
 
 interface HttpEnvelope<T> {
@@ -21,11 +22,13 @@ export class HttpTransport {
   private readonly baseUrl: string;
   private readonly getToken: () => string | null;
   private readonly fetchImpl: FetchLike;
+  private readonly requestIdFactory: () => string;
 
   constructor(opts: HttpTransportOptions) {
     this.baseUrl = opts.baseUrl.replace(/\/+$/, "");
     this.getToken = opts.getToken ?? (() => null);
     this.fetchImpl = opts.fetchImpl ?? ((input, init) => globalThis.fetch(input, init));
+    this.requestIdFactory = opts.requestIdFactory ?? defaultRequestId;
   }
 
   get<T>(path: string, query: Record<string, unknown> = {}): Promise<T> {
@@ -83,7 +86,11 @@ export class HttpTransport {
   }
 
   private async request<T>(path: string, init: RequestInit): Promise<T> {
-    const resp = await this.fetchImpl(`${this.baseUrl}${path}`, init);
+    const headers = {
+      ...(init.headers as Record<string, string> | undefined),
+      "X-Request-Id": this.requestIdFactory(),
+    };
+    const resp = await this.fetchImpl(`${this.baseUrl}${path}`, { ...init, headers });
     let payload: unknown;
     try {
       payload = await resp.json();
@@ -132,4 +139,9 @@ export class HttpTransport {
     const encoded = params.toString();
     return encoded ? `?${encoded}` : "";
   }
+}
+
+function defaultRequestId(): string {
+  const random = Math.random().toString(36).slice(2, 10);
+  return `req_${Date.now().toString(36)}_${random}`;
 }

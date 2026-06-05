@@ -87,10 +87,12 @@ export class IMSDK {
       maxReconnect: opts.maxReconnect,
       heartbeatInterval: opts.heartbeatInterval,
       requestTimeout: opts.requestTimeout,
+      requestIdFactory: opts.requestIdFactory,
     });
     this.httpTransport = opts.httpUrl ? new HttpTransport({
       baseUrl: opts.httpUrl,
       getToken: this.getToken,
+      requestIdFactory: opts.requestIdFactory,
     }) : undefined;
 
     this.user = new UserAPI(this.transport, this.httpTransport);
@@ -154,6 +156,14 @@ export class IMSDK {
     const response = await this.user.login(userId, password);
     const tokens = response.data as TokenPair | undefined;
     return this.applyTokens(tokens ?? {});
+  }
+
+  /** 清空 SDK 内存中的 token。宿主应用仍负责清理自己的持久化存储。 */
+  clearTokens(): void {
+    this.accessToken = null;
+    this.refreshTokenValue = null;
+    this.opts.onTokenChanged?.({});
+    this.bus.emit("tokenChanged", {});
   }
 
   // ── 连接管理 ──

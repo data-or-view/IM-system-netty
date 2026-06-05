@@ -6,8 +6,7 @@ import com.baomidou.mybatisplus.annotation.TableName;
 /**
  * 消息实体，映射 {@code im_messages} 表。
  *
- * <p>对应 OpenIM {@code model.MsgDataModel + MsgInfoModel}。
- * 将撤回信息和删除标记内联到消息行，不另建表。</p>
+ * <p>对应 OpenIM {@code model.MsgDataModel + MsgInfoModel}。</p>
  *
  * <p>SenderNickname/SenderFaceURL 冗余存储：即使以后用户改名改头像，
  * 历史消息里看到的是发消息那一刻的信息。</p>
@@ -63,9 +62,6 @@ public class MessageEntity {
     @TableField("status")
     private int status;
 
-    @TableField("is_read")
-    private int isRead;
-
     // ── 撤回信息 ──
     @TableField("revoke_user_id")
     private String revokeUserId;
@@ -78,10 +74,6 @@ public class MessageEntity {
 
     @TableField("revoke_time")
     private long revokeTime;
-
-    // ── 删除标记 ──
-    @TableField("del_user_ids")
-    private String delUserIds;
 
     // ── @用户 ──
     @TableField("at_user_ids")
@@ -164,9 +156,6 @@ public class MessageEntity {
     public int getStatus() { return status; }
     public void setStatus(int status) { this.status = status; }
 
-    public int getIsRead() { return isRead; }
-    public void setIsRead(int isRead) { this.isRead = isRead; }
-
     public String getRevokeUserId() { return revokeUserId; }
     public void setRevokeUserId(String revokeUserId) { this.revokeUserId = revokeUserId; }
 
@@ -178,9 +167,6 @@ public class MessageEntity {
 
     public long getRevokeTime() { return revokeTime; }
     public void setRevokeTime(long revokeTime) { this.revokeTime = revokeTime; }
-
-    public String getDelUserIds() { return delUserIds; }
-    public void setDelUserIds(String delUserIds) { this.delUserIds = delUserIds; }
 
     public String getAtUserIds() { return atUserIds; }
     public void setAtUserIds(String atUserIds) { this.atUserIds = atUserIds; }

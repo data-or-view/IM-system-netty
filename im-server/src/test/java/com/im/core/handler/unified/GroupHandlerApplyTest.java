@@ -1,0 +1,135 @@
+package com.im.core.handler.unified;
+
+import com.im.api.ApiRequest;
+import com.im.api.GroupApply;
+import com.im.api.GroupInformation;
+import com.im.api.GroupMemberInformation;
+import com.im.api.IGroupManager;
+import com.im.api.IncrementalSyncResult;
+import com.im.api.Operation;
+import com.im.common.exception.ForbiddenException;
+import org.junit.jupiter.api.Test;
+
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+
+class GroupHandlerApplyTest {
+
+    @Test
+    void ownerCanListManageablePendingGroupApplies() {
+        RecordingGroupManager manager = new RecordingGroupManager();
+        GroupApply apply = new GroupApply();
+        apply.setGroupId("grp_1");
+        apply.setUserId("alice");
+        apply.setHandleResult(0);
+        manager.manageableApplies = List.of(apply);
+        GroupHandler handler = new GroupHandler(manager);
+        ApiRequest request = request(Operation.GROUP_APPLY_LIST, Map.of("onlyPending", true), "owner");
+
+        Object response = handler.handle(request);
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> body = (Map<String, Object>) response;
+        @SuppressWarnings("unchecked")
+        List<GroupApply> applies = (List<GroupApply>) body.get("applies");
+        assertEquals("owner", body.get("operatorId"));
+        assertEquals(1, body.get("count"));
+        assertEquals("alice", applies.get(0).getUserId());
+        assertEquals("owner", manager.manageableOperatorId);
+        assertEquals(true, manager.manageableOnlyPending);
+    }
+
+    @Test
+    void nonAdminCannotApproveGroupApply() {
+        RecordingGroupManager manager = new RecordingGroupManager();
+        manager.role = "member";
+        GroupHandler handler = new GroupHandler(manager);
+        ApiRequest request = request(Operation.GROUP_APPLY_APPROVE,
+                Map.of("groupId", "grp_1", "userId", "alice", "agreed", true), "bob");
+
+        assertThrows(ForbiddenException.class, () -> handler.handle(request));
+        assertEquals(0, manager.respondCalls);
+    }
+
+    @Test
+    void adminCanApproveGroupApply() {
+        RecordingGroupManager manager = new RecordingGroupManager();
+        manager.role = "admin";
+        GroupHandler handler = new GroupHandler(manager);
+        ApiRequest request = request(Operation.GROUP_APPLY_APPROVE,
+                Map.of("groupId", "grp_1", "userId", "alice", "agreed", true, "handleMsg", "ok"), "admin");
+
+        handler.handle(request);
+
+        assertEquals(1, manager.respondCalls);
+        assertEquals("grp_1", manager.respondGroupId);
+        assertEquals("alice", manager.respondUserId);
+        assertEquals("admin", manager.respondOperatorId);
+        assertEquals("ok", manager.respondHandleMsg);
+        assertEquals(true, manager.respondAgreed);
+    }
+
+    private static ApiRequest request(Operation operation, Map<String, Object> params, String userId) {
+        ApiRequest request = new ApiRequest(operation, params, Map.of(), null, null);
+        request.setAttribute("_uid", userId);
+        return request;
+    }
+
+    private static class RecordingGroupManager implements IGroupManager {
+        List<GroupApply> manageableApplies = List.of();
+        String manageableOperatorId;
+        boolean manageableOnlyPending;
+        String role = "owner";
+        int respondCalls;
+        String respondGroupId;
+        String respondUserId;
+        String respondOperatorId;
+        String respondHandleMsg;
+        boolean respondAgreed;
+
+        @Override public void createGroup(String groupId, String ownerId, String groupName, String faceUrl, List<String> members, int groupType, int needVerification) {}
+        @Override public void disbandGroup(String groupId, String operatorId) {}
+        @Override public void setGroupInformation(String groupId, String groupName, String notification, String introduction, String faceUrl, int needVerification, int lookMemberInfo, int applyMemberFriend, String notificationUserId) {}
+        @Override public void addMember(String groupId, String userId) {}
+        @Override public void addMembers(String groupId, List<String> userIds) {}
+        @Override public void kickMember(String groupId, String operatorId, String targetUserId) {}
+        @Override public void quitGroup(String groupId, String userId) {}
+        @Override public void transferOwner(String groupId, String oldOwnerId, String newOwnerId) {}
+        @Override public void setMemberRole(String groupId, String operatorId, String targetUserId, int roleLevel) {}
+        @Override public void muteMember(String groupId, String targetUserId, long muteEndTime) {}
+        @Override public void joinGroup(String groupId, String userId, String reqMsg) {}
+
+        @Override
+        public void respondJoinRequest(String groupId, String userId, String operatorId, String handleMsg, boolean agreed) {
+            respondCalls++;
+            respondGroupId = groupId;
+            respondUserId = userId;
+            respondOperatorId = operatorId;
+            respondHandleMsg = handleMsg;
+            respondAgreed = agreed;
+        }
+
+        @Override public List<GroupApply> getJoinRequests(String groupId, boolean onlyPending) { return List.of(); }
+
+        @Override
+        public List<GroupApply> getManageableJoinRequests(String operatorId, boolean onlyPending) {
+            manageableOperatorId = operatorId;
+            manageableOnlyPending = onlyPending;
+            return manageableApplies;
+        }
+
+        @Override public List<GroupMemberInformation> getMemberList(String groupId) { return List.of(); }
+        @Override public Set<String> getMemberIds(String groupId) { return Set.of(); }
+        @Override public boolean isMember(String groupId, String userId) { return false; }
+        @Override public String getRole(String groupId, String userId) { return role; }
+        @Override public Set<String> getJoinedGroups(String userId) { return Set.of(); }
+        @Override public GroupInformation getGroupInformation(String groupId) { return null; }
+        @Override public List<GroupInformation> searchGroups(String keyword, int limit) { return List.of(); }
+        @Override public IncrementalSyncResult<String> getIncrementalGroups(String userId, long version) { return new IncrementalSyncResult<>(List.of(), version, false); }
+        @Override public IncrementalSyncResult<GroupMemberInformation> getIncrementalMembers(String groupId, long version) { return new IncrementalSyncResult<>(List.of(), version, false); }
+    }
+}

@@ -1,6 +1,7 @@
 package com.im.core.webhook;
 
 import com.im.api.IWebhookManager;
+import com.im.common.util.IMExecutors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -93,8 +94,8 @@ public class LocalWebhookManager implements IWebhookManager {
                 .POST(HttpRequest.BodyPublishers.ofString(payload))
                 .build();
 
-        // 虚拟线程异步发送，不阻塞主流程
-        Thread.ofVirtual().name("webhook-after-" + event.name().toLowerCase()).start(() -> {
+        // after webhook 是外部 HTTP 调用，放到虚拟线程避免阻塞主业务链路。
+        IMExecutors.startVirtualThread("webhook-after-" + event.name().toLowerCase(), () -> {
             try {
                 HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
                 if (resp.statusCode() >= 200 && resp.statusCode() < 300) {

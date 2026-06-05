@@ -20,9 +20,15 @@ import static io.netty.handler.codec.http.HttpHeaderValues.APPLICATION_JSON;
 public class JsonResponse {
 
     private static final ObjectMapper MAPPER = ObjectMapperProvider.get();
+    private static final String CORS_ALLOW_HEADERS = "Content-Type, Authorization, X-Request-Id, X-Trace-Id";
+    private static final String CORS_EXPOSE_HEADERS = "X-Request-Id";
 
     public static void ok(ChannelHandlerContext ctx, Object data) {
-        write(ctx, HttpResponseStatus.OK, data);
+        write(ctx, HttpResponseStatus.OK, data, null);
+    }
+
+    public static void ok(ChannelHandlerContext ctx, Object data, String requestId) {
+        write(ctx, HttpResponseStatus.OK, data, requestId);
     }
 
     public static void created(ChannelHandlerContext ctx, Object data) {
@@ -43,13 +49,17 @@ public class JsonResponse {
      * 并在 JSON body 中携带原始 IM 错误码。
      */
     public static void imError(ChannelHandlerContext ctx, ImErrorCode imCode, String detail) {
+        imError(ctx, imCode, detail, null);
+    }
+
+    public static void imError(ChannelHandlerContext ctx, ImErrorCode imCode, String detail, String requestId) {
         HttpResponseStatus httpStatus = toHttpStatus(imCode);
         String msg = detail != null ? detail : imCode.getMessage();
         try {
             String json = MAPPER.writeValueAsString(new ErrorBody(httpStatus.code(), imCode.getCode(), msg));
-            writeRaw(ctx, httpStatus, json);
+            writeRaw(ctx, httpStatus, json, requestId);
         } catch (Exception e) {
-            writeRaw(ctx, httpStatus, "{\"code\":" + httpStatus.code() + ",\"imCode\":" + imCode.getCode() + ",\"message\":\"" + msg + "\"}");
+            writeRaw(ctx, httpStatus, "{\"code\":" + httpStatus.code() + ",\"imCode\":" + imCode.getCode() + ",\"message\":\"" + msg + "\"}", requestId);
         }
     }
 
@@ -83,9 +93,13 @@ public class JsonResponse {
     }
 
     private static void write(ChannelHandlerContext ctx, HttpResponseStatus status, Object data) {
+        write(ctx, status, data, null);
+    }
+
+    private static void write(ChannelHandlerContext ctx, HttpResponseStatus status, Object data, String requestId) {
         try {
             String json = MAPPER.writeValueAsString(data);
-            writeRaw(ctx, status, json);
+            writeRaw(ctx, status, json, requestId);
         } catch (Exception e) {
             writeRaw(ctx, HttpResponseStatus.INTERNAL_SERVER_ERROR,
                     "{\"code\":500,\"message\":\"serialization error\"}");
@@ -93,13 +107,21 @@ public class JsonResponse {
     }
 
     private static void writeRaw(ChannelHandlerContext ctx, HttpResponseStatus status, String json) {
+        writeRaw(ctx, status, json, null);
+    }
+
+    private static void writeRaw(ChannelHandlerContext ctx, HttpResponseStatus status, String json, String requestId) {
         ByteBuf content = Unpooled.copiedBuffer(json, StandardCharsets.UTF_8);
         FullHttpResponse resp = new DefaultFullHttpResponse(HttpVersion.HTTP_1_1, status, content);
         resp.headers().set(HttpHeaderNames.CONTENT_TYPE, APPLICATION_JSON);
         resp.headers().set(HttpHeaderNames.CONTENT_LENGTH, content.readableBytes());
         resp.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
         resp.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_METHODS, "GET, POST, PUT, DELETE, OPTIONS");
-        resp.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_HEADERS, "Content-Type, Authorization");
+        resp.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_HEADERS, CORS_ALLOW_HEADERS);
+        resp.headers().set(HttpHeaderNames.ACCESS_CONTROL_EXPOSE_HEADERS, CORS_EXPOSE_HEADERS);
+        if (requestId != null && !requestId.isBlank()) {
+            resp.headers().set("X-Request-Id", requestId);
+        }
         ctx.writeAndFlush(resp).addListener(ChannelFutureListener.CLOSE);
     }
 

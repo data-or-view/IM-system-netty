@@ -14,23 +14,29 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class HttpResponseWriter implements ResponseWriter {
 
     private final ChannelHandlerContext ctx;
+    private final String requestId;
     private final AtomicBoolean committed = new AtomicBoolean(false);
 
     public HttpResponseWriter(ChannelHandlerContext ctx) {
+        this(ctx, null);
+    }
+
+    public HttpResponseWriter(ChannelHandlerContext ctx, String requestId) {
         this.ctx = ctx;
+        this.requestId = requestId;
     }
 
     @Override
     public void write(Object result) {
         if (result != null && committed.compareAndSet(false, true)) {
-            JsonResponse.ok(ctx, result);
+            JsonResponse.ok(ctx, result, requestId);
         }
     }
 
     @Override
     public void writeError(ImErrorCode code, String detail) {
         if (committed.compareAndSet(false, true)) {
-            JsonResponse.imError(ctx, code, detail);
+            JsonResponse.imError(ctx, code, detail, requestId);
         }
     }
 

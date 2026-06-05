@@ -1,4 +1,4 @@
-import { type Conversation } from "../types.js";
+import { type Conversation, type ConversationReadResult } from "../types.js";
 import { type HttpAPI, requireHttp } from "./http-api.js";
 
 /**
@@ -22,10 +22,10 @@ export class ConversationAPI {
   }
 
   /** 标记会话已读 */
-  read(conversationId: string, seq?: number): Promise<void> {
-    return requireHttp(this.transport).post("/api/conversation/read", {
+  read(conversationId: string, seq?: number): Promise<ConversationReadResult> {
+    return requireHttp(this.transport).post<ConversationReadResult>("/api/conversation/read", {
       conversationId,
       ...(seq !== undefined ? { readSeq: seq } : {}),
-    }).then(() => undefined);
+    });
   }
 }

@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { Toaster } from "sonner";
 import { StoreProvider, useStore } from "@/store/store";
@@ -13,10 +13,50 @@ import { CallProvider } from "@/components/call/CallProvider";
 import { CallDialog } from "@/components/call/CallDialog";
 
 function AuthGate() {
-  const { state, login: storeLogin, register: storeRegister } = useStore();
+  const { state, login: storeLogin, register: storeRegister, logout } = useStore();
   const [connecting, setConnecting] = useState(false);
+  const [checkingAuth, setCheckingAuth] = useState(Boolean(state.token && state.userId));
   const [statusMsg, setStatusMsg] = useState("");
   const connectingRef = useRef(false);
+  const checkedAuthKeyRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!state.token || !state.userId) {
+      checkedAuthKeyRef.current = null;
+      setCheckingAuth(false);
+      return;
+    }
+
+    const authKey = `${state.userId}:${state.token}`;
+    if (checkedAuthKeyRef.current === authKey) {
+      setCheckingAuth(false);
+      return;
+    }
+
+    let cancelled = false;
+    const isInitialCheck = checkedAuthKeyRef.current === null;
+    if (isInitialCheck) {
+      setCheckingAuth(true);
+    }
+    im.user.info(state.userId)
+      .then(() => {
+        if (!cancelled) {
+          checkedAuthKeyRef.current = authKey;
+          setCheckingAuth(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          checkedAuthKeyRef.current = null;
+          logout();
+          setCheckingAuth(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [logout, state.token, state.userId]);
 
   const handleLogin = useCallback(
     async (userId: string, password?: string) => {
@@ -81,6 +121,17 @@ function AuthGate() {
     },
     [storeRegister]
   );
+
+  if (checkingAuth) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100">
+        <div className="rounded-xl border bg-card px-6 py-5 text-center shadow-lg">
+          <div className="text-sm font-medium">正在校验登录状态...</div>
+          <div className="mt-1 text-xs text-muted-foreground">如果后端数据已重置，会自动回到登录页</div>
+        </div>
+      </div>
+    );
+  }
 
   if (!state.token || !state.userId) {
     return (

@@ -2,6 +2,7 @@ package com.im.core.discovery;
 
 import com.im.api.NodeInformation;
 import com.im.api.INodeDiscovery;
+import com.im.common.util.IMExecutors;
 import com.im.core.redis.RedisConfiguration;
 import io.lettuce.core.cluster.api.async.RedisClusterAsyncCommands;
 import org.slf4j.Logger;
@@ -9,7 +10,6 @@ import org.slf4j.LoggerFactory;
 
 import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -56,19 +56,8 @@ public class RedisNodeDiscovery implements INodeDiscovery {
     public void start() {
         if (!running.compareAndSet(false, true)) return;
 
-        // 心跳定时器（每 10s 刷新本节点 TTL）
-        this.heartbeatExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread t = new Thread(r, "redis-node-heartbeat");
-            t.setDaemon(true);
-            return t;
-        });
-
-        // 扫描定时器（每 15s 检查过期节点）
-        this.scanExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread t = new Thread(r, "redis-node-scan");
-            t.setDaemon(true);
-            return t;
-        });
+        this.heartbeatExecutor = IMExecutors.newScheduledExecutor("redis-node-heartbeat", 1);
+        this.scanExecutor = IMExecutors.newScheduledExecutor("redis-node-scan", 1);
 
         // 启动后立即执行一次心跳，然后按间隔执行
         if (self != null) {

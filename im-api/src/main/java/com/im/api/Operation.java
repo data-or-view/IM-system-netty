@@ -45,6 +45,9 @@ public enum Operation {
     GROUP_SEARCH("group.search", "GET", "/api/group/search", true, TransportType.HTTP_ONLY),
     GROUP_MEMBERS("group.members", "GET", "/api/group/members", true, TransportType.HTTP_ONLY),
     GROUP_MUTE_ALL("group.mute_all", "POST", "/api/group/mute/all", true, TransportType.HTTP_ONLY),
+    GROUP_APPLY_LIST("group.apply.list", "GET", "/api/group/apply/list", true, TransportType.HTTP_ONLY),
+    GROUP_APPLY_UNHANDLED_COUNT("group.apply.unhandled.count", "GET", "/api/group/apply/unhandled/count", true, TransportType.HTTP_ONLY),
+    GROUP_APPLY_APPROVE("group.apply.approve", "POST", "/api/group/apply/approve", true, TransportType.HTTP_ONLY),
 
     // ── 会话 ──
     CONVERSATION_LIST("conversation.list", "GET", "/api/conversation/list", true, TransportType.HTTP_ONLY),

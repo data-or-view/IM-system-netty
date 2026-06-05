@@ -8,6 +8,7 @@ import com.im.common.exception.ImException;
 import com.im.common.exception.UnauthorizedException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 
 /**
  * 认证拦截器（统一 WS+HTTP）。
@@ -70,7 +71,8 @@ public class AuthInterceptor implements ApiInterceptor {
         // 验证
         try {
             String userId = authenticator.authenticate(token);
-            request.setAttribute("_uid", userId);
+            request.setAttribute(ApiRequest.ATTR_USER_ID, userId);
+            MDC.put("app.user.id", userId);
             log.debug("AUTH OK: userId={}, op={}", userId, request.operation());
             return true;
         } catch (ImException e) {

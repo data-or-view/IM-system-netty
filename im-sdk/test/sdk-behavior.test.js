@@ -241,6 +241,41 @@ test("HTTP resource APIs require httpUrl instead of falling back to websocket", 
   );
 });
 
+test("HttpTransport attaches generated X-Request-Id to every request", async () => {
+  const calls = [];
+  const http = new HttpTransport({
+    baseUrl: "http://im.test",
+    requestIdFactory: () => "req_http_1",
+    fetchImpl: async (input, init) => {
+      calls.push({ input, init });
+      return new Response(JSON.stringify({ code: 0, data: { ok: true } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    },
+  });
+
+  await http.get("/api/conversation/list");
+
+  assert.equal(calls[0].init.headers["X-Request-Id"], "req_http_1");
+});
+
+test("WsTransport attaches generated _requestId to request frames", async () => {
+  const ws = new WsTransport({
+    requestIdFactory: () => "req_ws_1",
+  });
+  const sentFrames = [];
+  ws.send = (frame) => {
+    sentFrames.push(frame);
+    return true;
+  };
+
+  const pending = ws.request("chat.send", { toUserId: "u2" });
+  pending.catch(() => {});
+
+  assert.equal(sentFrames[0]._requestId, "req_ws_1");
+});
+
 
 test("friend receivedApplyList uses received apply endpoint with pending filter", async () => {
   const { http, calls } = createHttpCapture({ applies: [{ fromUserId: "alice", toUserId: "bob", handleResult: 0 }] });
@@ -314,6 +349,33 @@ test("sdk.login stores returned tokens and emits tokenChanged", async () => {
   assert.equal(im.token, "access-1");
   assert.equal(im.refreshToken, "refresh-1");
   assert.deepEqual(tokens, [{ token: "access-1", refreshToken: "refresh-1", expiresIn: 7200 }]);
+});
+
+test("sdk.clearTokens removes in-memory tokens and emits empty tokenChanged", async () => {
+  const changed = [];
+  const im = createIM({
+    wsUrl: "ws://example.test/ws",
+    onTokenChanged: (tokens) => changed.push(tokens),
+  });
+  const emitted = [];
+  im.on("tokenChanged", (tokenPair) => emitted.push(tokenPair));
+  im.user.login = async () => ({
+    op: "login_ack",
+    seq: 1,
+    code: 0,
+    data: {
+      token: "access-1",
+      refreshToken: "refresh-1",
+    },
+  });
+
+  await im.login("u1", "pw");
+  im.clearTokens();
+
+  assert.equal(im.token, null);
+  assert.equal(im.refreshToken, null);
+  assert.deepEqual(changed.at(-1), {});
+  assert.deepEqual(emitted.at(-1), {});
 });
 
 test("transport heartbeat carries refresh token and updates token from heartbeat ack", async () => {
@@ -527,4 +589,19 @@ test("sdk file api requires httpUrl instead of falling back to websocket", async
     () => im.file.upload("a.txt", new Uint8Array([1]), "text/plain"),
     (err) => err instanceof IMError && err.message === "File API requires httpUrl",
   );
+});
+
+test("conversation.read sends readSeq over HTTP and returns unread count", async () => {
+  const { http, calls } = createHttpCapture({ conversationId: "c1", unreadCount: 0 });
+  const { ConversationAPI } = await import("../dist/api/conversation.js");
+  const api = new ConversationAPI(http);
+
+  const result = await api.read("c1", 12);
+
+  assert.deepEqual(result, { conversationId: "c1", unreadCount: 0 });
+  assert.deepEqual(calls[0], {
+    method: "POST",
+    path: "/api/conversation/read",
+    body: { conversationId: "c1", readSeq: 12 },
+  });
 });

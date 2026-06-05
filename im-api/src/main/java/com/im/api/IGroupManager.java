@@ -123,6 +123,18 @@ public interface IGroupManager {
     List<GroupApply> getJoinRequests(String groupId, boolean onlyPending);
 
     /**
+     * 获取当前操作者有权管理的群加群申请。
+     *
+     * <p>只应返回操作者是群主或管理员的群申请，避免 groupId=null 时泄露全库申请。</p>
+     *
+     * @param operatorId   当前操作者用户 ID
+     * @param onlyPending  true=只查待处理的
+     */
+    default List<GroupApply> getManageableJoinRequests(String operatorId, boolean onlyPending) {
+        return List.of();
+    }
+
+    /**
      * 全员禁言。
      *
      * <p>全员禁言后，只有群主和管理员可以发言。

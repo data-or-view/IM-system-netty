@@ -1,5 +1,6 @@
 package com.im.common.lifecycle;
 
+import com.im.common.util.IMExecutors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -56,7 +57,7 @@ public final class LifecycleManager {
      * 注册 JVM 关闭钩子，应用退出时逆序关闭所有组件。
      */
     public static void registerShutdownHook(List<? extends Lifecycle> components) {
-        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+        Runtime.getRuntime().addShutdownHook(IMExecutors.newPlatformThreadFactory("lifecycle-shutdown-hook", false).newThread(() -> {
             log.info("Shutting down {} components...", components.size());
             stopAll(components);
         }));

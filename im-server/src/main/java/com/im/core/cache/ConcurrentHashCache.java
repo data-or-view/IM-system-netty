@@ -1,5 +1,6 @@
 package com.im.core.cache;
 
+import com.im.common.util.IMExecutors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -9,7 +10,6 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -45,11 +45,7 @@ public class ConcurrentHashCache<K, V> implements Cache<K, V> {
 
     public ConcurrentHashCache() {
         this.store = new ConcurrentHashMap<>();
-        this.cleanupExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread t = new Thread(r, "cache-cleanup");
-            t.setDaemon(true);
-            return t;
-        });
+        this.cleanupExecutor = IMExecutors.newScheduledExecutor("cache-cleanup", 1);
         this.cleanupExecutor.scheduleAtFixedRate(
                 this::cleanupExpired,
                 CLEANUP_INTERVAL_SECONDS,

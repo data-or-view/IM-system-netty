@@ -19,6 +19,12 @@ import java.util.Map;
  */
 public class ApiRequest {
 
+    public static final String ATTR_USER_ID = "_uid";
+    public static final String ATTR_CONNECTION_ID = "_connectionId";
+    public static final String ATTR_REQUEST_ID = "_requestId";
+    public static final String ATTR_TRACE_ID = "_traceId";
+    public static final String ATTR_WS_SEQ = "_wsSeq";
+
     private final String operation;
     private final Operation op;
     private final Map<String, Object> params;
@@ -89,7 +95,7 @@ public class ApiRequest {
      * 未认证的操作返回 null。
      */
     public String currentUserId() {
-        Object uid = attributes.get("_uid");
+        Object uid = attributes.get(ATTR_USER_ID);
         return uid != null ? uid.toString() : null;
     }
 

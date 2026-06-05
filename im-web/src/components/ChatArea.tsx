@@ -34,6 +34,7 @@ export default function ChatArea() {
   // Load history when conversation changes
   useEffect(() => {
     if (!conv?.conversationId) return;
+    if (!conv.latestMsg && !conv.latestMsgSendTime && messages.length === 0) return;
     const loadHistory = async () => {
       try {
         const maxSeq = await im.message.seq(conv.conversationId);
@@ -60,7 +61,7 @@ export default function ChatArea() {
       }
     };
     loadHistory();
-  }, [conv?.conversationId, dispatch]);
+  }, [conv?.conversationId, conv?.latestMsg, conv?.latestMsgSendTime, dispatch, messages.length]);
 
   const handleSend = () => {
     if (!input.trim() || !conv) return;

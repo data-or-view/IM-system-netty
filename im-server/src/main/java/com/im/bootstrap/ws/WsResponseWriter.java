@@ -30,12 +30,18 @@ public class WsResponseWriter implements ResponseWriter {
     private final ChannelHandlerContext ctx;
     private final int seq;
     private final String operation;
+    private final String requestId;
     private final AtomicBoolean committed = new AtomicBoolean(false);
 
     public WsResponseWriter(ChannelHandlerContext ctx, int seq, String operation) {
+        this(ctx, seq, operation, null);
+    }
+
+    public WsResponseWriter(ChannelHandlerContext ctx, int seq, String operation, String requestId) {
         this.ctx = ctx;
         this.seq = seq;
         this.operation = operation;
+        this.requestId = requestId;
     }
 
     @Override
@@ -47,6 +53,9 @@ public class WsResponseWriter implements ResponseWriter {
         envelope.put("op", operation + "_ack");
         envelope.put("seq", seq);
         envelope.put("code", 0);
+        if (requestId != null && !requestId.isBlank()) {
+            envelope.put("requestId", requestId);
+        }
         if (result != null) {
             envelope.put("data", result);
         }
@@ -63,6 +72,9 @@ public class WsResponseWriter implements ResponseWriter {
         envelope.put("seq", seq);
         envelope.put("code", code.getCode());
         envelope.put("msg", code.getMessage());
+        if (requestId != null && !requestId.isBlank()) {
+            envelope.put("requestId", requestId);
+        }
         if (detail != null && !detail.isEmpty()) {
             envelope.put("detail", detail);
         }

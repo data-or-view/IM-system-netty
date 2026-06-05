@@ -1,4 +1,4 @@
-import { type GroupInfo, type GroupMember } from "../types.js";
+import { type GroupApply, type GroupInfo, type GroupMember } from "../types.js";
 import { type HttpAPI, requireHttp } from "./http-api.js";
 
 /**
@@ -8,11 +8,12 @@ export class GroupAPI {
   constructor(private transport?: HttpAPI) {}
 
   /** 创建群组 */
-  create(groupName: string, groupType?: number, memberIds?: string[]): Promise<GroupInfo> {
+  create(groupName: string, groupType?: number, memberIds?: string[], needVerification?: number): Promise<GroupInfo> {
     return requireHttp(this.transport).post<GroupInfo>("/api/group/create", {
       groupName,
       ...(groupType !== undefined ? { groupType } : {}),
       ...(memberIds ? { members: memberIds } : {}),
+      ...(needVerification !== undefined ? { needVerification } : {}),
     });
   }
 
@@ -80,6 +81,29 @@ export class GroupAPI {
     return requireHttp(this.transport).post("/api/group/mute/all", {
       groupId,
       mute: muted,
+    }).then(() => undefined);
+  }
+
+  /** 获取我可审批的加群申请 */
+  applyList(onlyPending = true): Promise<GroupApply[]> {
+    return requireHttp(this.transport).get<{ applies?: GroupApply[] }>("/api/group/apply/list", {
+      onlyPending,
+    }).then((data) => data.applies ?? []);
+  }
+
+  /** 获取我可审批的未处理加群申请数量 */
+  unhandledApplyCount(): Promise<number> {
+    return requireHttp(this.transport).get<{ count?: number } | number>("/api/group/apply/unhandled/count")
+      .then((data) => typeof data === "number" ? data : data.count ?? 0);
+  }
+
+  /** 审批加群申请 */
+  approveApply(groupId: string, userId: string, agreed: boolean, handleMsg?: string): Promise<void> {
+    return requireHttp(this.transport).post("/api/group/apply/approve", {
+      groupId,
+      userId,
+      agreed,
+      ...(handleMsg ? { handleMsg } : {}),
     }).then(() => undefined);
   }
 }

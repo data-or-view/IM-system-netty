@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.im.api.Message;
 import com.im.api.IMessageQueue;
 import com.im.common.exception.RedisPersistenceException;
+import com.im.common.util.IMExecutors;
 import com.im.core.redis.RedisConfiguration;
 import com.im.core.redis.RedisConfiguration.CloseableRedisCommands;
 import com.im.core.serialization.jackson.ObjectMapperProvider;
@@ -184,9 +185,7 @@ public class RedisMessageQueue implements IMessageQueue {
     private void startConsumer(String topic) {
         consumerTasks.computeIfAbsent(topic, t -> {
             ConsumerTask task = new ConsumerTask(t);
-            Thread thread = Thread.ofVirtual()
-                    .name("redis-mq-" + t)
-                    .start(task);
+            Thread thread = IMExecutors.startVirtualThread("redis-mq-" + t, task);
             task.thread = thread;
             return task;
         });

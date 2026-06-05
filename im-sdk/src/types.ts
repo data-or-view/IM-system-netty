@@ -34,6 +34,9 @@ export const OP = {
   GROUP_SEARCH: "group.search",
   GROUP_MEMBERS: "group.members",
   GROUP_MUTE_ALL: "group.mute_all",
+  GROUP_APPLY_LIST: "group.apply.list",
+  GROUP_APPLY_UNHANDLED_COUNT: "group.apply.unhandled.count",
+  GROUP_APPLY_APPROVE: "group.apply.approve",
   // Conversation
   CONVERSATION_LIST: "conversation.list",
   CONVERSATION_SET: "conversation.set",
@@ -153,6 +156,19 @@ export interface GroupMember {
   joinTime: number;
 }
 
+export interface GroupApply {
+  groupId: string;
+  userId: string;
+  reqMsg?: string;
+  handledMsg?: string;
+  handlerUserId?: string;
+  handleResult: number;
+  joinSource?: number;
+  inviterUserId?: string;
+  createTime: number;
+  handledTime?: number;
+}
+
 // ── Conversation ──
 
 export interface Conversation {
@@ -169,6 +185,11 @@ export interface Conversation {
   unreadCount: number;
   recvMsgOpt: number;
   isPinned: boolean;
+}
+
+export interface ConversationReadResult {
+  conversationId: string;
+  unreadCount: number;
 }
 
 // ── Message ──
@@ -568,6 +589,8 @@ export interface IMOptions {
   heartbeatInterval?: number;
   /** 请求超时 ms（默认 30000） */
   requestTimeout?: number;
+  /** 生成请求关联 ID。默认自动生成 req_xxx，用于前后端日志串联。 */
+  requestIdFactory?: () => string;
   /** 消息推送批处理窗口 ms（默认 16，一帧内合并）。设为 0 可关闭批处理延迟。 */
   messageBatchInterval?: number;
   /** 单批消息数量上限（默认 100）。超过后立即刷出，避免缓冲过大。 */

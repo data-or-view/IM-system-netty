@@ -6,12 +6,14 @@ import com.im.api.Operation;
 import com.im.api.RequestHandler;
 import com.im.common.enums.ImErrorCode;
 import com.im.common.exception.ImException;
+import com.im.common.exception.PersistenceException;
 import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.Tracer;
 import io.opentelemetry.context.Scope;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -121,23 +123,52 @@ public class ApiDispatcher {
      */
     public void dispatch(ApiRequest request) {
         String operation = request.operation();
-        RequestHandler handler = handlerMap.get(operation);
-
-        if (handler == null) {
-            log.warn("No handler for operation: {}", operation);
-            request.responseWriter().writeError(ImErrorCode.NOT_FOUND, "no handler for: " + operation);
-            return;
-        }
 
         Span span = TRACER.spanBuilder(operation).startSpan();
         try (Scope scope = span.makeCurrent()) {
+            bindMdc(request);
+            RequestHandler handler = handlerMap.get(operation);
+            if (handler == null) {
+                log.warn("No handler for operation: {}", operation);
+                request.responseWriter().writeError(ImErrorCode.NOT_FOUND, "no handler for: " + operation);
+                return;
+            }
             process(request, handler);
         } catch (Exception e) {
             span.recordException(e);
             throw e;
         } finally {
+            clearMdc();
             span.end();
         }
+    }
+
+    private void bindMdc(ApiRequest request) {
+        Object requestId = request.attribute(ApiRequest.ATTR_REQUEST_ID);
+        if (requestId != null) {
+            MDC.put("request_id", requestId.toString());
+        }
+        MDC.put("app.operation", request.operation());
+        Object userId = request.attribute(ApiRequest.ATTR_USER_ID);
+        if (userId != null) {
+            MDC.put("app.user.id", userId.toString());
+        }
+        Object connectionId = request.attribute(ApiRequest.ATTR_CONNECTION_ID);
+        if (connectionId != null) {
+            MDC.put("connection_id", connectionId.toString());
+        }
+        Object wsSeq = request.attribute(ApiRequest.ATTR_WS_SEQ);
+        if (wsSeq != null) {
+            MDC.put("ws.seq", wsSeq.toString());
+        }
+    }
+
+    private void clearMdc() {
+        MDC.remove("request_id");
+        MDC.remove("app.operation");
+        MDC.remove("app.user.id");
+        MDC.remove("connection_id");
+        MDC.remove("ws.seq");
     }
 
     private void process(ApiRequest request, RequestHandler handler) {
@@ -149,6 +180,7 @@ public class ApiDispatcher {
                 if (!interceptor.preHandle(request)) {
                     log.debug("Interceptor '{}' blocked request op={}", interceptor.name(), request.operation());
                     afterCompleteReverse(request, idx, null, null);
+                    // 这里是不是应该先写会结果在执行拦截器的after
                     request.responseWriter().writeError(ImErrorCode.FORBIDDEN,
                             "blocked by interceptor: " + interceptor.name());
                     return;
@@ -175,7 +207,11 @@ public class ApiDispatcher {
             result = handler.handle(request);
         } catch (ImException e) {
             handlerEx = e;
-            log.warn("Handler rejected: {} {} op={}", e.getCode(), e.getMessage(), request.operation());
+            if (e instanceof PersistenceException) {
+                log.error("Handler persistence failure: {} {} op={}", e.getCode(), e.getMessage(), request.operation(), e);
+            } else {
+                log.warn("Handler rejected: {} {} op={}", e.getCode(), e.getMessage(), request.operation());
+            }
             writeImError(request, e);
         } catch (Exception e) {
             handlerEx = e;

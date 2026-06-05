@@ -16,6 +16,7 @@ export default function CreateGroupPage() {
   const { state, dispatch, fetchConversations, fetchMyGroups } = useStore();
   const [groupName, setGroupName] = useState("");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [needVerification, setNeedVerification] = useState(true);
   const [creating, setCreating] = useState(false);
 
   const toggleMember = (userId: string) => {
@@ -28,7 +29,7 @@ export default function CreateGroupPage() {
     if (!groupName.trim() || creating) return;
     setCreating(true);
     try {
-      const group = await im.group.create(groupName.trim(), 0, selectedIds);
+      const group = await im.group.create(groupName.trim(), 0, selectedIds, needVerification ? 1 : 0);
       dispatch({ type: "SET_MY_GROUPS", list: [group, ...state.myGroups.filter((item) => item.groupId !== group.groupId)] });
       await Promise.all([fetchMyGroups(), fetchConversations()]);
       toast("群创建成功");
@@ -61,6 +62,26 @@ export default function CreateGroupPage() {
             value={groupName}
             onChange={(e) => setGroupName(e.target.value)}
           />
+          <button
+            type="button"
+            onClick={() => setNeedVerification((prev) => !prev)}
+            className="flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left text-sm transition-colors hover:bg-accent"
+          >
+            <span>
+              <span className="block font-medium">入群审批</span>
+              <span className="text-xs text-muted-foreground">
+                {needVerification ? "新成员需要群主或管理员同意后入群" : "新成员可以直接加入群聊"}
+              </span>
+            </span>
+            <span
+              className={cn(
+                "rounded-full px-2 py-0.5 text-xs",
+                needVerification ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
+              )}
+            >
+              {needVerification ? "已开启" : "已关闭"}
+            </span>
+          </button>
         </div>
 
         <Separator className="my-4" />

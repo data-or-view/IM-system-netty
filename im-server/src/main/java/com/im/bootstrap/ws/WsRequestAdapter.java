@@ -6,6 +6,7 @@ import com.im.api.ApiRequest;
 import com.im.api.Operation;
 import com.im.api.ResponseWriter;
 import com.im.bootstrap.DispatchSubmitter;
+import com.im.common.trace.RequestIds;
 import com.im.core.dispatcher.ApiDispatcher;
 import com.im.core.serialization.jackson.ObjectMapperProvider;
 import com.im.core.session.NettyConnectionRef;
@@ -109,6 +110,14 @@ public class WsRequestAdapter extends SimpleChannelInboundHandler<WebSocketFrame
         Map<String, Object> params = new HashMap<>(raw);
         params.remove("op");
         params.remove("seq");
+        Object requestIdObj = params.remove("_requestId");
+        Object traceIdObj = params.remove("_traceId");
+        String requestId = RequestIds.firstNonBlank(
+                requestIdObj != null ? requestIdObj.toString() : null,
+                traceIdObj != null ? traceIdObj.toString() : null);
+        if (requestId == null) {
+            requestId = RequestIds.next();
+        }
 
         // 提取协议头部（Authorization 等）
         Map<String, String> headers = new HashMap<>();
@@ -116,11 +125,14 @@ public class WsRequestAdapter extends SimpleChannelInboundHandler<WebSocketFrame
             headers.put("Authorization", params.get("Authorization").toString());
             params.remove("Authorization");
         }
+        headers.put("X-Request-Id", requestId);
 
         // 创建 ResponseWriter + ApiRequest 并提交到虚拟线程
-        ResponseWriter responseWriter = new WsResponseWriter(ctx, seq, operation.opName());
+        ResponseWriter responseWriter = new WsResponseWriter(ctx, seq, operation.opName(), requestId);
         ApiRequest request = new ApiRequest(operation, params, headers, responseWriter, null);
-        request.setAttribute("_connectionId", NettyConnectionRef.connectionId(ctx.channel()));
+        request.setAttribute(ApiRequest.ATTR_CONNECTION_ID, NettyConnectionRef.connectionId(ctx.channel()));
+        request.setAttribute(ApiRequest.ATTR_REQUEST_ID, requestId);
+        request.setAttribute(ApiRequest.ATTR_WS_SEQ, seq);
         DispatchSubmitter.submit(dispatcher, virtualExecutor, request, log);
     }
 }

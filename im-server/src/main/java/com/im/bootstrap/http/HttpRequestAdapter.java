@@ -7,6 +7,7 @@ import com.im.api.Operation;
 import com.im.api.ResponseWriter;
 import com.im.bootstrap.DispatchSubmitter;
 import com.im.common.enums.ImErrorCode;
+import com.im.common.trace.RequestIds;
 import com.im.core.dispatcher.ApiDispatcher;
 import com.im.core.serialization.jackson.ObjectMapperProvider;
 import io.netty.buffer.ByteBuf;
@@ -128,10 +129,19 @@ public class HttpRequestAdapter extends SimpleChannelInboundHandler<FullHttpRequ
         if (auth != null) {
             headers.put("Authorization", auth);
         }
+        String requestId = RequestIds.firstNonBlank(
+                req.headers().get("X-Request-Id"),
+                req.headers().get("X-Trace-Id"),
+                req.headers().get("traceparent"));
+        if (requestId == null) {
+            requestId = RequestIds.next();
+        }
+        headers.put("X-Request-Id", requestId);
 
         // 创建 ResponseWriter + ApiRequest 并提交到虚拟线程
-        ResponseWriter responseWriter = new HttpResponseWriter(ctx);
+        ResponseWriter responseWriter = new HttpResponseWriter(ctx, requestId);
         ApiRequest request = new ApiRequest(operation, params, headers, responseWriter, bodyRaw);
+        request.setAttribute(ApiRequest.ATTR_REQUEST_ID, requestId);
         DispatchSubmitter.submit(dispatcher, virtualExecutor, request, log);
     }
 

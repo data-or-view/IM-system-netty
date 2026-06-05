@@ -1,6 +1,6 @@
 <configuration>
     <property name="LOG_HOME" value="logs"/>
-    <property name="LOG_PATTERN" value="%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - [%X{trace_id:-no-trace}] [%X{app.user.id:-}] %msg%n"/>
+    <property name="LOG_PATTERN" value="%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - [trace=%X{trace_id:-no-trace}] [req=%X{request_id:-no-request}] [user=%X{app.user.id:-}] [op=%X{app.operation:-}] [conn=%X{connection_id:-}] [seq=%X{ws.seq:-}] %msg%n"/>
 
     <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
         <encoder>

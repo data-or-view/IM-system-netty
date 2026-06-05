@@ -39,6 +39,8 @@ import com.im.core.db.DatabaseConfiguration;
 import com.im.core.db.MyBatisPlusFactory;
 import com.im.core.db.SchemaInitializer;
 import com.im.core.store.DbMessageStore;
+import com.im.core.store.GroupMessageStoreAdapter;
+import com.im.core.store.SingleMessageStoreAdapter;
 import com.im.core.usecase.*;
 import com.im.core.user.DbUserManager;
 import com.im.common.util.IMExecutors;
@@ -54,7 +56,6 @@ import org.slf4j.LoggerFactory;
 import java.net.InetAddress;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
@@ -136,7 +137,8 @@ public class IMServer implements Lifecycle {
 
         ConsumerModule consumers = initConsumers(
                 nodeId, sessionManager, routeTable, clusterMessageBus, storage.messageQueue,
-                storage.messageStore, business.conversationManager, business.groupManager);
+                storage.singleMessageStore, storage.groupMessageStore,
+                business.conversationManager, business.groupManager);
         this.persistenceConsumer = consumers.persistenceConsumer;
         this.deliveryConsumer = consumers.deliveryConsumer;
 
@@ -167,6 +169,8 @@ public class IMServer implements Lifecycle {
 
     private record StorageModule(ISequenceManager sequenceManager,
                                  IMessageStore messageStore,
+                                 ISingleMessageStore singleMessageStore,
+                                 IGroupMessageStore groupMessageStore,
                                  IMessageQueue messageQueue,
                                  IFileStorageService fileStorage) {}
 
@@ -180,7 +184,7 @@ public class IMServer implements Lifecycle {
         return new RuntimeModule(
                 sessionManager,
                 new PendingAcknowledgementManager(),
-                Executors.newVirtualThreadPerTaskExecutor());
+                IMExecutors.newVirtualThreadExecutor("im-dispatch"));
     }
 
     private void applyMultiLoginStrategy(Config config, SessionManager sessionManager) {
@@ -219,12 +223,14 @@ public class IMServer implements Lifecycle {
                                             String nodeId, RetryExecutor retryExecutor) {
         ISequenceManager sequenceManager = new RedisSequenceManager(redisConfig);
         IMessageStore messageStore = new DbMessageStore(retryExecutor);
+        ISingleMessageStore singleMessageStore = new SingleMessageStoreAdapter(messageStore);
+        IGroupMessageStore groupMessageStore = new GroupMessageStoreAdapter(messageStore);
         IMessageQueue messageQueue = new RedisMessageQueue(redisConfig, nodeId);
         IFileStorageService fileStorage = new MinioFileStorageService(
                 config.getString("im.minio.endpoint").orElse("http://127.0.0.1:9000"),
                 config.getString("im.minio.access-key").orElse("minioadmin"),
                 config.getString("im.minio.secret-key").orElse("minioadmin"));
-        return new StorageModule(sequenceManager, messageStore, messageQueue, fileStorage);
+        return new StorageModule(sequenceManager, messageStore, singleMessageStore, groupMessageStore, messageQueue, fileStorage);
     }
 
     private CallModule initCallModule(Config config, IMessageQueue messageQueue) {
@@ -248,11 +254,12 @@ public class IMServer implements Lifecycle {
                                          IRouteTable routeTable,
                                          IClusterMessageBus clusterMessageBus,
                                          IMessageQueue messageQueue,
-                                         IMessageStore messageStore,
+                                         ISingleMessageStore singleMessageStore,
+                                         IGroupMessageStore groupMessageStore,
                                          IConversationManager conversationManager,
                                          IGroupManager groupManager) {
         PersistenceConsumer persistenceConsumer = new PersistenceConsumer(
-                messageQueue, messageStore, conversationManager, groupManager);
+                messageQueue, singleMessageStore, groupMessageStore, conversationManager, groupManager);
         DeliveryConsumer deliveryConsumer = new DeliveryConsumer(
                 messageQueue, sessionManager, routeTable, clusterMessageBus, nodeId, groupManager);
 
@@ -303,7 +310,8 @@ public class IMServer implements Lifecycle {
         dispatcher.registerHandlers(new com.im.core.handler.unified.GroupHandler(business.groupManager),
                 Operation.GROUP_CREATE, Operation.GROUP_JOIN, Operation.GROUP_QUIT, Operation.GROUP_KICK,
                 Operation.GROUP_DISBAND, Operation.GROUP_INFO_UPDATE, Operation.GROUP_INFO,
-                Operation.GROUP_LIST, Operation.GROUP_SEARCH, Operation.GROUP_MEMBERS, Operation.GROUP_MUTE_ALL);
+                Operation.GROUP_LIST, Operation.GROUP_SEARCH, Operation.GROUP_MEMBERS, Operation.GROUP_MUTE_ALL,
+                Operation.GROUP_APPLY_LIST, Operation.GROUP_APPLY_UNHANDLED_COUNT, Operation.GROUP_APPLY_APPROVE);
         dispatcher.registerHandlers(new com.im.core.handler.unified.ConversationHandler(
                         business.conversationManager, conversationAccessChecker),
                 Operation.CONVERSATION_LIST, Operation.CONVERSATION_SET, Operation.CONVERSATION_READ);

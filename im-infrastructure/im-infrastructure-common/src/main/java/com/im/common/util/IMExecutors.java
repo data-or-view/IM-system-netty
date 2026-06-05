@@ -44,11 +44,30 @@ public final class IMExecutors {
     public static ExecutorService newVirtualThreadExecutor(String namePrefix) {
         requireNamePrefix(namePrefix);
         return Executors.newThreadPerTaskExecutor(
-                Thread.ofVirtual()
-                        .name(namePrefix + "-", 0)
-                        .uncaughtExceptionHandler(UNCAUGHT_EXCEPTION_HANDLER)
-                        .factory()
+                newVirtualThreadFactory(namePrefix)
         );
+    }
+
+    /**
+     * 启动一条命名虚拟线程。
+     * 统一入口便于后续接入 MDC、trace 和线程指标，不让业务代码散落 JDK 线程创建细节。
+     */
+    public static Thread startVirtualThread(String namePrefix, Runnable task) {
+        requireNamePrefix(namePrefix);
+        if (task == null) {
+            throw new IllegalArgumentException("task must not be null");
+        }
+        Thread thread = newVirtualThreadFactory(namePrefix).newThread(task);
+        thread.start();
+        return thread;
+    }
+
+    public static ThreadFactory newVirtualThreadFactory(String namePrefix) {
+        requireNamePrefix(namePrefix);
+        return Thread.ofVirtual()
+                .name(namePrefix + "-", 0)
+                .uncaughtExceptionHandler(UNCAUGHT_EXCEPTION_HANDLER)
+                .factory();
     }
 
     /**
@@ -65,12 +84,16 @@ public final class IMExecutors {
         if (coreSize <= 0) {
             throw new IllegalArgumentException("coreSize must be > 0");
         }
-        return new ObservedScheduledThreadPoolExecutor(coreSize,
-                Thread.ofPlatform()
-                        .name(namePrefix + "-scheduler-", 0)
-                        .daemon(true)
-                        .uncaughtExceptionHandler(UNCAUGHT_EXCEPTION_HANDLER)
-                        .factory());
+        return new ObservedScheduledThreadPoolExecutor(coreSize, newPlatformThreadFactory(namePrefix + "-scheduler", true));
+    }
+
+    public static ThreadFactory newPlatformThreadFactory(String namePrefix, boolean daemon) {
+        requireNamePrefix(namePrefix);
+        return Thread.ofPlatform()
+                .name(namePrefix + "-", 0)
+                .daemon(daemon)
+                .uncaughtExceptionHandler(UNCAUGHT_EXCEPTION_HANDLER)
+                .factory();
     }
 
     private static void requireNamePrefix(String namePrefix) {

@@ -94,7 +94,7 @@ CREATE TABLE IF NOT EXISTS im_groups (
     face_url             VARCHAR(512) NOT NULL DEFAULT '' COMMENT '群头像URL',
     owner_user_id        VARCHAR(64)  NOT NULL DEFAULT '' COMMENT '群主ID',
     member_count         INT          NOT NULL DEFAULT 0  COMMENT '成员数',
-    status               TINYINT      NOT NULL DEFAULT 0  COMMENT '状态: 0=正常, 1=封禁, 2=解散',
+    status               TINYINT      NOT NULL DEFAULT 1  COMMENT '状态: 0=解散, 1=正常',
     group_type           TINYINT      NOT NULL DEFAULT 0  COMMENT '群类型: 0=私有群, 1=公开群',
     need_verification    TINYINT      NOT NULL DEFAULT 0  COMMENT '加群验证: 0=无条件, 1=需验证, 2=需邀请, 3=不允许',
     look_member_info     TINYINT      NOT NULL DEFAULT 0  COMMENT '成员信息可见: 0=所有人可见, 1=仅管理员',
@@ -211,15 +211,12 @@ CREATE TABLE IF NOT EXISTS im_messages (
     msg_from            TINYINT      NOT NULL DEFAULT 0  COMMENT '消息来源: 0=用户, 1=系统',
     content_type        INT          NOT NULL DEFAULT 0  COMMENT '消息内容类型（101=文本, 102=图片, 103=文件, ...）',
     content             MEDIUMTEXT   COMMENT '消息体(JSON)',
-    status              TINYINT      NOT NULL DEFAULT 0  COMMENT '状态: 0=正常, 1=已撤回, 2=已删除',
-    is_read             TINYINT      NOT NULL DEFAULT 0  COMMENT '是否已读: 0=未读, 1=已读',
+    status              TINYINT      NOT NULL DEFAULT 0  COMMENT '状态: 0=正常, 1=已撤回',
     -- 撤回信息
     revoke_user_id      VARCHAR(64)  NOT NULL DEFAULT '' COMMENT '撤回者ID（为空表示未撤回）',
     revoke_role         TINYINT      NOT NULL DEFAULT 0  COMMENT '撤回者角色',
     revoke_nickname     VARCHAR(128) NOT NULL DEFAULT '' COMMENT '撤回者昵称',
     revoke_time         BIGINT       NOT NULL DEFAULT 0  COMMENT '撤回时间',
-    -- 删除记录（逗号分隔的用户ID列表）
-    del_user_ids        TEXT         COMMENT '已删除此消息的用户ID列表(逗号分隔)',
     -- @用户
     at_user_ids         TEXT         COMMENT '@用户ID列表(逗号分隔)',
     -- 离线推送
@@ -245,7 +242,48 @@ CREATE TABLE IF NOT EXISTS im_messages (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='消息表';
 
 -- ============================================================
--- 10. 会话序号表（序号发生器）
+-- 10. 消息已读状态表（用户维度）
+--
+-- 将“谁读到了哪里”从 im_messages 拆出，避免群聊用消息表单列表达多用户状态。
+-- 单聊/群聊都按 user_id + conversation_id 维护 read_seq。
+-- ============================================================
+CREATE TABLE IF NOT EXISTS im_message_read_states (
+    id                BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '物理主键',
+    user_id           VARCHAR(64)  NOT NULL COMMENT '用户ID',
+    conversation_id   VARCHAR(128) NOT NULL COMMENT '会话ID',
+    read_seq          BIGINT       NOT NULL DEFAULT 0 COMMENT '该用户在此会话已读到的最大消息序号',
+    delivered_seq     BIGINT       NOT NULL DEFAULT 0 COMMENT '该用户在此会话已投递到的最大消息序号',
+    unread_count      INT          NOT NULL DEFAULT 0 COMMENT '该用户在此会话的未读消息数缓存',
+    updated_at        BIGINT       NOT NULL DEFAULT 0 COMMENT '更新时间(毫秒)',
+    UNIQUE KEY uk_user_conversation_read (user_id, conversation_id),
+    INDEX idx_conversation_read (conversation_id),
+    INDEX idx_updated_read (updated_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='消息已读状态表';
+
+-- ============================================================
+-- 11. 消息用户可见性表（删除/隐藏/清空）
+--
+-- 将“某个用户是否还能看到某条消息”独立建模。
+-- 用于单条删除、清空会话、合规隐藏等用户级可见性控制。
+-- ============================================================
+CREATE TABLE IF NOT EXISTS im_message_visibility (
+    id                BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '物理主键',
+    user_id           VARCHAR(64)  NOT NULL COMMENT '用户ID',
+    conversation_id   VARCHAR(128) NOT NULL COMMENT '会话ID',
+    seq               BIGINT       NOT NULL COMMENT '会话内消息序号',
+    client_msg_id     VARCHAR(64)  NOT NULL DEFAULT '' COMMENT '客户端消息ID，便于按消息ID定位可见性记录',
+    visibility_state  TINYINT      NOT NULL DEFAULT 0 COMMENT '可见性状态: 0=可见, 1=用户删除, 2=会话清空隐藏, 3=合规隐藏',
+    operator_user_id  VARCHAR(64)  NOT NULL DEFAULT '' COMMENT '操作人用户ID',
+    reason            VARCHAR(255) NOT NULL DEFAULT '' COMMENT '状态变更原因',
+    updated_at        BIGINT       NOT NULL DEFAULT 0 COMMENT '更新时间(毫秒)',
+    UNIQUE KEY uk_user_message_visibility (user_id, conversation_id, seq),
+    INDEX idx_conversation_visibility (conversation_id, seq),
+    INDEX idx_client_msg_visibility (client_msg_id),
+    INDEX idx_state_visibility (visibility_state, updated_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='消息用户可见性表';
+
+-- ============================================================
+-- 12. 会话序号表（序号发生器）
 -- 对应 OpenIM: model.SeqConversation
 --
 -- 每条消息需要一个会话内递增 seq，用于排序/去重/分页。
@@ -260,7 +298,7 @@ CREATE TABLE IF NOT EXISTS im_sequences (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='会话序号表';
 
 -- ============================================================
--- 11. 用户序号表（用户视角的游标）
+-- 13. 用户序号表（用户视角的游标）
 -- 对应 OpenIM: model.SeqUser
 --
 -- 每个用户对每个会话有自己的游标位置。
@@ -279,7 +317,7 @@ CREATE TABLE IF NOT EXISTS im_seq_users (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户序号表';
 
 -- ============================================================
--- 12. 文件对象表（上传文件元数据）
+-- 14. 文件对象表（上传文件元数据）
 -- 对应 OpenIM: model.Object
 -- ============================================================
 CREATE TABLE IF NOT EXISTS im_objects (
@@ -302,12 +340,11 @@ CREATE TABLE IF NOT EXISTS im_objects (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='文件对象表';
 
 -- ============================================================
--- 13. 消息状态机说明
+-- 15. 消息状态机说明
 -- ============================================================
 -- im_messages.status:
 --   0 = 正常
 --   1 = 已撤回（revoke_user_id 非空）
---   2 = 已删除（当前用户视角，对应 del_user_ids）
 --
 -- im_sequences 用法：
 --   INSERT INTO im_sequences (conversation_id, max_seq, min_seq, updated_at)
@@ -334,12 +371,14 @@ CREATE TABLE IF NOT EXISTS im_objects (
 -- 旧表 im_messages       → 已重写：使用 OpenIM 字段命名方式
 --                        → 新增：client_msg_id, server_msg_id, recv_id, group_id,
 --                          sender_platform_id, sender_nickname, sender_face_url, session_type,
---                          msg_from, is_read, revoke_* 系列, del_user_ids, at_user_ids,
---                          offline_* 系列, ios_* 系列, attached_info, ex
+--                          msg_from, revoke_* 系列, at_user_ids, offline_* 系列,
+--                          ios_* 系列, attached_info, ex
 -- 新增 im_friend_requests → 好友申请表
 -- 新增 im_blacklist       → 黑名单表
 -- 新增 im_group_requests  → 加群申请表
 -- 新增 im_sequences       → 会话序号发生器
 -- 新增 im_seq_users       → 用户级序号
+-- 新增 im_message_read_states → 用户级消息已读/投递状态
+-- 新增 im_message_visibility  → 用户级消息删除/隐藏可见性
 -- 新增 im_objects         → 文件上传元数据
 -- ============================================================

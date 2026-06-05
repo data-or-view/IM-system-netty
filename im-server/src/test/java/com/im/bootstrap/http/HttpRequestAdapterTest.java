@@ -26,6 +26,55 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 class HttpRequestAdapterTest {
 
     @Test
+    void requestIdHeaderIsExposedAsRequestAttribute() {
+        ApiDispatcher dispatcher = new ApiDispatcher();
+        ExecutorService directExecutor = new DirectExecutorService();
+        dispatcher.registerHandler(com.im.api.Operation.USER_INFO, req -> {
+            assertEquals("req-http-1", req.attribute("_requestId"));
+            return java.util.Map.of("ok", true);
+        });
+        EmbeddedChannel channel = new EmbeddedChannel(new HttpRequestAdapter(dispatcher, directExecutor));
+        DefaultFullHttpRequest request = new DefaultFullHttpRequest(
+                HttpVersion.HTTP_1_1,
+                HttpMethod.GET,
+                "/api/user/info"
+        );
+        request.headers().set("X-Request-Id", "req-http-1");
+
+        assertFalse(channel.writeInbound(request));
+
+        FullHttpResponse response = channel.readOutbound();
+        assertNotNull(response);
+        assertEquals(HttpResponseStatus.OK, response.status());
+    }
+
+    @Test
+    void corsPreflightAllowsSdkRequestIdHeader() {
+        ApiDispatcher dispatcher = new ApiDispatcher();
+        ExecutorService directExecutor = new DirectExecutorService();
+        EmbeddedChannel channel = new EmbeddedChannel(new HttpRequestAdapter(dispatcher, directExecutor));
+        DefaultFullHttpRequest request = new DefaultFullHttpRequest(
+                HttpVersion.HTTP_1_1,
+                HttpMethod.OPTIONS,
+                "/api/user/login"
+        );
+        request.headers().set(HttpHeaderNames.ORIGIN, "http://127.0.0.1:5173");
+        request.headers().set(HttpHeaderNames.ACCESS_CONTROL_REQUEST_METHOD, "POST");
+        request.headers().set(HttpHeaderNames.ACCESS_CONTROL_REQUEST_HEADERS, "content-type,x-request-id");
+
+        assertFalse(channel.writeInbound(request));
+
+        FullHttpResponse response = channel.readOutbound();
+        assertNotNull(response);
+        assertEquals(HttpResponseStatus.OK, response.status());
+        assertEquals("*", response.headers().get(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN));
+        String allowHeaders = response.headers().get(HttpHeaderNames.ACCESS_CONTROL_ALLOW_HEADERS);
+        assertNotNull(allowHeaders);
+        assertEquals(true, allowHeaders.toLowerCase().contains("x-request-id"));
+        assertEquals("X-Request-Id", response.headers().get(HttpHeaderNames.ACCESS_CONTROL_EXPOSE_HEADERS));
+    }
+
+    @Test
     void invalidJsonBodyReturnsBadRequestBeforeDispatch() {
         ApiDispatcher dispatcher = new ApiDispatcher();
         ExecutorService directExecutor = new DirectExecutorService();

@@ -1,7 +1,5 @@
 package com.im.core.store;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.im.api.ConversationIds;
 import com.im.api.Message;
 import com.im.api.SearchMessagesParam;
@@ -10,6 +8,8 @@ import com.im.api.IMessageStore;
 import com.im.core.db.MyBatisPlusFactory;
 import com.im.core.db.entity.MessageEntity;
 import com.im.core.db.mapper.MessageMapper;
+import com.im.core.db.mapper.MessageReadStateMapper;
+import com.im.core.db.mapper.MessageVisibilityMapper;
 import com.im.common.retry.RetryConfig;
 import com.im.common.retry.RetryExecutor;
 import com.im.common.retry.RetryStrategies;
@@ -20,8 +20,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
-import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * MySQL 消息持久化存储（生产环境用）。
@@ -30,9 +31,9 @@ import java.util.List;
  * 与 LocalMessageStore 接口兼容，替换后不影响业务代码流程。</p>
  *
  * <h3>离线消息策略</h3>
- * 不设独立的离线队列。每条消息保存时记录 sendId/recvId，
- * 拉取离线时通过 {@code WHERE recv_id = ? AND is_read = 0} 查询。
- * 投递确认后标记 {@code is_read = 1}。
+ * 不设独立的离线队列。每条消息保存时记录 sendId/recvId。
+ * 投递状态写入 {@code im_message_read_states}，用户级删除/隐藏写入
+ * {@code im_message_visibility}。
  */
 public class DbMessageStore implements IMessageStore {
 
@@ -93,7 +94,7 @@ public class DbMessageStore implements IMessageStore {
 
     @Override
     public List<Message> pullOffline(String userId, int limit) {
-        if (userId == null || userId.isEmpty()) return Collections.emptyList();
+        if (userId == null || userId.isEmpty()) return List.of();
 
         int actualLimit = Math.min(limit > 0 ? limit : 50, MAX_OFFLINE_PULL);
 
@@ -101,16 +102,9 @@ public class DbMessageStore implements IMessageStore {
             try (SqlSession session = MyBatisPlusFactory.openSession()) {
             MessageMapper mapper = session.getMapper(MessageMapper.class);
 
-            // 查询 recv_id = userId, is_read = 0 的消息作为离线消息
-            List<MessageEntity> entities = mapper.selectList(
-                    new LambdaQueryWrapper<MessageEntity>()
-                            .eq(MessageEntity::getRecvId, userId)
-                            .eq(MessageEntity::getIsRead, 0)
-                            .orderByAsc(MessageEntity::getSeq)
-                            .last("LIMIT " + actualLimit)
-            );
+            List<MessageEntity> entities = mapper.selectUndeliveredSingleMessages(userId, actualLimit);
 
-            if (entities.isEmpty()) return Collections.emptyList();
+            if (entities.isEmpty()) return List.of();
 
             List<Message> result = new ArrayList<>(entities.size());
             for (MessageEntity entity : entities) {
@@ -128,18 +122,23 @@ public class DbMessageStore implements IMessageStore {
         PersistenceExceptions.runDatabase("mark messages delivered", () -> retryExecutor.execute(CFG, () -> {
             try (SqlSession session = MyBatisPlusFactory.openSession()) {
                 MessageMapper mapper = session.getMapper(MessageMapper.class);
+                MessageReadStateMapper readStateMapper = session.getMapper(MessageReadStateMapper.class);
 
-                for (String clientMsgId : msgIds) {
-                    mapper.update(
-                            null,
-                            new LambdaUpdateWrapper<MessageEntity>()
-                                    .eq(MessageEntity::getClientMsgId, clientMsgId)
-                                    .eq(MessageEntity::getRecvId, userId)
-                                    .set(MessageEntity::getIsRead, 1)
-                    );
+                List<MessageEntity> messages = mapper.selectByClientMsgIds(msgIds);
+                Map<String, Long> maxDeliveredByConversation = new HashMap<>();
+                for (MessageEntity message : messages) {
+                    if (userId.equals(message.getRecvId())) {
+                        maxDeliveredByConversation.merge(
+                                message.getConversationId(), message.getSeq(), Math::max);
+                    }
+                }
+
+                long now = System.currentTimeMillis();
+                for (Map.Entry<String, Long> entry : maxDeliveredByConversation.entrySet()) {
+                    readStateMapper.upsertState(userId, entry.getKey(), 0, entry.getValue(), 0, now);
                 }
                 session.commit();
-                log.debug("Marked {} messages delivered for user {}", msgIds.size(), userId);
+                log.debug("Marked {} conversations delivered for user {}", maxDeliveredByConversation.size(), userId);
             }
             return null;
         }));
@@ -147,17 +146,27 @@ public class DbMessageStore implements IMessageStore {
 
     @Override
     public void deleteBefore(String userId, long seqId) {
+        if (userId == null || userId.isBlank() || seqId <= 0) return;
+
         PersistenceExceptions.runDatabase("delete messages before sequence", () -> retryExecutor.execute(CFG, () -> {
             try (SqlSession session = MyBatisPlusFactory.openSession()) {
                 MessageMapper mapper = session.getMapper(MessageMapper.class);
-
-                mapper.delete(
-                        new LambdaQueryWrapper<MessageEntity>()
-                                .eq(MessageEntity::getRecvId, userId)
-                                .lt(MessageEntity::getSeq, seqId)
-                );
+                MessageVisibilityMapper visibilityMapper = session.getMapper(MessageVisibilityMapper.class);
+                List<MessageEntity> messages = mapper.selectSingleMessagesBefore(userId, seqId);
+                long now = System.currentTimeMillis();
+                for (MessageEntity message : messages) {
+                    visibilityMapper.upsertVisibility(
+                            userId,
+                            message.getConversationId(),
+                            message.getSeq(),
+                            message.getClientMsgId(),
+                            2,
+                            userId,
+                            "delete before sequence",
+                            now);
+                }
                 session.commit();
-                log.debug("Deleted messages before seq {} for user {}", seqId, userId);
+                log.debug("Hidden {} messages before seq {} for user {}", messages.size(), seqId, userId);
             }
             return null;
         }));
@@ -262,7 +271,6 @@ public class DbMessageStore implements IMessageStore {
 
         e.setSeq(msg.getMessageSeq());
         e.setStatus(msg.getStatus());
-        e.setIsRead(0);
 
         e.setSentAt(msg.getTimestamp());
         e.setCreatedAt(System.currentTimeMillis());

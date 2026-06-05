@@ -1,161 +1,177 @@
 # IM 系统日志排查指南
 
-## 1. OpenTelemetry 全链路追踪
+## 1. 核心思路
 
-### 1.1 原理
+当前日志链路分两层：
+
+| 能力 | 用途 | 是否依赖 OTel Agent |
+|------|------|---------------------|
+| `requestId` | 前端、SDK、HTTP/WS 响应、后端日志之间的主关联键 | 否 |
+| `trace_id` | Redis、Netty、异步链路等更完整的分布式追踪 | 是 |
+
+排查线上问题时，优先用 `requestId`。它由 SDK 自动生成，也允许业务方自定义生成器，后端会透传到日志和响应里。
+
+## 2. 日志格式
+
+Logback 当前输出以下上下文字段：
+
+```text
+[trace=...] [req=...] [user=...] [op=...] [conn=...] [seq=...]
+```
+
+| 字段 | 说明 |
+|------|------|
+| `trace` | OpenTelemetry trace id；未启 agent 时通常是 `no-trace` |
+| `req` | 单次 HTTP 请求或 WS 帧的 requestId |
+| `user` | 认证后的用户 ID |
+| `op` | 业务操作名，如 `chat.send`、`friend.apply` |
+| `conn` | WebSocket 连接 ID |
+| `seq` | WebSocket 请求序号 |
+
+示例：
+
+```text
+12:30:23.163 [virtual-42] WARN c.i.c.d.ApiDispatcher - [trace=781ae36daa974c9bfbb9f83c5ad6a720] [req=req_mbh...] [user=332211] [op=chat.send] [conn=conn_abc] [seq=18] Handler rejected: ...
+```
+
+## 3. SDK 与后端如何传 requestId
+
+### 3.1 HTTP
+
+SDK 每次 HTTP 请求都会加：
+
+```http
+X-Request-Id: req_xxxxx
+```
+
+后端响应也会带回：
+
+```http
+X-Request-Id: req_xxxxx
+```
+
+浏览器 Network 面板里看到某个接口失败后，复制响应头里的 `X-Request-Id`，直接查后端日志：
+
+```bash
+grep "req_xxxxx" logs/im-system.log
+```
+
+### 3.2 WebSocket
+
+SDK 每个 WS 请求帧都会带：
+
+```json
+{"op":"chat.send","seq":12,"_requestId":"req_xxxxx"}
+```
+
+后端 ACK 会带回：
+
+```json
+{"op":"chat.send.ack","seq":12,"code":0,"requestId":"req_xxxxx","data":{}}
+```
+
+如果前端提示发送失败，优先在 Console 或 WS Frames 里找 `requestId`，再 grep 后端日志。
+
+### 3.3 自定义 requestId 生成器
+
+SDK 支持传入 `requestIdFactory`，适合接入企业自己的 trace 规则：
+
+```ts
+const im = new IMClient({
+  baseUrl: "http://127.0.0.1:8084",
+  wsUrl: "ws://127.0.0.1:8083/ws",
+  requestIdFactory: () => `req_${Date.now()}_${crypto.randomUUID()}`,
+});
+```
+
+## 4. OpenTelemetry 全链路追踪
+
+### 4.1 原理
 
 使用 OpenTelemetry Java Agent 在 JVM 启动时自动插桩：
 
 | 组件 | 自动追踪内容 |
 |------|-------------|
-| **Netty** | HTTP 请求的 method、path、status、耗时 |
-| **Lettuce (Redis)** | 每条命令的 statement、耗时、地址 |
-| **虚拟线程** | 跨线程自动传播 trace context |
-| **Logback** | 自动注入 `trace_id` / `span_id` 到 MDC，日志直接关联 |
+| Netty | HTTP 请求 method、path、status、耗时 |
+| Lettuce / Redis | Redis 命令、耗时、地址 |
+| Logback | 自动注入 `trace_id` / `span_id` 到 MDC |
 
-业务代码在 `ApiDispatcher` 中为每个请求（含 WS 帧）创建 span，`TelemetryInterceptor` 注入用户行为属性。
+业务代码在 `ApiDispatcher` 中为每个 HTTP 请求或 WS 帧创建 span。启用 OTel 后，同一个请求内的业务日志会拥有相同 `trace`。
 
-### 1.2 启动方式
+### 4.2 启动方式
+
+开发环境可直接使用重启脚本启动普通日志链路：
 
 ```bash
-# 1. 编译（自动下载 OTel Agent 到 target/agent/）
-mvn package -DskipTests -q
+bin/restart-backend.sh
+```
 
-# 2. 启动（开发环境：控制台输出 span）
+如果需要 OTel 控制台 span，可手动启动：
+
+```bash
+mvn -pl im-server -am package -DskipTests
+
 java -javaagent:im-server/target/agent/opentelemetry-javaagent-2.27.0.jar \
-     -Dotel.service.name=im-system \
-     -Dotel.traces.exporter=console \
-     -Dotel.metrics.exporter=none \
-     -jar im-server/target/im-server-1.0.0-SNAPSHOT.jar
-
-# 3. 生产环境：对接 Jaeger/Zipkin
-java -javaagent:im-server/target/agent/opentelemetry-javaagent-2.27.0.jar \
-     -Dotel.service.name=im-system \
-     -Dotel.traces.exporter=otlp \
-     -Dotel.exporter.otlp.endpoint=http://jaeger:4318 \
-     -Dotel.metrics.exporter=none \
-     -jar im-server/target/im-server-1.0.0-SNAPSHOT.jar
-```
-
-### 1.3 日志效果
-
-```
-# 格式：[时间] [线程] 级别 类 - [trace_id] [user_id] 消息
-
-# 请求入口（ApiDispatcher 创建 span → 有 trace_id）
-18:54:28.298 [virtual-77] INFO  c.i.c.u.LocalUserManager - [69ba4bb6f2d3687b] [] User registered: userId=caller_...
-
-# 同一请求链（trace_id 一致）
-18:54:28.336 [virtual-80] INFO  c.i.c.s.SessionManager     - [59af5890cd67c0a] [] User bound: userId=caller_...
-
-# 带用户属性
-18:54:28.373 [virtual-82] INFO  c.i.c.c.LiveKitCallManager - [6f1f915cae4226f] [] Room created: room=room_...
-
-# 异步回调（独立 span）
-18:54:31.399 [scheduler-0] INFO  c.i.c.c.CallStateManager   - [a1b2c3d4e5f6789] [] Call timeout fired: room=...
-
-# 系统启动（无请求上下文 → no-trace）
-18:54:28.025 [main] INFO  c.i.b.IMServer - [no-trace] [] Server started: ...
-```
-
-### 1.4 关键配置项
-
-| 环境变量 / 系统属性 | 默认值 | 说明 |
-|---------------------|--------|------|
-| `OTEL_SERVICE_NAME` | `im-system` | 服务名，Jaeger/日志中区分服务 |
-| `OTEL_TRACES_EXPORTER` | `otlp` | `console`=控制台输出, `otlp`=对接后端, `none`=关闭 |
-| `OTEL_METRICS_EXPORTER` | `otlp` | 建议设 `none`（暂不需要 metrics） |
-| `OTEL_LOGS_EXPORTER` | `otlp` | 日志导出（暂不需要） |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | OTLP 接收地址 |
-
-### 1.5 Span 属性说明
-
-每个业务 span 携带以下属性（由 `TelemetryInterceptor` 注入）：
-
-| 属性 | 示例 | 来源 |
-|------|------|------|
-| `app.operation` | `user.register`、`chat.send` | 请求操作名 |
-| `app.user.id` | `user_12345` | AuthInterceptor 认证后 |
-| `app.conversation.id` | `conv_abc` | 请求参数中的 conversationId |
-| `app.group.id` | `group_xyz` | 请求参数中的 groupId |
-
----
-
-## 2. 日志文件
-
-日志同时输出到控制台和文件：
-
-| 文件 | 路径 | 滚动策略 |
-|------|------|---------|
-| 运行日志 | `logs/im-system.log` | 按天 + 100MB 滚动，保留 7 天 |
-
-```bash
-# 实时查看
-tail -f logs/im-system.log
-
-# 按 traceId 搜索
-grep "69ba4bb6f2d3687b" logs/im-system.log
-
-# 按用户搜索
-grep "\[user_12345\]" logs/im-system.log
-
-# 只看异常
-grep "ERROR\|WARN" logs/im-system.log
-```
-
----
-
-## 3. 前后端关联
-
-前后端通过自定义 `_traceId` 字段关联（非 OTel trace_id，由前端生成）：
-
-```
-前端发: [IM] [debug] traceId=trc_xxxxx_001 event=ws.send data={op: "92", seq: "1"}
-后端收: [trc_xxxxx_001] AUTH OK: userId=1111, type=USER_SEARCH
-            ↓
-前端收: [IM] [debug] traceId=trc_xxxxx_001 event=ws.recv data={op: "93", status: "OK"}
-```
-
-搜索方法：根据前端报错的 traceId，到后端日志 grep：
-
-```bash
-grep "trc_xxxxx_001" logs/im-system.log
-```
-
----
-
-## 4. 常见排查流程
-
-```
-用户操作 → 前端没反应？
-    ↓
-1. 打开 Console 看有没有 ws.send/ws.recv
-    ↓
-有 send 没 recv → 后端 grep 该 traceId → 看拦截器是否拒了
-    ↓
-有 send 有 recv → store 处理逻辑有问题（条件/字段名不匹配）
-    ↓
-没 send → 前端组件逻辑没走到该代码路径
-```
-
----
-
-## 5. 编译重启
-
-```bash
-cd /Users/macbook/java/IdeaProjects/github-source/data-or-view/IM-system-netty
-
-# 编译
-mvn package -DskipTests -q
-
-# 重启（开发环境，带 OTel 追踪）
-kill $(lsof -ti:8081) 2>/dev/null
-nohup java -javaagent:im-server/target/agent/opentelemetry-javaagent-2.27.0.jar \
   -Dotel.service.name=im-system \
   -Dotel.traces.exporter=console \
   -Dotel.metrics.exporter=none \
-  -jar im-server/target/im-server-1.0.0-SNAPSHOT.jar \
-  > logs/console.log 2>&1 &
-
-tail -f logs/im-system.log | grep "Server ready"
+  -jar im-server/target/im-server-1.0.0-SNAPSHOT.jar
 ```
+
+生产环境可对接 Jaeger / OTLP Collector：
+
+```bash
+java -javaagent:im-server/target/agent/opentelemetry-javaagent-2.27.0.jar \
+  -Dotel.service.name=im-system \
+  -Dotel.traces.exporter=otlp \
+  -Dotel.exporter.otlp.endpoint=http://jaeger:4318 \
+  -Dotel.metrics.exporter=none \
+  -jar im-server/target/im-server-1.0.0-SNAPSHOT.jar
+```
+
+## 5. 常用排查命令
+
+```bash
+# 实时查看日志
+tail -f logs/im-system.log
+
+# 按 requestId 搜索，最推荐
+grep "req_xxxxx" logs/im-system.log
+
+# 按用户搜索
+grep "\[user=332211\]" logs/im-system.log
+
+# 按 operation 搜索
+grep "\[op=chat.send\]" logs/im-system.log
+
+# 只看异常
+grep "ERROR\|WARN" logs/im-system.log
+
+# 查看最近 200 行异常上下文
+tail -n 200 logs/im-system.log | grep "ERROR\|WARN\|req_xxxxx"
+```
+
+## 6. 常见排查流程
+
+```text
+前端提示失败
+  ↓
+1. 从 HTTP 响应头或 WS ACK / Frame 里拿 requestId
+  ↓
+2. grep requestId 查后端日志
+  ↓
+3. 看 op、user、conn、seq 是否符合预期
+  ↓
+4. 如果是业务拒绝，看 Validation / Unauthorized / Forbidden / Persistence 日志
+  ↓
+5. 如果 requestId 找不到，说明请求没到后端或前端使用了旧 SDK 构建产物
+```
+
+## 7. 后续增强方向
+
+| 方向 | 价值 |
+|------|------|
+| MQ / 异步消费继续携带 requestId | 消息从发送、落库、跨节点投递到 ACK 可完整追踪 |
+| 日志增加 `messageId` / `conversationId` / `groupId` | 排查聊天链路更快 |
+| 重启脚本支持 `--otel-console` | 开发时一键打开 span 输出 |
+| 前端错误弹窗展示 requestId | 用户报错时可直接带定位 ID |

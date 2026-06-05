@@ -24,10 +24,12 @@ import {
   MoreHorizontal,
   UserMinus,
   Contact,
+  Bell,
 } from "lucide-react";
 import UserSearchDialog from "./sidebar/UserSearchDialog";
 import GroupSearchDialog from "./sidebar/GroupSearchDialog";
 import FriendRequestDialog from "./sidebar/FriendRequestDialog";
+import GroupRequestDialog from "./sidebar/GroupRequestDialog";
 import { toast } from "sonner";
 
 type Tab = "chats" | "friends" | "groups";
@@ -39,6 +41,7 @@ export default function Sidebar() {
   const [searchUserOpen, setSearchUserOpen] = useState(false);
   const [searchGroupOpen, setSearchGroupOpen] = useState(false);
   const [friendRequestOpen, setFriendRequestOpen] = useState(false);
+  const [groupRequestOpen, setGroupRequestOpen] = useState(false);
 
   return (
     <TooltipProvider>
@@ -85,12 +88,14 @@ export default function Sidebar() {
           <GroupList
             onSearchGroup={() => setSearchGroupOpen(true)}
             onCreateGroup={() => navigate("/chat/create-group")}
+            onGroupRequests={() => setGroupRequestOpen(true)}
           />
         )}
 
         <UserSearchDialog open={searchUserOpen} onOpenChange={setSearchUserOpen} />
         <GroupSearchDialog open={searchGroupOpen} onOpenChange={setSearchGroupOpen} />
         <FriendRequestDialog open={friendRequestOpen} onOpenChange={setFriendRequestOpen} />
+        <GroupRequestDialog open={groupRequestOpen} onOpenChange={setGroupRequestOpen} />
       </div>
     </TooltipProvider>
   );
@@ -216,11 +221,13 @@ function FriendList({
 function GroupList({
   onSearchGroup,
   onCreateGroup,
+  onGroupRequests,
 }: {
   onSearchGroup: () => void;
   onCreateGroup: () => void;
+  onGroupRequests: () => void;
 }) {
-  const { state } = useStore();
+  const { state, fetchUnhandledGroupApplyCount } = useStore();
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -236,6 +243,21 @@ function GroupList({
           className="flex-1 rounded-md bg-secondary px-2 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:bg-secondary/80"
         >
           <Plus className="mr-1 inline h-3 w-3" /> 创建群
+        </button>
+        <button
+          onClick={() => {
+            void fetchUnhandledGroupApplyCount();
+            onGroupRequests();
+          }}
+          className="relative rounded-md bg-secondary px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary/80"
+        >
+          <Bell className="mr-1 inline h-3 w-3" />
+          申请
+          {state.unhandledGroupApplyCount > 0 && (
+            <span className="absolute -right-1.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] text-destructive-foreground">
+              {state.unhandledGroupApplyCount > 99 ? "99+" : state.unhandledGroupApplyCount}
+            </span>
+          )}
         </button>
       </div>
 

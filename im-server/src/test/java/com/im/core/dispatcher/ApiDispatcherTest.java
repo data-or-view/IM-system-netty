@@ -10,6 +10,7 @@ import com.im.common.exception.BusinessException;
 import com.im.common.exception.InfrastructureException;
 import com.im.common.exception.ImException;
 import org.junit.jupiter.api.Test;
+import org.slf4j.MDC;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -50,10 +51,52 @@ class ApiDispatcherTest {
     }
 
     @Test
+    void dispatcherBindsAndClearsMdcForRequest() {
+        ApiRequest request = request(Operation.HEARTBEAT);
+        request.setAttribute("_requestId", "req-mdc-1");
+        request.setAttribute("_uid", "user-mdc-1");
+        dispatcher.registerHandler(Operation.HEARTBEAT, req -> {
+            assertEquals("req-mdc-1", MDC.get("request_id"));
+            assertEquals("user-mdc-1", MDC.get("app.user.id"));
+            assertEquals("heartbeat", MDC.get("app.operation"));
+            return "ok";
+        });
+
+        dispatcher.dispatch(request);
+
+        assertNull(MDC.get("request_id"));
+        assertNull(MDC.get("app.user.id"));
+        assertNull(MDC.get("app.operation"));
+    }
+
+    @Test
     void noHandlerReturnsNotFound() {
         dispatcher.dispatch(request(Operation.LOGIN));
         assertNotNull(responseWriter.lastError);
         assertEquals(ImErrorCode.NOT_FOUND, responseWriter.lastError);
+    }
+
+    @Test
+    void noHandlerStillBindsAndClearsMdc() {
+        CapturingResponseWriter writer = new CapturingResponseWriter() {
+            @Override
+            public void writeError(ImErrorCode code, String detail) {
+                assertEquals("req-missing-handler", MDC.get("request_id"));
+                assertEquals("user-missing-handler", MDC.get("app.user.id"));
+                assertEquals(Operation.LOGIN.opName(), MDC.get("app.operation"));
+                super.writeError(code, detail);
+            }
+        };
+        ApiRequest request = new ApiRequest(Operation.LOGIN, Map.of(), Map.of(), writer, null);
+        request.setAttribute(ApiRequest.ATTR_REQUEST_ID, "req-missing-handler");
+        request.setAttribute(ApiRequest.ATTR_USER_ID, "user-missing-handler");
+
+        dispatcher.dispatch(request);
+
+        assertEquals(ImErrorCode.NOT_FOUND, writer.lastError);
+        assertNull(MDC.get("request_id"));
+        assertNull(MDC.get("app.user.id"));
+        assertNull(MDC.get("app.operation"));
     }
 
     @Test

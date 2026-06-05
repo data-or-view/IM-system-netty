@@ -1,10 +1,13 @@
 package com.im.bootstrap;
 
+import com.im.common.util.IMExecutors;
 import com.im.config.Config;
 import com.im.config.ConfigLoader;
 import com.im.config.YamlConfigSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.util.concurrent.CountDownLatch;
 
 /**
  * IM Server 启动入口。
@@ -25,10 +28,11 @@ public class Main {
         log.info("Starting IM server with nodeId={}", nodeId);
 
         IMServer server = new IMServer(config);
-        Runtime.getRuntime().addShutdownHook(new Thread(server::stop));
+        Runtime.getRuntime().addShutdownHook(
+                IMExecutors.newPlatformThreadFactory("im-shutdown-hook", false).newThread(server::stop));
         server.start();
         log.info("Server ready. Press Ctrl+C to stop.");
-        Thread.currentThread().join();
+        new CountDownLatch(1).await();
     }
 
     static Config loadConfig() {

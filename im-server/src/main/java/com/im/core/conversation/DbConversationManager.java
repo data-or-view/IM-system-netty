@@ -8,8 +8,10 @@ import com.im.api.IncrementalSyncResult;
 import com.im.api.Message;
 import com.im.core.db.MyBatisPlusFactory;
 import com.im.core.db.entity.ConversationEntity;
+import com.im.core.db.entity.MessageReadStateEntity;
 import com.im.core.db.entity.SeqUserEntity;
 import com.im.core.db.mapper.ConversationMapper;
+import com.im.core.db.mapper.MessageReadStateMapper;
 import com.im.core.db.mapper.SeqUserMapper;
 import com.im.core.sync.DbIncrementalSync;
 import com.im.common.retry.RetryConfig;
@@ -32,7 +34,7 @@ import java.util.stream.Collectors;
  * <p>基于 MyBatis-Plus 操作 {@code im_conversations} 表。
  * 每个用户独立拥有会话视图，通过 {@code owner_user_id} 隔离。</p>
  *
- * <p>未读数通过 {@code im_seq_users.read_seq} 与 {@code max_seq} 差值计算。</p>
+ * <p>未读数通过 {@code im_message_read_states.read_seq} 与 {@code max_seq} 差值计算。</p>
  */
 public class DbConversationManager implements IConversationManager {
 
@@ -124,9 +126,9 @@ public class DbConversationManager implements IConversationManager {
     public long getReadSeq(String ownerUserId, String conversationId) {
         return PersistenceExceptions.runDatabase("get conversation read sequence", () -> {
             try (SqlSession session = MyBatisPlusFactory.openSession()) {
-                SeqUserMapper seqMapper = session.getMapper(SeqUserMapper.class);
-                SeqUserEntity seqUser = seqMapper.selectByUserAndConversation(ownerUserId, conversationId);
-                return seqUser != null ? seqUser.getReadSeq() : 0;
+                MessageReadStateMapper readMapper = session.getMapper(MessageReadStateMapper.class);
+                MessageReadStateEntity state = readMapper.selectByUserConversation(ownerUserId, conversationId);
+                return state != null ? state.getReadSeq() : 0;
             }
         });
     }
@@ -169,8 +171,8 @@ public class DbConversationManager implements IConversationManager {
                 mapper.updateUpdatedAt(ownerUserId, conversationId, System.currentTimeMillis());
 
                 if (readSeq > 0) {
-                    SeqUserMapper seqMapper = session.getMapper(SeqUserMapper.class);
-                    seqMapper.updateReadSeq(ownerUserId, conversationId, readSeq, System.currentTimeMillis());
+                    MessageReadStateMapper readMapper = session.getMapper(MessageReadStateMapper.class);
+                    readMapper.upsertState(ownerUserId, conversationId, readSeq, readSeq, 0, System.currentTimeMillis());
                 }
 
                 session.commit();
@@ -362,13 +364,13 @@ public class DbConversationManager implements IConversationManager {
     }
 
     private long computeUnreadCount(SqlSession session, ConversationEntity e) {
-        SeqUserMapper seqMapper = session.getMapper(SeqUserMapper.class);
-        SeqUserEntity seqUser = seqMapper.selectByUserAndConversation(
+        MessageReadStateMapper readMapper = session.getMapper(MessageReadStateMapper.class);
+        MessageReadStateEntity state = readMapper.selectByUserConversation(
                 e.getOwnerUserId(), e.getConversationId());
-        if (seqUser == null) {
+        if (state == null) {
             return e.getMaxSeq() > 0 ? 1 : 0;
         }
-        long unread = e.getMaxSeq() - seqUser.getReadSeq();
+        long unread = e.getMaxSeq() - state.getReadSeq();
         return Math.max(unread, 0);
     }
 
