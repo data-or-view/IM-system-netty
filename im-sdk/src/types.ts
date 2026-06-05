@@ -104,13 +104,90 @@ export interface MessageRevoked {
   revokerId?: string;
 }
 
+
+export const ApplyHandleResult = {
+  PENDING: "PENDING",
+  AGREED: "AGREED",
+  REJECTED: "REJECTED",
+} as const;
+export type ApplyHandleResultValue = (typeof ApplyHandleResult)[keyof typeof ApplyHandleResult];
+
+export const ApplySource = {
+  UNKNOWN: "UNKNOWN",
+  SEARCH: "SEARCH",
+  QR_CODE: "QR_CODE",
+  GROUP: "GROUP",
+  INVITE: "INVITE",
+} as const;
+export type ApplySourceValue = (typeof ApplySource)[keyof typeof ApplySource];
+
+export const ConversationType = {
+  SINGLE: "SINGLE",
+  GROUP: "GROUP",
+} as const;
+export type ConversationTypeValue = (typeof ConversationType)[keyof typeof ConversationType];
+
+export const MessageReceiveOption = {
+  NORMAL: "NORMAL",
+  NOT_NOTIFY: "NOT_NOTIFY",
+  NOT_RECEIVE: "NOT_RECEIVE",
+} as const;
+export type MessageReceiveOptionValue = (typeof MessageReceiveOption)[keyof typeof MessageReceiveOption];
+
+export const GroupType = {
+  PRIVATE: "PRIVATE",
+  PUBLIC: "PUBLIC",
+} as const;
+export type GroupTypeValue = (typeof GroupType)[keyof typeof GroupType];
+
+export const GroupJoinVerification = {
+  DIRECT: "DIRECT",
+  NEED_APPROVAL: "NEED_APPROVAL",
+  INVITE_ONLY: "INVITE_ONLY",
+  FORBIDDEN: "FORBIDDEN",
+} as const;
+export type GroupJoinVerificationValue = (typeof GroupJoinVerification)[keyof typeof GroupJoinVerification];
+
+export const GroupMemberRole = {
+  REMOVED: "REMOVED",
+  MEMBER: "MEMBER",
+  ADMIN: "ADMIN",
+  OWNER: "OWNER",
+} as const;
+export type GroupMemberRoleValue = (typeof GroupMemberRole)[keyof typeof GroupMemberRole];
+
+export const UserAdminLevel = {
+  NORMAL: "NORMAL",
+  ADMIN: "ADMIN",
+  SUPER_ADMIN: "SUPER_ADMIN",
+} as const;
+export type UserAdminLevelValue = (typeof UserAdminLevel)[keyof typeof UserAdminLevel];
+
+export function groupMemberRoleRank(role?: GroupMemberRoleValue): number {
+  switch (role) {
+    case GroupMemberRole.OWNER:
+      return 200;
+    case GroupMemberRole.ADMIN:
+      return 100;
+    case GroupMemberRole.REMOVED:
+      return -1;
+    case GroupMemberRole.MEMBER:
+    default:
+      return 1;
+  }
+}
+
+export function isGroupConversation(conversation: { conversationType: ConversationTypeValue }): boolean {
+  return conversation.conversationType === ConversationType.GROUP;
+}
+
 // ── User ──
 
 export interface UserInfo {
   userId: string;
   nickname?: string;
   faceUrl?: string;
-  appMangerLevel?: number;
+  appMangerLevel?: UserAdminLevelValue;
 }
 
 // ── Friend ──
@@ -121,7 +198,7 @@ export interface FriendInfo {
   nickname?: string;
   faceUrl?: string;
   remark?: string;
-  addSource: number;
+  addSource: ApplySourceValue;
   isPinned: boolean;
   createTime: number;
 }
@@ -129,7 +206,7 @@ export interface FriendInfo {
 export interface FriendApply {
   fromUserId: string;
   toUserId: string;
-  handleResult: number;
+  handleResult: ApplyHandleResultValue;
   reqMsg?: string;
   createTime: number;
 }
@@ -142,8 +219,8 @@ export interface GroupInfo {
   faceUrl?: string;
   ownerUserId?: string;
   memberCount?: number;
-  groupType?: number;
-  needVerification?: number;
+  groupType?: GroupTypeValue;
+  needVerification?: GroupJoinVerificationValue;
   createTime?: number;
 }
 
@@ -152,7 +229,7 @@ export interface GroupMember {
   userId: string;
   nickname?: string;
   faceUrl?: string;
-  roleLevel: number;
+  roleLevel: GroupMemberRoleValue;
   joinTime: number;
 }
 
@@ -162,8 +239,8 @@ export interface GroupApply {
   reqMsg?: string;
   handledMsg?: string;
   handlerUserId?: string;
-  handleResult: number;
-  joinSource?: number;
+  handleResult: ApplyHandleResultValue;
+  joinSource?: ApplySourceValue;
   inviterUserId?: string;
   createTime: number;
   handledTime?: number;
@@ -174,7 +251,7 @@ export interface GroupApply {
 export interface Conversation {
   conversationId: string;
   ownerUserId: string;
-  conversationType: number; // 1=单聊, 2=群聊
+  conversationType: ConversationTypeValue;
   userId?: string;
   groupId?: string;
   groupName?: string;
@@ -183,7 +260,7 @@ export interface Conversation {
   latestMsg?: string;
   latestMsgSendTime?: number;
   unreadCount: number;
-  recvMsgOpt: number;
+  recvMsgOpt: MessageReceiveOptionValue;
   isPinned: boolean;
 }
 

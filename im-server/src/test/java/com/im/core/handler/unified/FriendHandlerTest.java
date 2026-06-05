@@ -1,6 +1,7 @@
 package com.im.core.handler.unified;
 
 import com.im.api.ApiRequest;
+import com.im.api.ApplyHandleResult;
 import com.im.api.FriendApply;
 import com.im.api.FriendInformation;
 import com.im.api.IFriendManager;
@@ -31,7 +32,7 @@ class FriendHandlerTest {
         FriendApply pending = new FriendApply();
         pending.setFromUserId("alice");
         pending.setToUserId("bob");
-        pending.setHandleResult(0);
+        pending.setHandleResult(ApplyHandleResult.PENDING);
         manager.receivedApplies = List.of(pending);
         FriendHandler handler = new FriendHandler(manager);
         ApiRequest request = new ApiRequest(Operation.FRIEND_APPLY_RECEIVED,

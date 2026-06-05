@@ -10,6 +10,7 @@ import { ArrowLeft, Loader2, Check, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { im } from "@/sdk/im-sdk";
+import { GroupJoinVerification, GroupType } from "im-sdk";
 
 export default function CreateGroupPage() {
   const navigate = useNavigate();
@@ -29,7 +30,7 @@ export default function CreateGroupPage() {
     if (!groupName.trim() || creating) return;
     setCreating(true);
     try {
-      const group = await im.group.create(groupName.trim(), 0, selectedIds, needVerification ? 1 : 0);
+      const group = await im.group.create(groupName.trim(), GroupType.PRIVATE, selectedIds, needVerification ? GroupJoinVerification.NEED_APPROVAL : GroupJoinVerification.DIRECT);
       dispatch({ type: "SET_MY_GROUPS", list: [group, ...state.myGroups.filter((item) => item.groupId !== group.groupId)] });
       await Promise.all([fetchMyGroups(), fetchConversations()]);
       toast("群创建成功");

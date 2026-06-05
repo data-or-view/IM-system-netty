@@ -14,9 +14,7 @@ public class FriendApply {
     private String reqMsg;
     private String handlerUserId;
     private String handleMsg;
-
-    /** 0=待处理, 1=已同意, 2=已拒绝 */
-    private int handleResult;
+    private ApplyHandleResult handleResult = ApplyHandleResult.PENDING;
 
     private long createTime;
     private long handleTime;
@@ -38,8 +36,10 @@ public class FriendApply {
     public String getHandleMsg() { return handleMsg; }
     public void setHandleMsg(String handleMsg) { this.handleMsg = handleMsg; }
 
-    public int getHandleResult() { return handleResult; }
-    public void setHandleResult(int handleResult) { this.handleResult = handleResult; }
+    public ApplyHandleResult getHandleResult() { return handleResult; }
+    public void setHandleResult(ApplyHandleResult handleResult) {
+        this.handleResult = handleResult != null ? handleResult : ApplyHandleResult.PENDING;
+    }
 
     public long getCreateTime() { return createTime; }
     public void setCreateTime(long createTime) { this.createTime = createTime; }

@@ -14,12 +14,8 @@ public class GroupApply {
     private String reqMsg;
     private String handledMsg;
     private String handlerUserId;
-
-    /** 0=待处理, 1=已同意, 2=已拒绝 */
-    private int handleResult;
-
-    /** 来源: 搜索/二维码/邀请 */
-    private int joinSource;
+    private ApplyHandleResult handleResult = ApplyHandleResult.PENDING;
+    private ApplySource joinSource = ApplySource.UNKNOWN;
 
     /** 邀请人 ID（被邀请入群时有效） */
     private String inviterUserId;
@@ -44,11 +40,15 @@ public class GroupApply {
     public String getHandlerUserId() { return handlerUserId; }
     public void setHandlerUserId(String handlerUserId) { this.handlerUserId = handlerUserId; }
 
-    public int getHandleResult() { return handleResult; }
-    public void setHandleResult(int handleResult) { this.handleResult = handleResult; }
+    public ApplyHandleResult getHandleResult() { return handleResult; }
+    public void setHandleResult(ApplyHandleResult handleResult) {
+        this.handleResult = handleResult != null ? handleResult : ApplyHandleResult.PENDING;
+    }
 
-    public int getJoinSource() { return joinSource; }
-    public void setJoinSource(int joinSource) { this.joinSource = joinSource; }
+    public ApplySource getJoinSource() { return joinSource; }
+    public void setJoinSource(ApplySource joinSource) {
+        this.joinSource = joinSource != null ? joinSource : ApplySource.UNKNOWN;
+    }
 
     public String getInviterUserId() { return inviterUserId; }
     public void setInviterUserId(String inviterUserId) { this.inviterUserId = inviterUserId; }

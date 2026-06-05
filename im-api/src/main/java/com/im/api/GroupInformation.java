@@ -16,19 +16,11 @@ public class GroupInformation {
     private String faceUrl;
     private String ownerUserId;
     private int memberCount;
-    private int status;
-
-    /** 群类型: 0=私有群, 1=公开群 */
-    private int groupType;
-
-    /** 加群验证: 0=无条件入群, 1=需验证, 2=需邀请, 3=不允许 */
-    private int needVerification;
-
-    /** 成员信息可见: 0=所有人可见, 1=仅管理员 */
-    private int lookMemberInfo;
-
-    /** 允许互加好友: 0=允许, 1=不允许 */
-    private int applyMemberFriend;
+    private GroupStatus status = GroupStatus.NORMAL;
+    private GroupType groupType = GroupType.PRIVATE;
+    private GroupJoinVerification needVerification = GroupJoinVerification.DIRECT;
+    private GroupMemberInfoVisibility lookMemberInfo = GroupMemberInfoVisibility.ALL_VISIBLE;
+    private GroupMemberFriendPolicy applyMemberFriend = GroupMemberFriendPolicy.ALLOW;
 
     /** 最后更新公告的用户ID */
     private String notificationUserId;
@@ -49,8 +41,8 @@ public class GroupInformation {
         this.groupName = groupName;
         this.ownerUserId = ownerUserId;
         this.memberCount = 1;
-        this.status = 1;
-        this.groupType = 0;
+        this.status = GroupStatus.NORMAL;
+        this.groupType = GroupType.PRIVATE;
         this.createTime = System.currentTimeMillis();
         this.updateTime = this.createTime;
     }
@@ -76,20 +68,26 @@ public class GroupInformation {
     public int getMemberCount() { return memberCount; }
     public void setMemberCount(int memberCount) { this.memberCount = memberCount; }
 
-    public int getStatus() { return status; }
-    public void setStatus(int status) { this.status = status; }
+    public GroupStatus getStatus() { return status; }
+    public void setStatus(GroupStatus status) { this.status = status != null ? status : GroupStatus.NORMAL; }
 
-    public int getGroupType() { return groupType; }
-    public void setGroupType(int groupType) { this.groupType = groupType; }
+    public GroupType getGroupType() { return groupType; }
+    public void setGroupType(GroupType groupType) { this.groupType = groupType != null ? groupType : GroupType.PRIVATE; }
 
-    public int getNeedVerification() { return needVerification; }
-    public void setNeedVerification(int needVerification) { this.needVerification = needVerification; }
+    public GroupJoinVerification getNeedVerification() { return needVerification; }
+    public void setNeedVerification(GroupJoinVerification needVerification) {
+        this.needVerification = needVerification != null ? needVerification : GroupJoinVerification.DIRECT;
+    }
 
-    public int getLookMemberInfo() { return lookMemberInfo; }
-    public void setLookMemberInfo(int lookMemberInfo) { this.lookMemberInfo = lookMemberInfo; }
+    public GroupMemberInfoVisibility getLookMemberInfo() { return lookMemberInfo; }
+    public void setLookMemberInfo(GroupMemberInfoVisibility lookMemberInfo) {
+        this.lookMemberInfo = lookMemberInfo != null ? lookMemberInfo : GroupMemberInfoVisibility.ALL_VISIBLE;
+    }
 
-    public int getApplyMemberFriend() { return applyMemberFriend; }
-    public void setApplyMemberFriend(int applyMemberFriend) { this.applyMemberFriend = applyMemberFriend; }
+    public GroupMemberFriendPolicy getApplyMemberFriend() { return applyMemberFriend; }
+    public void setApplyMemberFriend(GroupMemberFriendPolicy applyMemberFriend) {
+        this.applyMemberFriend = applyMemberFriend != null ? applyMemberFriend : GroupMemberFriendPolicy.ALLOW;
+    }
 
     public String getNotificationUserId() { return notificationUserId; }
     public void setNotificationUserId(String notificationUserId) { this.notificationUserId = notificationUserId; }

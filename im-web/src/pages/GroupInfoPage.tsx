@@ -10,10 +10,11 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { im } from "@/sdk/im-sdk";
+import { GroupMemberRole, groupMemberRoleRank, type GroupMemberRoleValue } from "im-sdk";
 
-function roleLabel(level: number): { text: string; className: string } | null {
-  if (level >= 200) return { text: "群主", className: "text-red-500 bg-red-50 border-red-200" };
-  if (level >= 100) return { text: "管理员", className: "text-blue-500 bg-blue-50 border-blue-200" };
+function roleLabel(role: GroupMemberRoleValue): { text: string; className: string } | null {
+  if (role === GroupMemberRole.OWNER) return { text: "群主", className: "text-red-500 bg-red-50 border-red-200" };
+  if (role === GroupMemberRole.ADMIN) return { text: "管理员", className: "text-blue-500 bg-blue-50 border-blue-200" };
   return null;
 }
 
@@ -21,7 +22,7 @@ export default function GroupInfoPage() {
   const { groupId } = useParams<{ groupId: string }>();
   const navigate = useNavigate();
   const { state, fetchGroupMembers, fetchGroupInfo } = useStore();
-  const [currentUserRole, setCurrentUserRole] = useState<number>(1);
+  const [currentUserRole, setCurrentUserRole] = useState<GroupMemberRoleValue>(GroupMemberRole.MEMBER);
   const [loading, setLoading] = useState(true);
   const [kicking, setKicking] = useState<Record<string, boolean>>({});
 
@@ -43,8 +44,9 @@ export default function GroupInfoPage() {
     if (me) setCurrentUserRole(me.roleLevel);
   }, [members, state.userId]);
 
-  const isOwner = currentUserRole >= 200;
-  const isAdmin = currentUserRole >= 100;
+  const currentUserRoleRank = groupMemberRoleRank(currentUserRole);
+  const isOwner = currentUserRole === GroupMemberRole.OWNER;
+  const isAdmin = currentUserRoleRank >= groupMemberRoleRank(GroupMemberRole.ADMIN);
 
   const handleKick = async (userId: string) => {
     if (!groupId) return;
@@ -135,7 +137,7 @@ export default function GroupInfoPage() {
             {members.map((member) => {
               const label = roleLabel(member.roleLevel);
               const canKick =
-                isOwner || (isAdmin && member.roleLevel < 100);
+                isOwner || (isAdmin && groupMemberRoleRank(member.roleLevel) < groupMemberRoleRank(GroupMemberRole.ADMIN));
               return (
                 <div
                   key={member.userId}
@@ -152,7 +154,7 @@ export default function GroupInfoPage() {
                         <span className="text-sm font-medium">
                           {member.nickname || member.userId}
                         </span>
-                        {member.roleLevel >= 200 && <Crown className="h-3.5 w-3.5 text-red-500" />}
+                        {member.roleLevel === GroupMemberRole.OWNER && <Crown className="h-3.5 w-3.5 text-red-500" />}
                         {label && (
                           <span className={`rounded border px-1.5 text-[10px] ${label.className}`}>
                             {label.text}

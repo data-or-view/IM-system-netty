@@ -14,26 +14,17 @@ import React, {
   type ReactNode,
 } from "react";
 import { im } from "@/sdk/im-sdk";
-import { toMessageContentType } from "im-sdk";
-import type { Message as SDKMessage, OutgoingMessageContentTypeValue, SendMessageAck, TokenPair } from "im-sdk";
+import { ConversationType, toMessageContentType } from "im-sdk";
+import type { Message as SDKMessage, OutgoingMessageContentTypeValue, SendMessageAck, TokenPair, UserInfo as SDKUserInfo, FriendInfo as SDKFriendInfo, GroupInfo as SDKGroupInfo, GroupMember as SDKGroupMember, GroupApply as SDKGroupApply, Conversation as SDKConversation } from "im-sdk";
 
 // ========== 类型（与 SDK 类型一致） ==========
 
-export interface Conversation {
-  conversationId: string;
-  ownerUserId: string;
-  conversationType: number;
-  userId?: string;
-  groupId?: string;
-  groupName?: string;
-  showName: string;
-  faceUrl?: string;
-  latestMsg?: string;
-  latestMsgSendTime?: number;
-  unreadCount: number;
-  recvMsgOpt: number;
-  isPinned: boolean;
-}
+export type Conversation = SDKConversation;
+export type UserInfo = SDKUserInfo;
+export type FriendInfo = SDKFriendInfo;
+export type GroupInfo = SDKGroupInfo;
+export type GroupMember = SDKGroupMember;
+export type GroupApply = SDKGroupApply;
 
 export interface Message {
   messageId: string;
@@ -45,57 +36,6 @@ export interface Message {
   content: string;
   createTime: number;
   status: number;
-}
-
-export interface UserInfo {
-  userId: string;
-  nickname?: string;
-  faceUrl?: string;
-  appMangerLevel?: number;
-}
-
-export interface GroupInfo {
-  groupId: string;
-  groupName: string;
-  faceUrl?: string;
-  ownerUserId?: string;
-  memberCount?: number;
-  groupType?: number;
-  needVerification?: number;
-  createTime?: number;
-}
-
-export interface FriendInfo {
-  ownerUserId: string;
-  friendUserId: string;
-  nickname?: string;
-  faceUrl?: string;
-  remark?: string;
-  addSource: number;
-  isPinned: boolean;
-  createTime: number;
-}
-
-export interface GroupMember {
-  groupId: string;
-  userId: string;
-  nickname?: string;
-  faceUrl?: string;
-  roleLevel: number;
-  joinTime: number;
-}
-
-export interface GroupApply {
-  groupId: string;
-  userId: string;
-  reqMsg?: string;
-  handledMsg?: string;
-  handlerUserId?: string;
-  handleResult: number;
-  joinSource?: number;
-  inviterUserId?: string;
-  createTime: number;
-  handledTime?: number;
 }
 
 // ========== State ==========
@@ -422,7 +362,7 @@ function toOptimisticMessage(
 
 function groupInfoFromConversation(list: Conversation[]): GroupInfo[] {
   return list
-    .filter((c) => c.conversationType === 2)
+    .filter((c) => c.conversationType === ConversationType.GROUP)
     .map((c) => ({
       groupId: c.groupId || c.conversationId.replace(/^group_/, ""),
       groupName: c.groupName || c.showName,

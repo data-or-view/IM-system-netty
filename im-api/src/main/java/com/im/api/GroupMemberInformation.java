@@ -5,7 +5,6 @@ package com.im.api;
  *
  * <p>对应 OpenIM {@code GetGroupMemberListResp.GroupMemberFullInfo}。</p>
  *
- * <p>角色层级：1=普通成员, 100=管理员, 200=群主。</p>
  */
 public class GroupMemberInformation {
 
@@ -14,11 +13,8 @@ public class GroupMemberInformation {
     private String nickname;
     private String faceUrl;
 
-    /** 1=普通成员, 100=管理员, 200=群主 */
-    private int roleLevel;
-
-    /** 入群来源 */
-    private int joinSource;
+    private GroupMemberRole roleLevel = GroupMemberRole.MEMBER;
+    private ApplySource joinSource = ApplySource.UNKNOWN;
 
     /** 邀请人 ID */
     private String inviterUserId;
@@ -46,11 +42,15 @@ public class GroupMemberInformation {
     public String getFaceUrl() { return faceUrl; }
     public void setFaceUrl(String faceUrl) { this.faceUrl = faceUrl; }
 
-    public int getRoleLevel() { return roleLevel; }
-    public void setRoleLevel(int roleLevel) { this.roleLevel = roleLevel; }
+    public GroupMemberRole getRoleLevel() { return roleLevel; }
+    public void setRoleLevel(GroupMemberRole roleLevel) {
+        this.roleLevel = roleLevel != null ? roleLevel : GroupMemberRole.MEMBER;
+    }
 
-    public int getJoinSource() { return joinSource; }
-    public void setJoinSource(int joinSource) { this.joinSource = joinSource; }
+    public ApplySource getJoinSource() { return joinSource; }
+    public void setJoinSource(ApplySource joinSource) {
+        this.joinSource = joinSource != null ? joinSource : ApplySource.UNKNOWN;
+    }
 
     public String getInviterUserId() { return inviterUserId; }
     public void setInviterUserId(String inviterUserId) { this.inviterUserId = inviterUserId; }
@@ -71,11 +71,11 @@ public class GroupMemberInformation {
 
     /** 是否为群主 */
     public boolean isOwner() {
-        return roleLevel >= 200;
+        return roleLevel.isOwner();
     }
 
     /** 是否为管理员或群主 */
     public boolean isAdminOrOwner() {
-        return roleLevel >= 100;
+        return roleLevel.isAdminOrOwner();
     }
 }

@@ -1,5 +1,25 @@
-import { type GroupApply, type GroupInfo, type GroupMember } from "../types.js";
+import {
+  GroupJoinVerification,
+  GroupType,
+  type GroupApply,
+  type GroupInfo,
+  type GroupJoinVerificationValue,
+  type GroupMember,
+  type GroupTypeValue,
+} from "../types.js";
 import { type HttpAPI, requireHttp } from "./http-api.js";
+
+const GROUP_TYPE_CODE: Record<GroupTypeValue, number> = {
+  [GroupType.PRIVATE]: 0,
+  [GroupType.PUBLIC]: 1,
+};
+
+const GROUP_JOIN_VERIFICATION_CODE: Record<GroupJoinVerificationValue, number> = {
+  [GroupJoinVerification.DIRECT]: 0,
+  [GroupJoinVerification.NEED_APPROVAL]: 1,
+  [GroupJoinVerification.INVITE_ONLY]: 2,
+  [GroupJoinVerification.FORBIDDEN]: 3,
+};
 
 /**
  * 群组模块 API。
@@ -8,12 +28,17 @@ export class GroupAPI {
   constructor(private transport?: HttpAPI) {}
 
   /** 创建群组 */
-  create(groupName: string, groupType?: number, memberIds?: string[], needVerification?: number): Promise<GroupInfo> {
+  create(
+    groupName: string,
+    groupType: GroupTypeValue = GroupType.PRIVATE,
+    memberIds?: string[],
+    needVerification: GroupJoinVerificationValue = GroupJoinVerification.DIRECT,
+  ): Promise<GroupInfo> {
     return requireHttp(this.transport).post<GroupInfo>("/api/group/create", {
       groupName,
-      ...(groupType !== undefined ? { groupType } : {}),
+      groupType: GROUP_TYPE_CODE[groupType],
       ...(memberIds ? { members: memberIds } : {}),
-      ...(needVerification !== undefined ? { needVerification } : {}),
+      needVerification: GROUP_JOIN_VERIFICATION_CODE[needVerification],
     });
   }
 

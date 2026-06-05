@@ -20,18 +20,6 @@ import java.util.Objects;
  */
 public class Conversation {
 
-    /** 单聊 */
-    public static final int SESSION_TYPE_SINGLE = 1;
-    /** 群聊 */
-    public static final int SESSION_TYPE_GROUP = 2;
-
-    /** 接收消息选项：正常 */
-    public static final int RECV_OPT_NORMAL = 0;
-    /** 接收消息选项：不提醒 */
-    public static final int RECV_OPT_NOT_NOTIFY = 1;
-    /** 接收消息选项：不接收 */
-    public static final int RECV_OPT_NOT_RECEIVE = 2;
-
     // ========== 会话标识 ==========
 
     /** 会话所属者（每个用户独立视图） */
@@ -40,8 +28,7 @@ public class Conversation {
     /** 会话 ID（单聊: s_user1_user2, 群聊: g_groupId） */
     private String conversationId;
 
-    /** 会话类型: 1=单聊, 2=群聊 */
-    private int sessionType;
+    private ConversationType conversationType;
 
     /** 对方用户 ID（单聊时有效） */
     private String userId;
@@ -74,11 +61,8 @@ public class Conversation {
     /** 是否置顶 */
     private boolean isPinned;
 
-    /** 消息接收选项: 0=正常, 1=不提醒, 2=不接收 */
-    private int recvMsgOpt;
-
-    /** @类型: 0=未@, 1=@我, 2=@所有人 */
-    private int groupAtType;
+    private MessageReceiveOption recvMsgOpt = MessageReceiveOption.NORMAL;
+    private GroupAtType groupAtType = GroupAtType.NONE;
 
     /** 阅后即焚时长(秒), 0=不开启 */
     private int burnDuration;
@@ -105,10 +89,10 @@ public class Conversation {
 
     public Conversation() {}
 
-    public Conversation(String conversationId, String ownerUserId, int sessionType) {
+    public Conversation(String conversationId, String ownerUserId, ConversationType conversationType) {
         this.conversationId = conversationId;
         this.ownerUserId = ownerUserId;
-        this.sessionType = sessionType;
+        this.conversationType = conversationType;
         this.createTime = System.currentTimeMillis();
         this.updateTime = this.createTime;
     }
@@ -121,8 +105,8 @@ public class Conversation {
     public String getConversationId() { return conversationId; }
     public void setConversationId(String conversationId) { this.conversationId = conversationId; }
 
-    public int getSessionType() { return sessionType; }
-    public void setSessionType(int sessionType) { this.sessionType = sessionType; }
+    public ConversationType getConversationType() { return conversationType; }
+    public void setConversationType(ConversationType conversationType) { this.conversationType = conversationType; }
 
     public String getUserId() { return userId; }
     public void setUserId(String userId) { this.userId = userId; }
@@ -151,11 +135,15 @@ public class Conversation {
     public boolean isPinned() { return isPinned; }
     public void setPinned(boolean pinned) { isPinned = pinned; }
 
-    public int getRecvMsgOpt() { return recvMsgOpt; }
-    public void setRecvMsgOpt(int recvMsgOpt) { this.recvMsgOpt = recvMsgOpt; }
+    public MessageReceiveOption getRecvMsgOpt() { return recvMsgOpt; }
+    public void setRecvMsgOpt(MessageReceiveOption recvMsgOpt) {
+        this.recvMsgOpt = recvMsgOpt != null ? recvMsgOpt : MessageReceiveOption.NORMAL;
+    }
 
-    public int getGroupAtType() { return groupAtType; }
-    public void setGroupAtType(int groupAtType) { this.groupAtType = groupAtType; }
+    public GroupAtType getGroupAtType() { return groupAtType; }
+    public void setGroupAtType(GroupAtType groupAtType) {
+        this.groupAtType = groupAtType != null ? groupAtType : GroupAtType.NONE;
+    }
 
     public int getBurnDuration() { return burnDuration; }
     public void setBurnDuration(int burnDuration) { this.burnDuration = burnDuration; }

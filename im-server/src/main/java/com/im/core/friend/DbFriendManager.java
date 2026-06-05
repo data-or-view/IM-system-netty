@@ -1,6 +1,8 @@
 package com.im.core.friend;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.im.api.ApplyHandleResult;
+import com.im.api.ApplySource;
 import com.im.api.FriendApply;
 import com.im.api.FriendInformation;
 import com.im.api.IFriendManager;
@@ -65,7 +67,7 @@ public class DbFriendManager implements IFriendManager {
                 entity.setFromUserId(fromUserId);
                 entity.setToUserId(toUserId);
                 entity.setReqMsg(reqMsg);
-                entity.setHandleResult(0);
+                entity.setHandleResult(ApplyHandleResult.PENDING.getCode());
                 entity.setCreatedAt(now);
                 mapper.insert(entity);
                 session.commit();
@@ -370,7 +372,7 @@ public class DbFriendManager implements IFriendManager {
         apply.setReqMsg(entity.getReqMsg());
         apply.setHandlerUserId(entity.getHandlerUserId());
         apply.setHandleMsg(entity.getHandleMsg());
-        apply.setHandleResult(entity.getHandleResult());
+        apply.setHandleResult(ApplyHandleResult.fromCode(entity.getHandleResult()));
         apply.setCreateTime(entity.getCreatedAt());
         apply.setHandleTime(entity.getHandleTime());
         return apply;
@@ -381,7 +383,7 @@ public class DbFriendManager implements IFriendManager {
         fi.setOwnerUserId(entity.getOwnerUserId());
         fi.setFriendUserId(entity.getFriendUserId());
         fi.setRemark(entity.getRemark());
-        fi.setAddSource(entity.getAddSource());
+        fi.setAddSource(ApplySource.fromCode(entity.getAddSource()));
         fi.setEx(entity.getEx());
         fi.setCreateTime(entity.getCreatedAt());
         fi.setPinned(entity.getIsPinned() == 1);

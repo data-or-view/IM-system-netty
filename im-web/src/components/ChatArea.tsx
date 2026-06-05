@@ -15,7 +15,7 @@ import { Send, Paperclip, MoreHorizontal, Undo2, Info, Phone, Video } from "luci
 import { toast } from "sonner";
 import { im } from "@/sdk/im-sdk";
 import { MessageContentRenderer } from "@/components/MessageContentRenderer";
-import { toMessageContentType, type OutgoingMessageContentTypeValue, type SendMessageAck } from "im-sdk";
+import { ConversationType, toMessageContentType, type OutgoingMessageContentTypeValue, type SendMessageAck } from "im-sdk";
 import { useCall } from "@/components/call/CallProvider";
 
 export default function ChatArea() {
@@ -68,7 +68,7 @@ export default function ChatArea() {
     const content = input.trim();
     setInput("");
 
-    if (conv.conversationType === 2 && conv.groupId) {
+    if (conv.conversationType === ConversationType.GROUP && conv.groupId) {
       // Group chat
       im.message
         .sendGroup(conv.groupId, "text", { text: content })
@@ -137,7 +137,7 @@ export default function ChatArea() {
         url: uploaded.fileUrl,
       };
 
-      const msg = conv.conversationType === 2 && conv.groupId
+      const msg = conv.conversationType === ConversationType.GROUP && conv.groupId
         ? await im.message.sendGroup(conv.groupId, "file", fileContent)
         : conv.userId
           ? await im.message.send({ toUserId: conv.userId, contentType: "file", content: fileContent })
@@ -174,7 +174,7 @@ export default function ChatArea() {
 
   const handleHeaderClick = () => {
     if (!conv) return;
-    if (conv.conversationType === 2 && conv.groupId) {
+    if (conv.conversationType === ConversationType.GROUP && conv.groupId) {
       navigate(`/chat/group/${conv.groupId}`);
     } else if (conv.userId) {
       navigate(`/chat/user/${conv.userId}`);
@@ -182,7 +182,7 @@ export default function ChatArea() {
   };
 
   const handleStartCall = useCallback((callType: "voice" | "video") => {
-    if (!conv?.userId || conv.conversationType === 2) return;
+    if (!conv?.userId || conv.conversationType === ConversationType.GROUP) return;
     void startCall({
       callType,
       peer: {
@@ -226,11 +226,11 @@ export default function ChatArea() {
         <div className="flex-1">
           <div className="text-sm font-medium">{conv?.showName}</div>
           <div className="text-xs text-muted-foreground">
-            {conv?.conversationType === 2 ? "群聊" : "单聊"}
+            {conv?.conversationType === ConversationType.GROUP ? "群聊" : "单聊"}
           </div>
         </div>
       </button>
-        {conv?.conversationType !== 2 && conv?.userId && (
+        {conv?.conversationType !== ConversationType.GROUP && conv?.userId && (
           <div className="flex items-center gap-1">
             <Button
               type="button"

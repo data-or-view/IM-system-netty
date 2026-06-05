@@ -3,9 +3,12 @@ package com.im.core.conversation;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.im.api.Conversation;
+import com.im.api.ConversationType;
+import com.im.api.GroupAtType;
 import com.im.api.IConversationManager;
 import com.im.api.IncrementalSyncResult;
 import com.im.api.Message;
+import com.im.api.MessageReceiveOption;
 import com.im.core.db.MyBatisPlusFactory;
 import com.im.core.db.entity.ConversationEntity;
 import com.im.core.db.entity.MessageReadStateEntity;
@@ -89,11 +92,11 @@ public class DbConversationManager implements IConversationManager {
 
                 String attachedInfo = buildAttachedInfo(msg);
 
-                int convType = conversationId != null && conversationId.startsWith("group_")
-                        ? Conversation.SESSION_TYPE_GROUP : Conversation.SESSION_TYPE_SINGLE;
+                ConversationType convType = conversationId != null && conversationId.startsWith("group_")
+                        ? ConversationType.GROUP : ConversationType.SINGLE;
 
                 String targetUserId = null;
-                if (convType == Conversation.SESSION_TYPE_SINGLE) {
+                if (convType == ConversationType.SINGLE) {
                     String from = msg.getFromUserId();
                     String to = msg.getToUserId();
                     targetUserId = from != null && from.equals(ownerUserId) ? to : from;
@@ -103,7 +106,7 @@ public class DbConversationManager implements IConversationManager {
                 long newSeq = msg.getSequenceId();
 
                 mapper.upsertConversation(
-                        ownerUserId, conversationId, convType,
+                        ownerUserId, conversationId, convType.getCode(),
                         targetUserId, msg.getGroupId(),
                         attachedInfo, newSeq, now
                 );
@@ -257,7 +260,7 @@ public class DbConversationManager implements IConversationManager {
                 ConversationEntity entity = new ConversationEntity();
                 entity.setOwnerUserId(ownerUserId);
                 entity.setConversationId(conversationId);
-                entity.setConversationType(Conversation.SESSION_TYPE_SINGLE);
+                entity.setConversationType(ConversationType.SINGLE.getCode());
                 entity.setUserId(targetUserId);
                 entity.setCreatedAt(System.currentTimeMillis());
                 entity.setUpdatedAt(System.currentTimeMillis());
@@ -288,7 +291,7 @@ public class DbConversationManager implements IConversationManager {
                     ConversationEntity entity = new ConversationEntity();
                     entity.setOwnerUserId(memberId);
                     entity.setConversationId(conversationId);
-                    entity.setConversationType(Conversation.SESSION_TYPE_GROUP);
+                    entity.setConversationType(ConversationType.GROUP.getCode());
                     entity.setGroupId(groupId);
                     entity.setCreatedAt(now);
                     entity.setUpdatedAt(now);
@@ -320,14 +323,14 @@ public class DbConversationManager implements IConversationManager {
         Conversation conv = new Conversation();
         conv.setConversationId(e.getConversationId());
         conv.setOwnerUserId(e.getOwnerUserId());
-        conv.setSessionType(e.getConversationType());
+        conv.setConversationType(ConversationType.fromCode(e.getConversationType()));
         conv.setUserId(e.getUserId());
         conv.setGroupId(e.getGroupId());
-        conv.setRecvMsgOpt(e.getRecvMsgOpt());
+        conv.setRecvMsgOpt(MessageReceiveOption.fromCode(e.getRecvMsgOpt()));
         conv.setPinned(e.getIsPinned() == 1);
         conv.setPrivateChat(e.getIsPrivateChat() == 1);
         conv.setBurnDuration(e.getBurnDuration());
-        conv.setGroupAtType(e.getGroupAtType());
+        conv.setGroupAtType(GroupAtType.fromCode(e.getGroupAtType()));
         conv.setAttachedInfo(e.getAttachedInfo());
         conv.setEx(e.getEx());
         conv.setLastMsgSeq(e.getMaxSeq());

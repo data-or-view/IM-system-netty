@@ -1,9 +1,12 @@
 package com.im.core.conversation;
 
 import com.im.api.Conversation;
+import com.im.api.ConversationType;
+import com.im.api.GroupAtType;
 import com.im.api.IConversationManager;
 import com.im.api.IncrementalSyncResult;
 import com.im.api.Message;
+import com.im.api.MessageReceiveOption;
 import com.im.common.exception.PersistenceExceptions;
 import com.im.core.redis.RedisConfiguration;
 import io.lettuce.core.cluster.api.async.RedisClusterAsyncCommands;
@@ -92,10 +95,10 @@ public class RedisConversationManager implements IConversationManager {
 
             boolean exists = async.exists(key).get(REDIS_TIMEOUT_MS, TimeUnit.MILLISECONDS) == 1;
             if (!exists) {
-                int sessionType = conversationId.startsWith("group_")
-                        ? Conversation.SESSION_TYPE_GROUP : Conversation.SESSION_TYPE_SINGLE;
+                ConversationType sessionType = conversationId.startsWith("group_")
+                        ? ConversationType.GROUP : ConversationType.SINGLE;
                 Conversation conv = new Conversation(conversationId, ownerUserId, sessionType);
-                if (sessionType == Conversation.SESSION_TYPE_SINGLE) {
+                if (sessionType == ConversationType.SINGLE) {
                     String from = msg.getFromUserId();
                     conv.setUserId(from != null && from.equals(ownerUserId) ? msg.getToUserId() : from);
                 } else {
@@ -189,7 +192,7 @@ public class RedisConversationManager implements IConversationManager {
             if (exists) return null;
 
             long now = System.currentTimeMillis();
-            Conversation conv = new Conversation(conversationId, ownerUserId, Conversation.SESSION_TYPE_SINGLE);
+            Conversation conv = new Conversation(conversationId, ownerUserId, ConversationType.SINGLE);
             conv.setUserId(targetUserId);
             conv.setCreateTime(now);
             conv.setUpdateTime(now);
@@ -209,7 +212,7 @@ public class RedisConversationManager implements IConversationManager {
                 boolean exists = async.exists(key).get(REDIS_TIMEOUT_MS, TimeUnit.MILLISECONDS) == 1;
                 if (exists) continue;
 
-                Conversation conv = new Conversation(conversationId, memberId, Conversation.SESSION_TYPE_GROUP);
+                Conversation conv = new Conversation(conversationId, memberId, ConversationType.GROUP);
                 conv.setGroupId(groupId);
                 conv.setCreateTime(now);
                 conv.setUpdateTime(now);
@@ -282,7 +285,7 @@ public class RedisConversationManager implements IConversationManager {
         Conversation conv = new Conversation();
         conv.setOwnerUserId(fields.get("ownerUserId"));
         conv.setConversationId(fields.get("conversationId"));
-        conv.setSessionType(intField(fields, "sessionType", Conversation.SESSION_TYPE_SINGLE));
+        conv.setConversationType(ConversationType.fromCode(intField(fields, "sessionType", ConversationType.SINGLE.getCode())));
         conv.setUserId(fields.get("userId"));
         conv.setGroupId(fields.get("groupId"));
         conv.setUnreadCount(longField(fields, "unreadCount", 0));
@@ -292,8 +295,8 @@ public class RedisConversationManager implements IConversationManager {
         conv.setLastMsgSeq(longField(fields, "lastMsgSeq", 0));
         conv.setLastMsgTime(longField(fields, "lastMsgTime", 0));
         conv.setPinned("1".equals(fields.get("isPinned")));
-        conv.setRecvMsgOpt(intField(fields, "recvMsgOpt", 0));
-        conv.setGroupAtType(intField(fields, "groupAtType", 0));
+        conv.setRecvMsgOpt(MessageReceiveOption.fromCode(intField(fields, "recvMsgOpt", MessageReceiveOption.NORMAL.getCode())));
+        conv.setGroupAtType(GroupAtType.fromCode(intField(fields, "groupAtType", GroupAtType.NONE.getCode())));
         conv.setBurnDuration(intField(fields, "burnDuration", 0));
         conv.setMsgDestruct("1".equals(fields.get("isMsgDestruct")));
         conv.setMsgDestructTime(intField(fields, "msgDestructTime", 0));
@@ -309,7 +312,7 @@ public class RedisConversationManager implements IConversationManager {
         Map<String, String> map = new LinkedHashMap<>();
         putIfNotNull(map, "ownerUserId", conv.getOwnerUserId());
         putIfNotNull(map, "conversationId", conv.getConversationId());
-        map.put("sessionType", String.valueOf(conv.getSessionType()));
+        map.put("sessionType", String.valueOf(conv.getConversationType().getCode()));
         putIfNotNull(map, "userId", conv.getUserId());
         putIfNotNull(map, "groupId", conv.getGroupId());
         map.put("unreadCount", String.valueOf(conv.getUnreadCount()));
@@ -319,8 +322,8 @@ public class RedisConversationManager implements IConversationManager {
         map.put("lastMsgSeq", String.valueOf(conv.getLastMsgSeq()));
         map.put("lastMsgTime", String.valueOf(conv.getLastMsgTime()));
         map.put("isPinned", conv.isPinned() ? "1" : "0");
-        map.put("recvMsgOpt", String.valueOf(conv.getRecvMsgOpt()));
-        map.put("groupAtType", String.valueOf(conv.getGroupAtType()));
+        map.put("recvMsgOpt", String.valueOf(conv.getRecvMsgOpt().getCode()));
+        map.put("groupAtType", String.valueOf(conv.getGroupAtType().getCode()));
         map.put("burnDuration", String.valueOf(conv.getBurnDuration()));
         map.put("isMsgDestruct", conv.isMsgDestruct() ? "1" : "0");
         map.put("msgDestructTime", String.valueOf(conv.getMsgDestructTime()));

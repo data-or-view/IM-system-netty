@@ -18,11 +18,8 @@ public class UserInformation {
     private String password;
     private String ex;
 
-    /** 管理员级别: 0=普通, 1=管理员, 2=超管 */
-    private int appMangerLevel;
-
-    /** 全局消息接收: 0=正常, 1=免打扰, 2=不接收 */
-    private int globalRecvMsgOpt;
+    private UserAdminLevel appMangerLevel = UserAdminLevel.NORMAL;
+    private MessageReceiveOption globalRecvMsgOpt = MessageReceiveOption.NORMAL;
 
     private long createTime;
     private long updatedAt;
@@ -51,11 +48,15 @@ public class UserInformation {
     public String getEx() { return ex; }
     public void setEx(String ex) { this.ex = ex; }
 
-    public int getAppMangerLevel() { return appMangerLevel; }
-    public void setAppMangerLevel(int appMangerLevel) { this.appMangerLevel = appMangerLevel; }
+    public UserAdminLevel getAppMangerLevel() { return appMangerLevel; }
+    public void setAppMangerLevel(UserAdminLevel appMangerLevel) {
+        this.appMangerLevel = appMangerLevel != null ? appMangerLevel : UserAdminLevel.NORMAL;
+    }
 
-    public int getGlobalRecvMsgOpt() { return globalRecvMsgOpt; }
-    public void setGlobalRecvMsgOpt(int globalRecvMsgOpt) { this.globalRecvMsgOpt = globalRecvMsgOpt; }
+    public MessageReceiveOption getGlobalRecvMsgOpt() { return globalRecvMsgOpt; }
+    public void setGlobalRecvMsgOpt(MessageReceiveOption globalRecvMsgOpt) {
+        this.globalRecvMsgOpt = globalRecvMsgOpt != null ? globalRecvMsgOpt : MessageReceiveOption.NORMAL;
+    }
 
     public long getCreateTime() { return createTime; }
     public void setCreateTime(long createTime) { this.createTime = createTime; }

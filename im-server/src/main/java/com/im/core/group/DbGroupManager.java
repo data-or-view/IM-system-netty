@@ -35,10 +35,10 @@ public class DbGroupManager implements IGroupManager {
 
     private static final Logger log = LoggerFactory.getLogger(DbGroupManager.class);
     private static final RetryConfig CFG = RetryStrategies.DB_WRITE;
-    public static final int GROUP_STATUS_DISBANDED = 0;
-    public static final int GROUP_STATUS_NORMAL = 1;
-    private static final int GROUP_ROLE_ADMIN = 100;
-    private static final int GROUP_ROLE_OWNER = 200;
+    public static final int GROUP_STATUS_DISBANDED = GroupStatus.DISBANDED.getCode();
+    public static final int GROUP_STATUS_NORMAL = GroupStatus.NORMAL.getCode();
+    private static final int GROUP_ROLE_ADMIN = GroupMemberRole.ADMIN.getCode();
+    private static final int GROUP_ROLE_OWNER = GroupMemberRole.OWNER.getCode();
 
     private final RetryExecutor retryExecutor;
     private final DbIncrementalSync sync;
@@ -384,7 +384,7 @@ public class DbGroupManager implements IGroupManager {
             req.setGroupId(groupId);
             req.setUserId(userId);
             req.setReqMsg(reqMsg);
-            req.setHandleResult(0);
+            req.setHandleResult(ApplyHandleResult.PENDING.getCode());
             req.setCreatedAt(now);
             mapper.insert(req);
             session.commit();
@@ -514,11 +514,9 @@ public class DbGroupManager implements IGroupManager {
     public String getRole(String groupId, String userId) {
         GroupMemberEntity member = getMemberInSession(null, groupId, userId);
         if (member == null) return null;
-        return switch (member.getRoleLevel()) {
-            case GROUP_ROLE_OWNER -> "owner";
-            case GROUP_ROLE_ADMIN -> "admin";
-            default -> "member";
-        };
+        if (member.getRoleLevel() == GROUP_ROLE_OWNER) return "owner";
+        if (member.getRoleLevel() == GROUP_ROLE_ADMIN) return "admin";
+        return "member";
     }
 
     @Override
@@ -596,7 +594,7 @@ public class DbGroupManager implements IGroupManager {
                     GroupMemberInformation gmi = new GroupMemberInformation();
                     gmi.setGroupId(groupId);
                     gmi.setUserId(uid);
-                    gmi.setRoleLevel(-1);
+                    gmi.setRoleLevel(GroupMemberRole.REMOVED);
                     return gmi;
                 });
     }
@@ -647,11 +645,11 @@ public class DbGroupManager implements IGroupManager {
         gi.setIntroduction(entity.getIntroduction());
         gi.setFaceUrl(entity.getFaceUrl());
         gi.setMemberCount(entity.getMemberCount());
-        gi.setStatus(entity.getStatus());
-        gi.setGroupType(entity.getGroupType());
-        gi.setNeedVerification(entity.getNeedVerification());
-        gi.setLookMemberInfo(entity.getLookMemberInfo());
-        gi.setApplyMemberFriend(entity.getApplyMemberFriend());
+        gi.setStatus(GroupStatus.fromCode(entity.getStatus()));
+        gi.setGroupType(GroupType.fromCode(entity.getGroupType()));
+        gi.setNeedVerification(GroupJoinVerification.fromCode(entity.getNeedVerification()));
+        gi.setLookMemberInfo(GroupMemberInfoVisibility.fromCode(entity.getLookMemberInfo()));
+        gi.setApplyMemberFriend(GroupMemberFriendPolicy.fromCode(entity.getApplyMemberFriend()));
         gi.setNotificationUserId(entity.getNotificationUserId());
         gi.setNotificationUpdateTime(entity.getNotificationUpdateTime());
         gi.setEx(entity.getEx());
@@ -666,8 +664,8 @@ public class DbGroupManager implements IGroupManager {
         gmi.setUserId(entity.getUserId());
         gmi.setNickname(entity.getNickname());
         gmi.setFaceUrl(entity.getFaceUrl());
-        gmi.setRoleLevel(entity.getRoleLevel());
-        gmi.setJoinSource(entity.getJoinSource());
+        gmi.setRoleLevel(GroupMemberRole.fromCode(entity.getRoleLevel()));
+        gmi.setJoinSource(ApplySource.fromCode(entity.getJoinSource()));
         gmi.setInviterUserId(entity.getInviterUserId());
         gmi.setMuteEndTime(entity.getMuteEndTime());
         gmi.setEx(entity.getEx());
@@ -682,8 +680,8 @@ public class DbGroupManager implements IGroupManager {
         ga.setReqMsg(entity.getReqMsg());
         ga.setHandledMsg(entity.getHandledMsg());
         ga.setHandlerUserId(entity.getHandlerUserId());
-        ga.setHandleResult(entity.getHandleResult());
-        ga.setJoinSource(entity.getJoinSource());
+        ga.setHandleResult(ApplyHandleResult.fromCode(entity.getHandleResult()));
+        ga.setJoinSource(ApplySource.fromCode(entity.getJoinSource()));
         ga.setInviterUserId(entity.getInviterUserId());
         ga.setCreateTime(entity.getCreatedAt());
         ga.setHandledTime(entity.getHandledTime());

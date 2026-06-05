@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useStore, type Conversation, type FriendInfo, type GroupInfo } from "@/store/store";
+import { ConversationType, MessageReceiveOption } from "im-sdk";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -308,7 +309,7 @@ function ListShell({
 function ConversationItem({ conv }: { conv: Conversation }) {
   const { state, dispatch } = useStore();
   const isActive = state.activeConversationId === conv.conversationId;
-  const subtitle = conv.latestMsg || (conv.conversationType === 2 ? `[群聊] ${conv.groupName || conv.showName}` : "暂无消息");
+  const subtitle = conv.latestMsg || (conv.conversationType === ConversationType.GROUP ? `[群聊] ${conv.groupName || conv.showName}` : "暂无消息");
 
   return (
     <button
@@ -348,7 +349,7 @@ function FriendItem({ friend }: { friend: FriendInfo }) {
   const displayName = friend.remark || friend.nickname || friend.friendUserId;
 
   const openChat = () => {
-    const existing = state.conversations.find((conv) => conv.conversationType === 1 && conv.userId === friend.friendUserId);
+    const existing = state.conversations.find((conv) => conv.conversationType === ConversationType.SINGLE && conv.userId === friend.friendUserId);
     if (existing) {
       dispatch({ type: "SET_ACTIVE_CONVERSATION", conversationId: existing.conversationId });
       navigate("/chat");
@@ -358,14 +359,14 @@ function FriendItem({ friend }: { friend: FriendInfo }) {
     const conversation: Conversation = {
       conversationId: singleConversationId(state.userId || "", friend.friendUserId),
       ownerUserId: state.userId || "",
-      conversationType: 1,
+      conversationType: ConversationType.SINGLE,
       userId: friend.friendUserId,
       showName: displayName,
       faceUrl: friend.faceUrl,
       latestMsg: "",
       latestMsgSendTime: 0,
       unreadCount: 0,
-      recvMsgOpt: 0,
+      recvMsgOpt: MessageReceiveOption.NORMAL,
       isPinned: false,
     };
     dispatch({ type: "ADD_CONVERSATION", conversation });
@@ -413,7 +414,7 @@ function GroupItem({ group }: { group: GroupInfo }) {
   const { state, dispatch } = useStore();
   const navigate = useNavigate();
   const conversation = useMemo(
-    () => state.conversations.find((conv) => conv.conversationType === 2 && (conv.groupId === group.groupId || conv.conversationId === `group_${group.groupId}`)),
+    () => state.conversations.find((conv) => conv.conversationType === ConversationType.GROUP && (conv.groupId === group.groupId || conv.conversationId === `group_${group.groupId}`)),
     [group.groupId, state.conversations]
   );
 
@@ -427,7 +428,7 @@ function GroupItem({ group }: { group: GroupInfo }) {
     const localConversation: Conversation = {
       conversationId: `group_${group.groupId}`,
       ownerUserId: state.userId || "",
-      conversationType: 2,
+      conversationType: ConversationType.GROUP,
       groupId: group.groupId,
       groupName: group.groupName,
       showName: group.groupName,
@@ -435,7 +436,7 @@ function GroupItem({ group }: { group: GroupInfo }) {
       latestMsg: "",
       latestMsgSendTime: 0,
       unreadCount: 0,
-      recvMsgOpt: 0,
+      recvMsgOpt: MessageReceiveOption.NORMAL,
       isPinned: false,
     };
     dispatch({ type: "ADD_CONVERSATION", conversation: localConversation });

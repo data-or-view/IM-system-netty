@@ -15,7 +15,7 @@ interface Props {
 interface ApplyItem {
   fromUserId: string;
   toUserId: string;
-  handleResult: number;
+  handleResult: import("im-sdk").ApplyHandleResultValue;
   reqMsg?: string;
   createTime: number;
 }

@@ -1,6 +1,7 @@
 package com.im.core.access;
 
 import com.im.api.Conversation;
+import com.im.api.ConversationType;
 import com.im.api.IConversationManager;
 import com.im.api.IGroupManager;
 import com.im.api.IncrementalSyncResult;
@@ -25,7 +26,7 @@ class ConversationAccessCheckerTest {
     void allowsConversationOwnedByUser() {
         RecordingConversationManager conversationManager = new RecordingConversationManager();
         conversationManager.visibleConversations.put("alice|single_alice_bob",
-                new Conversation("single_alice_bob", "alice", Conversation.SESSION_TYPE_SINGLE));
+                new Conversation("single_alice_bob", "alice", ConversationType.SINGLE));
         ConversationAccessChecker checker = new ConversationAccessChecker(conversationManager, new RecordingGroupManager());
 
         assertDoesNotThrow(() -> checker.requireReadable("alice", "single_alice_bob"));
@@ -65,9 +66,9 @@ class ConversationAccessCheckerTest {
     void listsConversationIdsVisibleToUser() {
         RecordingConversationManager conversationManager = new RecordingConversationManager();
         conversationManager.conversations.put("alice", List.of(
-                new Conversation("single_alice_bob", "alice", Conversation.SESSION_TYPE_SINGLE),
-                new Conversation("", "alice", Conversation.SESSION_TYPE_SINGLE),
-                new Conversation(null, "alice", Conversation.SESSION_TYPE_SINGLE)
+                new Conversation("single_alice_bob", "alice", ConversationType.SINGLE),
+                new Conversation("", "alice", ConversationType.SINGLE),
+                new Conversation(null, "alice", ConversationType.SINGLE)
         ));
         ConversationAccessChecker checker = new ConversationAccessChecker(conversationManager, new RecordingGroupManager());
 

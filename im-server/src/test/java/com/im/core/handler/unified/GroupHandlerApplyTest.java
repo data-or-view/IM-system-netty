@@ -1,6 +1,7 @@
 package com.im.core.handler.unified;
 
 import com.im.api.ApiRequest;
+import com.im.api.ApplyHandleResult;
 import com.im.api.GroupApply;
 import com.im.api.GroupInformation;
 import com.im.api.GroupMemberInformation;
@@ -26,7 +27,7 @@ class GroupHandlerApplyTest {
         GroupApply apply = new GroupApply();
         apply.setGroupId("grp_1");
         apply.setUserId("alice");
-        apply.setHandleResult(0);
+        apply.setHandleResult(ApplyHandleResult.PENDING);
         manager.manageableApplies = List.of(apply);
         GroupHandler handler = new GroupHandler(manager);
         ApiRequest request = request(Operation.GROUP_APPLY_LIST, Map.of("onlyPending", true), "owner");

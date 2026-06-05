@@ -15,8 +15,7 @@ public class FriendInformation {
     private String remark;
     private String faceUrl;
 
-    /** 添加来源: 1=搜索, 2=二维码, 3=群添加 */
-    private int addSource;
+    private ApplySource addSource = ApplySource.UNKNOWN;
 
     /** 扩展字段（JSON） */
     private String ex;
@@ -41,8 +40,10 @@ public class FriendInformation {
     public String getFaceUrl() { return faceUrl; }
     public void setFaceUrl(String faceUrl) { this.faceUrl = faceUrl; }
 
-    public int getAddSource() { return addSource; }
-    public void setAddSource(int addSource) { this.addSource = addSource; }
+    public ApplySource getAddSource() { return addSource; }
+    public void setAddSource(ApplySource addSource) {
+        this.addSource = addSource != null ? addSource : ApplySource.UNKNOWN;
+    }
 
     public String getEx() { return ex; }
     public void setEx(String ex) { this.ex = ex; }

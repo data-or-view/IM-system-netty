@@ -99,7 +99,7 @@ export default function UserProfilePage() {
         </Avatar>
         <h2 className="text-xl font-semibold">{profile.nickname || userId}</h2>
         <p className="text-sm text-muted-foreground">ID: {userId}</p>
-        {profile.appMangerLevel !== undefined && profile.appMangerLevel > 0 && (
+        {profile.appMangerLevel !== undefined && profile.appMangerLevel !== "NORMAL" && (
           <span className="mt-1 rounded bg-yellow-100 px-2 py-0.5 text-xs text-yellow-700">
             平台管理员
           </span>
