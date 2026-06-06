@@ -58,6 +58,15 @@ im:
   webhook:
     url: ""                      # Webhook 回调 URL
 
+  # ── RocketMQ ──
+  rocketmq:
+    name-server: ""              # RocketMQ NameServer 地址，例: 127.0.0.1:9876
+    producer:
+      group: "im-producer"       # Producer Group
+    send:
+      timeout-ms: 3000           # 同步发送超时时间
+    retry-times: 2               # 同步发送失败重试次数
+
   # ── RTC 通话 ──
   call:
     enabled: true

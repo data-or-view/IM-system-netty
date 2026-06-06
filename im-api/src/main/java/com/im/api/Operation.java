@@ -48,6 +48,11 @@ public enum Operation {
     GROUP_APPLY_LIST("group.apply.list", "GET", "/api/group/apply/list", true, TransportType.HTTP_ONLY),
     GROUP_APPLY_UNHANDLED_COUNT("group.apply.unhandled.count", "GET", "/api/group/apply/unhandled/count", true, TransportType.HTTP_ONLY),
     GROUP_APPLY_APPROVE("group.apply.approve", "POST", "/api/group/apply/approve", true, TransportType.HTTP_ONLY),
+    GROUP_CALL_START("group.call.start", "POST", "/api/group/call/start", true, TransportType.HTTP_ONLY),
+    GROUP_CALL_JOIN("group.call.join", "POST", "/api/group/call/join", true, TransportType.HTTP_ONLY),
+    GROUP_CALL_LEAVE("group.call.leave", "POST", "/api/group/call/leave", true, TransportType.HTTP_ONLY),
+    GROUP_CALL_END("group.call.end", "POST", "/api/group/call/end", true, TransportType.HTTP_ONLY),
+    GROUP_CALL_ACTIVE("group.call.active", "GET", "/api/group/call/active", true, TransportType.HTTP_ONLY),
 
     // ── 会话 ──
     CONVERSATION_LIST("conversation.list", "GET", "/api/conversation/list", true, TransportType.HTTP_ONLY),

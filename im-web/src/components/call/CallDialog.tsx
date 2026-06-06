@@ -3,7 +3,7 @@ import { Camera, CameraOff, Mic, MicOff, Phone, PhoneOff, Video } from "lucide-r
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import { useCall, type CallState } from "./CallProvider";
+import { useCall, type CallState, type RemoteMedia } from "./CallProvider";
 
 export function CallDialog() {
   const {
@@ -16,27 +16,31 @@ export function CallDialog() {
     toggleCamera,
   } = useCall();
   const open = call.phase !== "idle";
-  const peerName = call.peer?.name || call.peer?.userId || "未知用户";
+  const title = call.mode === "group"
+    ? `${call.group?.name || "群聊"} 群视频`
+    : call.peer?.name || call.peer?.userId || "未知用户";
 
   return (
     <Dialog open={open}>
       <DialogContent
         hideClose
         onOpenAutoFocus={(event) => event.preventDefault()}
-        className="overflow-hidden border-white/10 bg-zinc-950 p-0 text-white shadow-2xl sm:max-w-[420px]"
+        className="overflow-hidden border-white/10 bg-zinc-950 p-0 text-white shadow-2xl sm:max-w-[720px]"
       >
         <DialogTitle className="sr-only">
-          {call.callType === "video" ? "视频通话" : "语音通话"}
+          {call.mode === "group" ? "群视频" : call.callType === "video" ? "视频通话" : "语音通话"}
         </DialogTitle>
         <div className="relative min-h-[560px] bg-[radial-gradient(circle_at_top,#14532d_0%,#18181b_42%,#050505_100%)]">
-          {call.callType === "video" && call.phase === "connected" ? (
-            <VideoStage call={call} peerName={peerName} />
+          {call.mode === "group" ? (
+            <GroupStage call={call} title={title} />
+          ) : call.callType === "video" && call.phase === "connected" ? (
+            <VideoStage call={call} peerName={title} />
           ) : (
-            <VoiceStage call={call} peerName={peerName} />
+            <VoiceStage call={call} peerName={title} />
           )}
 
           <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black via-black/75 to-transparent px-6 pb-8 pt-24">
-            <CallStatus call={call} peerName={peerName} />
+            <CallStatus call={call} title={title} />
             <CallActions
               call={call}
               onAccept={acceptCall}
@@ -107,23 +111,95 @@ function VideoStage({ call, peerName }: { call: CallState; peerName: string }) {
   );
 }
 
+function GroupStage({ call, title }: { call: CallState; title: string }) {
+  const localRef = useRef<HTMLVideoElement | null>(null);
+  useAttachTrack(call.localVideoTrack, localRef);
+  const tiles = call.remoteMedias.slice(0, 8);
+
+  return (
+    <div className="min-h-[560px] bg-black px-5 pb-36 pt-6">
+      <div className="mb-4 flex items-center justify-between text-white/80">
+        <div>
+          <div className="text-lg font-semibold text-white">{title}</div>
+          <div className="text-xs text-white/55">{tiles.length + 1} 人正在通话</div>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+        <LocalTile call={call} videoRef={localRef} />
+        {tiles.map((media) => <RemoteTile key={media.participantId} media={media} />)}
+      </div>
+    </div>
+  );
+}
+
+function LocalTile({ call, videoRef }: { call: CallState; videoRef: React.RefObject<HTMLVideoElement> }) {
+  return (
+    <div className="relative aspect-video overflow-hidden rounded-2xl border border-white/10 bg-zinc-900">
+      {call.localVideoTrack && !call.cameraOff ? (
+        <video ref={videoRef} autoPlay muted playsInline className="h-full w-full object-cover" />
+      ) : (
+        <TileFallback name="我" />
+      )}
+      <div className="absolute bottom-2 left-2 rounded-full bg-black/55 px-2 py-1 text-xs">我</div>
+    </div>
+  );
+}
+
+function RemoteTile({ media }: { media: RemoteMedia }) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  useAttachTrack(media.videoTrack, videoRef);
+  return (
+    <div className="relative aspect-video overflow-hidden rounded-2xl border border-white/10 bg-zinc-900">
+      {media.videoTrack ? (
+        <video ref={videoRef} autoPlay playsInline className="h-full w-full object-cover" />
+      ) : (
+        <TileFallback name={media.name || media.participantId} />
+      )}
+      <div className="absolute bottom-2 left-2 rounded-full bg-black/55 px-2 py-1 text-xs">
+        {media.name || media.participantId}
+      </div>
+    </div>
+  );
+}
+
+function TileFallback({ name }: { name: string }) {
+  return (
+    <div className="flex h-full w-full items-center justify-center bg-[radial-gradient(circle_at_top,#064e3b,#18181b)]">
+      <div className="flex h-14 w-14 items-center justify-center rounded-full bg-emerald-500 text-xl font-semibold text-white">
+        {name.charAt(0).toUpperCase()}
+      </div>
+    </div>
+  );
+}
+
 function RemoteAudio({ call }: { call: CallState }) {
+  if (call.mode === "group") {
+    return <>{call.remoteMedias.map((media) => <RemoteAudioTrack key={media.participantId} track={media.audioTrack} />)}</>;
+  }
+  return <RemoteAudioTrack track={call.remoteAudioTrack} />;
+}
+
+function RemoteAudioTrack({ track }: { track?: { attach(element: HTMLMediaElement): HTMLMediaElement; detach(element: HTMLMediaElement): HTMLMediaElement } }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  useAttachTrack(call.remoteAudioTrack, audioRef);
+  useAttachTrack(track, audioRef);
   return <audio ref={audioRef} autoPlay className="hidden" />;
 }
 
-function CallStatus({ call, peerName }: { call: CallState; peerName: string }) {
+function CallStatus({ call, title }: { call: CallState; title: string }) {
   const duration = useCallDuration(call.startedAt, call.phase === "connected");
 
   const text = useMemo(() => {
+    if (call.mode === "group") {
+      if (call.phase === "connecting") return "正在加入群视频...";
+      return duration;
+    }
     if (call.phase === "incoming") {
-      return `${peerName} 邀请你${call.callType === "video" ? "视频" : "语音"}通话`;
+      return `${title} 邀请你${call.callType === "video" ? "视频" : "语音"}通话`;
     }
     if (call.phase === "outgoing") return "正在呼叫对方...";
     if (call.phase === "connecting") return "正在接入通话...";
     return duration;
-  }, [call.callType, call.phase, duration, peerName]);
+  }, [call.callType, call.mode, call.phase, duration, title]);
 
   return (
     <div className="mb-7 text-center">
@@ -185,7 +261,7 @@ function CallActions({
           {call.cameraOff ? <CameraOff className="h-5 w-5" /> : <Camera className="h-5 w-5" />}
         </RoundButton>
       )}
-      <RoundButton label="挂断" tone="danger" onClick={() => void onHangup()}>
+      <RoundButton label={call.mode === "group" ? "退出" : "挂断"} tone="danger" onClick={() => void onHangup()}>
         <PhoneOff className="h-6 w-6" />
       </RoundButton>
     </div>

@@ -2,6 +2,8 @@ import {
   GroupJoinVerification,
   GroupType,
   type GroupApply,
+  type GroupCallJoinResult,
+  type GroupCallSession,
   type GroupInfo,
   type GroupJoinVerificationValue,
   type GroupMember,
@@ -130,5 +132,33 @@ export class GroupAPI {
       agreed,
       ...(handleMsg ? { handleMsg } : {}),
     }).then(() => undefined);
+  }
+
+  /** 发起群语音/视频。 */
+  startCall(groupId: string, callType: "voice" | "video" = "video"): Promise<GroupCallSession> {
+    return requireHttp(this.transport).post<GroupCallSession>("/api/group/call/start", {
+      groupId,
+      callType,
+    });
+  }
+
+  /** 加入当前群语音/视频，并获取 LiveKit token。 */
+  joinCall(groupId: string): Promise<GroupCallJoinResult> {
+    return requireHttp(this.transport).post<GroupCallJoinResult>("/api/group/call/join", { groupId });
+  }
+
+  /** 离开当前群语音/视频。 */
+  leaveCall(groupId: string): Promise<GroupCallSession> {
+    return requireHttp(this.transport).post<GroupCallSession>("/api/group/call/leave", { groupId });
+  }
+
+  /** 结束当前群语音/视频。 */
+  endCall(groupId: string): Promise<GroupCallSession> {
+    return requireHttp(this.transport).post<GroupCallSession>("/api/group/call/end", { groupId });
+  }
+
+  /** 查询当前群是否有正在进行的语音/视频。 */
+  activeCall(groupId: string): Promise<GroupCallSession> {
+    return requireHttp(this.transport).get<GroupCallSession>("/api/group/call/active", { groupId });
   }
 }

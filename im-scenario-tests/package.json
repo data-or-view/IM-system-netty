@@ -1,0 +1,22 @@
+{
+  "name": "im-scenario-tests",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Development-only multi-user scenario tests for the IM system.",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test dist/test/*.test.js",
+    "scenario:smoke": "npm run build && node dist/scenarios/smoke.js",
+    "scenario:group-chat": "npm run build && node dist/scenarios/group-chat.js",
+    "scenario:group-call": "npm run build && node dist/scenarios/group-call.js"
+  },
+  "dependencies": {
+    "ws": "^8.20.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.5.13",
+    "typescript": "^5.6.3"
+  }
+}

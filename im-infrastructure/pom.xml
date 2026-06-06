@@ -25,5 +25,6 @@
         <module>im-infrastructure-storage</module>
         <module>im-infrastructure-message</module>
         <module>im-infrastructure-message-kafka</module>
+        <module>im-infrastructure-message-rocketmq</module>
     </modules>
 </project>

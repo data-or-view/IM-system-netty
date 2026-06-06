@@ -67,6 +67,7 @@ export type OpValue = (typeof OP)[keyof typeof OP];
 export const PUSH_OP = {
   MESSAGE: "message",
   FRIEND_APPLY: "friend.apply",
+  GROUP_APPLY: "group.apply",
   MESSAGE_REVOKED: "msg_revoke",
 } as const;
 
@@ -445,6 +446,24 @@ export interface StartCallAck {
   sfuEndpoint: string;
 }
 
+export interface GroupCallSession {
+  active: boolean;
+  ended?: boolean;
+  groupId?: string;
+  roomId?: string;
+  callType?: "voice" | "video";
+  initiatorUserId?: string;
+  sfuEndpoint?: string;
+  startedAt?: number;
+  participantCount?: number;
+}
+
+export interface GroupCallJoinResult extends GroupCallSession {
+  token: string;
+  sfuEndpoint: string;
+  roomId: string;
+}
+
 export interface VoiceContent {
   uuid?: string;
   url: string;
@@ -640,6 +659,8 @@ export interface IMEvents {
   messageBatch: (msgs: Message[]) => void;
   /** 收到好友申请 */
   friendRequest: (apply: FriendApply) => void;
+  /** 收到加群申请或审批结果 */
+  groupApply: (apply: GroupApply) => void;
   /** 收到消息撤回通知 */
   messageRevoked: (event: MessageRevoked) => void;
   /** 所有服务端推送的兜底事件 */

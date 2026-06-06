@@ -58,7 +58,9 @@ public class LiveKitCallManager implements ICallManager {
         }
 
         String callerToken = signLiveKitToken(callerId, roomId);
-        String calleeToken = signLiveKitToken(calleeId, roomId);
+        // Group calls do not have a fixed callee at room creation time; members
+        // receive their own token later through issueToken when they join.
+        String calleeToken = hasText(calleeId) ? signLiveKitToken(calleeId, roomId) : null;
 
         log.info("Room created: roomId={}, caller={}, callee={}",
                 roomId, callerId, calleeId);
@@ -90,6 +92,18 @@ public class LiveKitCallManager implements ICallManager {
      * payload 中携带 video 权限字段。
      */
     private String signLiveKitToken(String userId, String roomId) {
+        if (!hasText(apiKey)) {
+            throw new IllegalStateException("LiveKit apiKey is required");
+        }
+        if (!hasText(apiSecret)) {
+            throw new IllegalStateException("LiveKit apiSecret is required");
+        }
+        if (!hasText(userId)) {
+            throw new IllegalArgumentException("LiveKit token subject userId is required");
+        }
+        if (!hasText(roomId)) {
+            throw new IllegalArgumentException("LiveKit token roomId is required");
+        }
         try {
             // ── header ──
             String header = "{\"alg\":\"HS256\",\"typ\":\"JWT\"}";
@@ -134,5 +148,9 @@ public class LiveKitCallManager implements ICallManager {
                 .replace("\"", "\\\"")
                 .replace("\n", "\\n")
                 .replace("\r", "\\r");
+    }
+
+    private static boolean hasText(String value) {
+        return value != null && !value.isBlank();
     }
 }

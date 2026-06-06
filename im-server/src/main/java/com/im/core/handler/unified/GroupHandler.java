@@ -1,8 +1,10 @@
 package com.im.core.handler.unified;
 
 import com.im.api.ApiRequest;
+import com.im.api.GroupApplyHandleResult;
 import com.im.api.GroupApply;
 import com.im.api.GroupInformation;
+import com.im.api.GroupJoinResult;
 import com.im.api.GroupMemberInformation;
 import com.im.api.IGroupManager;
 import com.im.api.RequestHandler;
@@ -11,6 +13,7 @@ import com.im.common.exception.UnauthorizedException;
 import com.im.common.exception.ValidationException;
 import com.im.common.exception.NotFoundException;
 import com.im.common.id.IdGenerator;
+import com.im.core.group.GroupApplyNotifier;
 
 import java.util.List;
 import java.util.Map;
@@ -24,9 +27,15 @@ import java.util.Map;
 public class GroupHandler implements RequestHandler {
 
     private final IGroupManager groupManager;
+    private final GroupApplyNotifier groupApplyNotifier;
 
     public GroupHandler(IGroupManager groupManager) {
+        this(groupManager, GroupApplyNotifier.NOOP);
+    }
+
+    public GroupHandler(IGroupManager groupManager, GroupApplyNotifier groupApplyNotifier) {
         this.groupManager = groupManager;
+        this.groupApplyNotifier = groupApplyNotifier != null ? groupApplyNotifier : GroupApplyNotifier.NOOP;
     }
 
     @Override
@@ -74,7 +83,13 @@ public class GroupHandler implements RequestHandler {
         if (userId == null) throw new UnauthorizedException("not authenticated");
         if (groupId == null) throw new ValidationException("groupId is required");
         String reqMsg = req.getString("reqMsg", "");
-        groupManager.joinGroup(groupId, userId, reqMsg);
+        GroupJoinResult result = groupManager.joinGroup(groupId, userId, reqMsg);
+        if (result == GroupJoinResult.APPLY_CREATED) {
+            GroupApply apply = findGroupApply(groupId, userId, true);
+            if (apply != null) {
+                groupApplyNotifier.notifyApplyCreated(groupManager.getManagerIds(groupId), apply);
+            }
+        }
         return Map.of("status", "OK");
     }
 
@@ -189,8 +204,21 @@ public class GroupHandler implements RequestHandler {
             throw new ValidationException("groupId and userId are required");
         }
         requireGroupAdmin(groupId, operatorId);
-        groupManager.respondJoinRequest(groupId, userId, operatorId, handleMsg, agreed);
+        GroupApplyHandleResult result = groupManager.respondJoinRequest(groupId, userId, operatorId, handleMsg, agreed);
+        if (result == GroupApplyHandleResult.HANDLED) {
+            GroupApply apply = findGroupApply(groupId, userId, false);
+            if (apply != null) {
+                groupApplyNotifier.notifyApplyHandled(userId, apply);
+            }
+        }
         return Map.of("status", "OK");
+    }
+
+    private GroupApply findGroupApply(String groupId, String userId, boolean onlyPending) {
+        return groupManager.getJoinRequests(groupId, onlyPending).stream()
+                .filter(apply -> userId.equals(apply.getUserId()))
+                .findFirst()
+                .orElse(null);
     }
 
     private void requireGroupAdmin(String groupId, String operatorId) {

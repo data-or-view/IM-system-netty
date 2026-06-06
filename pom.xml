@@ -35,6 +35,7 @@
         <snakeyaml.version>2.4</snakeyaml.version>
         <jjwt.version>0.12.6</jjwt.version>
         <kafka.version>3.9.0</kafka.version>
+        <rocketmq.version>5.3.4</rocketmq.version>
         <opentelemetry.version>1.62.0</opentelemetry.version>
         <opentelemetry-javaagent.version>2.27.0</opentelemetry-javaagent.version>
     </properties>
@@ -105,6 +106,11 @@
             <dependency>
                 <groupId>com.im</groupId>
                 <artifactId>im-infrastructure-message-kafka</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.im</groupId>
+                <artifactId>im-infrastructure-message-rocketmq</artifactId>
                 <version>${project.version}</version>
             </dependency>
 
@@ -227,6 +233,13 @@
                 <groupId>org.apache.kafka</groupId>
                 <artifactId>kafka-clients</artifactId>
                 <version>${kafka.version}</version>
+            </dependency>
+
+            <!-- RocketMQ -->
+            <dependency>
+                <groupId>org.apache.rocketmq</groupId>
+                <artifactId>rocketmq-client</artifactId>
+                <version>${rocketmq.version}</version>
             </dependency>
 
             <!-- JJWT -->

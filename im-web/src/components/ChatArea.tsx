@@ -15,16 +15,17 @@ import { Send, Paperclip, MoreHorizontal, Undo2, Info, Phone, Video } from "luci
 import { toast } from "sonner";
 import { im } from "@/sdk/im-sdk";
 import { MessageContentRenderer } from "@/components/MessageContentRenderer";
-import { ConversationType, toMessageContentType, type OutgoingMessageContentTypeValue, type SendMessageAck } from "im-sdk";
+import { ConversationType, MessageContentType, toMessageContentType, type GroupCallSession, type OutgoingMessageContentTypeValue, type SendMessageAck } from "im-sdk";
 import { useCall } from "@/components/call/CallProvider";
 
 export default function ChatArea() {
   const { state, sendMessage, fetchConversations, dispatch } = useStore();
   const [input, setInput] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [activeGroupCall, setActiveGroupCall] = useState<GroupCallSession | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const navigate = useNavigate();
-  const { startCall } = useCall();
+  const { startCall, startGroupCall, joinGroupCall } = useCall();
 
   const conv = state.conversations.find(
     (c) => c.conversationId === state.activeConversationId
@@ -62,6 +63,45 @@ export default function ChatArea() {
     };
     loadHistory();
   }, [conv?.conversationId, conv?.latestMsg, conv?.latestMsgSendTime, dispatch, messages.length]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (conv?.conversationType !== ConversationType.GROUP || !conv.groupId) {
+      setActiveGroupCall(null);
+      return;
+    }
+    const loadActiveGroupCall = async () => {
+      try {
+        const active = await im.group.activeCall(conv.groupId!);
+        if (!cancelled) setActiveGroupCall(active.active ? active : null);
+      } catch {
+        if (!cancelled) setActiveGroupCall(null);
+      }
+    };
+    void loadActiveGroupCall();
+    return () => {
+      cancelled = true;
+    };
+  }, [conv?.conversationType, conv?.groupId]);
+
+  useEffect(() => {
+    if (conv?.conversationType !== ConversationType.GROUP || !conv.groupId) return;
+    const hasGroupSignal = messages.some((msg) => msg.contentType === MessageContentType.SIGNAL);
+    if (!hasGroupSignal) return;
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const active = await im.group.activeCall(conv.groupId!);
+        if (!cancelled) setActiveGroupCall(active.active ? active : null);
+      } catch {
+        if (!cancelled) setActiveGroupCall(null);
+      }
+    };
+    void refresh();
+    return () => {
+      cancelled = true;
+    };
+  }, [conv?.conversationType, conv?.groupId, messages]);
 
   const handleSend = () => {
     if (!input.trim() || !conv) return;
@@ -193,6 +233,35 @@ export default function ChatArea() {
     });
   }, [conv, startCall]);
 
+  const handleStartGroupCall = useCallback(() => {
+    if (!conv?.groupId || conv.conversationType !== ConversationType.GROUP) return;
+    void startGroupCall({
+      callType: "video",
+      group: {
+        groupId: conv.groupId,
+        name: conv.showName,
+        faceUrl: conv.faceUrl,
+      },
+    }).then(async () => {
+      const active = await im.group.activeCall(conv.groupId!);
+      setActiveGroupCall(active.active ? active : null);
+    });
+  }, [conv, startGroupCall]);
+
+  const handleJoinGroupCall = useCallback(() => {
+    if (!conv?.groupId || conv.conversationType !== ConversationType.GROUP) return;
+    void joinGroupCall({
+      group: {
+        groupId: conv.groupId,
+        name: conv.showName,
+        faceUrl: conv.faceUrl,
+      },
+    }).then(async () => {
+      const active = await im.group.activeCall(conv.groupId!);
+      setActiveGroupCall(active.active ? active : null);
+    });
+  }, [conv, joinGroupCall]);
+
   // Empty state
   if (!state.activeConversationId) {
     return (
@@ -252,6 +321,17 @@ export default function ChatArea() {
             </Button>
           </div>
         )}
+        {conv?.conversationType === ConversationType.GROUP && conv?.groupId && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            title={activeGroupCall ? "加入群视频" : "发起群视频"}
+            onClick={activeGroupCall ? handleJoinGroupCall : handleStartGroupCall}
+          >
+            <Video className="h-4 w-4" />
+          </Button>
+        )}
         <button
           type="button"
           onClick={handleHeaderClick}
@@ -261,6 +341,19 @@ export default function ChatArea() {
           <Info className="h-4 w-4" />
         </button>
       </div>
+
+      {conv?.conversationType === ConversationType.GROUP && activeGroupCall && (
+        <div className="border-b bg-emerald-50 px-4 py-2 text-sm text-emerald-900">
+          <div className="flex items-center justify-between gap-3">
+            <span>
+              群视频进行中，{activeGroupCall.participantCount ?? 1} 人正在通话
+            </span>
+            <Button size="sm" className="h-7 bg-emerald-600 hover:bg-emerald-700" onClick={handleJoinGroupCall}>
+              加入
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Messages */}
       <ScrollArea className="flex-1 p-4">

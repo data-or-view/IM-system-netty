@@ -145,6 +145,7 @@ CREATE TABLE IF NOT EXISTS im_group_requests (
     inviter_user_id   VARCHAR(64)  NOT NULL DEFAULT '' COMMENT '邀请人ID（如果是被邀请的）',
     ex                TEXT         COMMENT '扩展字段',
     created_at        BIGINT       NOT NULL DEFAULT 0  COMMENT '申请时间',
+    UNIQUE KEY uk_group_user_apply (group_id, user_id),
     INDEX idx_group (group_id, handle_result, created_at),
     INDEX idx_user (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='加群申请表';

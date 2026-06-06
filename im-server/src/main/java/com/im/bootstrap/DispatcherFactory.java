@@ -15,6 +15,7 @@ import com.im.core.handler.unified.FileMultipartHandler;
 import com.im.core.handler.unified.FileUploadHandler;
 import com.im.core.handler.unified.FriendHandler;
 import com.im.core.handler.unified.GroupHandler;
+import com.im.core.handler.unified.GroupCallHandler;
 import com.im.core.handler.unified.HeartbeatHandler;
 import com.im.core.handler.unified.LoginHandler;
 import com.im.core.handler.unified.MessageHandler;
@@ -97,7 +98,9 @@ final class DispatcherFactory {
                 Operation.FRIEND_BLACK, Operation.FRIEND_UNBLACK, Operation.FRIEND_BLACKLIST,
                 Operation.FRIEND_APPLY_RECEIVED, Operation.FRIEND_APPLY_SENT,
                 Operation.FRIEND_APPLY_DETAIL, Operation.FRIEND_APPLY_UNHANDLED_COUNT);
-        dispatcher.registerHandlers(new GroupHandler(dependencies.business().groupManager()),
+        dispatcher.registerHandlers(new GroupHandler(
+                        dependencies.business().groupManager(),
+                        dependencies.runtime().groupApplyNotifier()),
                 Operation.GROUP_CREATE, Operation.GROUP_JOIN, Operation.GROUP_QUIT, Operation.GROUP_KICK,
                 Operation.GROUP_DISBAND, Operation.GROUP_INFO_UPDATE, Operation.GROUP_INFO,
                 Operation.GROUP_LIST, Operation.GROUP_SEARCH, Operation.GROUP_MEMBERS, Operation.GROUP_MUTE_ALL,
@@ -131,6 +134,11 @@ final class DispatcherFactory {
                 sendMessageUseCase, dependencies.call().callManager(), dependencies.call().callStateManager());
         dispatcher.registerHandler(Operation.CHAT_SEND, chatHandler);
         dispatcher.registerHandler(Operation.CHAT_SEND_GROUP, chatHandler);
+        if (dependencies.call().groupCallManager() != null) {
+            dispatcher.registerHandlers(new GroupCallHandler(dependencies.call().groupCallManager(), sendMessageUseCase),
+                    Operation.GROUP_CALL_START, Operation.GROUP_CALL_JOIN, Operation.GROUP_CALL_LEAVE,
+                    Operation.GROUP_CALL_END, Operation.GROUP_CALL_ACTIVE);
+        }
         dispatcher.registerHandler(Operation.CHAT_REVOKE,
                 new RevokeHandler(revokeUseCase, dependencies.runtime().sessionManager()));
     }

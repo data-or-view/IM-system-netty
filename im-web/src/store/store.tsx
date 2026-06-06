@@ -42,6 +42,7 @@ export interface Message {
 
 const MAX_MESSAGES_PER_CONVERSATION = 500;
 export const FRIEND_APPLY_UPDATED_EVENT = "im:friend-apply-updated";
+export const GROUP_APPLY_UPDATED_EVENT = "im:group-apply-updated";
 
 interface State {
   token: string | null;
@@ -508,6 +509,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
     });
 
+    const unsubGroupApply = im.on("groupApply", (apply: SDKGroupApply) => {
+      window.dispatchEvent(new CustomEvent(GROUP_APPLY_UPDATED_EVENT, { detail: apply }));
+      void fetchUnhandledGroupApplyCount();
+      if (apply.handleResult === ApplyHandleResult.AGREED || apply.handleResult === ApplyHandleResult.REJECTED) {
+        void fetchMyGroups();
+        void fetchConversations();
+      }
+    });
+
     const unsubTokenChanged = im.on("tokenChanged", (tokens) => {
       persistTokens(tokens);
       dispatch({ type: "SET_TOKENS", token: tokens.token, refreshToken: tokens.refreshToken });
@@ -518,9 +528,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       unsubMessageBatch();
       unsubRevoke();
       unsubFriendRequest();
+      unsubGroupApply();
       unsubTokenChanged();
     };
-  }, [fetchConversations, fetchFriends, fetchUnhandledApplyCount, hydrateAfterAuth, markConversationRead, state.activeConversationId]);
+  }, [fetchConversations, fetchFriends, fetchMyGroups, fetchUnhandledApplyCount, fetchUnhandledGroupApplyCount, hydrateAfterAuth, markConversationRead, state.activeConversationId]);
 
   useEffect(() => {
     const conversationId = state.activeConversationId;

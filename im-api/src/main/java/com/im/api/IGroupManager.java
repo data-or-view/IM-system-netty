@@ -104,15 +104,15 @@ public interface IGroupManager {
     /**
      * 申请加群。
      */
-    void joinGroup(String groupId, String userId, String reqMsg);
+    GroupJoinResult joinGroup(String groupId, String userId, String reqMsg);
 
     /**
      * 审批加群申请。
      *
      * @param agreed true=同意, false=拒绝
      */
-    void respondJoinRequest(String groupId, String userId, String operatorId,
-                            String handleMsg, boolean agreed);
+    GroupApplyHandleResult respondJoinRequest(String groupId, String userId, String operatorId,
+                                              String handleMsg, boolean agreed);
 
     /**
      * 获取加群申请列表。
@@ -131,6 +131,10 @@ public interface IGroupManager {
      * @param onlyPending  true=只查待处理的
      */
     default List<GroupApply> getManageableJoinRequests(String operatorId, boolean onlyPending) {
+        return List.of();
+    }
+
+    default List<String> getManagerIds(String groupId) {
         return List.of();
     }
 

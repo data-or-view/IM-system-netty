@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { useStore, type GroupApply } from "@/store/store";
+import { GROUP_APPLY_UPDATED_EVENT, useStore, type GroupApply } from "@/store/store";
 import { im } from "@/sdk/im-sdk";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -34,6 +34,13 @@ export default function GroupRequestDialog({ open, onOpenChange }: Props) {
 
   useEffect(() => {
     if (open) void loadApplies();
+  }, [open, loadApplies]);
+
+  useEffect(() => {
+    if (!open) return;
+    const reload = () => void loadApplies();
+    window.addEventListener(GROUP_APPLY_UPDATED_EVENT, reload);
+    return () => window.removeEventListener(GROUP_APPLY_UPDATED_EVENT, reload);
   }, [open, loadApplies]);
 
   const handleApprove = async (apply: GroupApply, agreed: boolean) => {

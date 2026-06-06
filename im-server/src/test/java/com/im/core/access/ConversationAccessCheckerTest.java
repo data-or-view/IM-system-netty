@@ -107,8 +107,8 @@ class ConversationAccessCheckerTest {
         @Override public void transferOwner(String groupId, String oldOwnerId, String newOwnerId) {}
         @Override public void setMemberRole(String groupId, String operatorId, String targetUserId, int roleLevel) {}
         @Override public void muteMember(String groupId, String targetUserId, long muteEndTime) {}
-        @Override public void joinGroup(String groupId, String userId, String reqMsg) {}
-        @Override public void respondJoinRequest(String groupId, String userId, String operatorId, String handleMsg, boolean agreed) {}
+        @Override public com.im.api.GroupJoinResult joinGroup(String groupId, String userId, String reqMsg) { return com.im.api.GroupJoinResult.APPLY_CREATED; }
+        @Override public com.im.api.GroupApplyHandleResult respondJoinRequest(String groupId, String userId, String operatorId, String handleMsg, boolean agreed) { return com.im.api.GroupApplyHandleResult.HANDLED; }
         @Override public List<com.im.api.GroupApply> getJoinRequests(String groupId, boolean onlyPending) { return List.of(); }
         @Override public List<com.im.api.GroupMemberInformation> getMemberList(String groupId) { return List.of(); }
         @Override public Set<String> getMemberIds(String groupId) { return Set.of(); }

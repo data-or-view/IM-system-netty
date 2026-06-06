@@ -3,7 +3,9 @@ package com.im.core.handler.unified;
 import com.im.api.ApiRequest;
 import com.im.api.ApplyHandleResult;
 import com.im.api.GroupApply;
+import com.im.api.GroupApplyHandleResult;
 import com.im.api.GroupInformation;
+import com.im.api.GroupJoinResult;
 import com.im.api.GroupMemberInformation;
 import com.im.api.IGroupManager;
 import com.im.api.IncrementalSyncResult;
@@ -120,16 +122,17 @@ class GroupHandlerApplyTest {
         @Override public void transferOwner(String groupId, String oldOwnerId, String newOwnerId) {}
         @Override public void setMemberRole(String groupId, String operatorId, String targetUserId, int roleLevel) {}
         @Override public void muteMember(String groupId, String targetUserId, long muteEndTime) {}
-        @Override public void joinGroup(String groupId, String userId, String reqMsg) {}
+        @Override public GroupJoinResult joinGroup(String groupId, String userId, String reqMsg) { return GroupJoinResult.APPLY_CREATED; }
 
         @Override
-        public void respondJoinRequest(String groupId, String userId, String operatorId, String handleMsg, boolean agreed) {
+        public GroupApplyHandleResult respondJoinRequest(String groupId, String userId, String operatorId, String handleMsg, boolean agreed) {
             respondCalls++;
             respondGroupId = groupId;
             respondUserId = userId;
             respondOperatorId = operatorId;
             respondHandleMsg = handleMsg;
             respondAgreed = agreed;
+            return GroupApplyHandleResult.HANDLED;
         }
 
         @Override public List<GroupApply> getJoinRequests(String groupId, boolean onlyPending) { return List.of(); }

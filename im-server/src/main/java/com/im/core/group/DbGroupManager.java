@@ -31,7 +31,7 @@ import java.util.stream.Collectors;
  * <p>基于 MyBatis-Plus，所有群组数据读写 {@code im_groups}、{@code im_group_members}、
  * {@code im_group_requests} 表。</p>
  */
-public class DbGroupManager implements IGroupManager {
+public class DbGroupManager implements IGroupManager, GroupApplyPolicy.Gateway {
 
     private static final Logger log = LoggerFactory.getLogger(DbGroupManager.class);
     private static final RetryConfig CFG = RetryStrategies.DB_WRITE;
@@ -42,6 +42,7 @@ public class DbGroupManager implements IGroupManager {
 
     private final RetryExecutor retryExecutor;
     private final DbIncrementalSync sync;
+    private final GroupApplyPolicy groupApplyPolicy;
 
     public DbGroupManager(RetryExecutor retryExecutor) {
         this(retryExecutor, new DbIncrementalSync(retryExecutor));
@@ -50,6 +51,7 @@ public class DbGroupManager implements IGroupManager {
     public DbGroupManager(RetryExecutor retryExecutor, DbIncrementalSync sync) {
         this.retryExecutor = retryExecutor;
         this.sync = sync;
+        this.groupApplyPolicy = new GroupApplyPolicy(this);
     }
 
     @Override
@@ -74,12 +76,14 @@ public class DbGroupManager implements IGroupManager {
             entity.setUpdatedAt(now);
             groupMapper.insert(entity);
 
-            addMemberRecord(memberMapper, groupId, ownerId, 200, 1, null, ownerId, now);
+            addMemberRecord(memberMapper, groupId, ownerId,
+                    GroupMemberRole.OWNER.getCode(), ApplySource.SEARCH.getCode(), null, ownerId, now);
 
             if (members != null) {
                 for (String m : members) {
                     if (!m.equals(ownerId)) {
-                        addMemberRecord(memberMapper, groupId, m, 1, 2, null, ownerId, now);
+                        addMemberRecord(memberMapper, groupId, m,
+                                GroupMemberRole.MEMBER.getCode(), ApplySource.INVITE.getCode(), null, ownerId, now);
                         entity.setMemberCount(entity.getMemberCount() + 1);
                     }
                 }
@@ -185,7 +189,8 @@ public class DbGroupManager implements IGroupManager {
             GroupMapper groupMapper = session.getMapper(GroupMapper.class);
             GroupMemberMapper memberMapper = session.getMapper(GroupMemberMapper.class);
             if (isMemberInSession(memberMapper, groupId, userId)) return null;
-            addMemberRecord(memberMapper, groupId, userId, 1, 3, null, userId, now);
+            addMemberRecord(memberMapper, groupId, userId,
+                    GroupMemberRole.MEMBER.getCode(), ApplySource.GROUP.getCode(), null, userId, now);
             GroupEntity entity = groupMapper.selectById(groupId);
             if (entity != null) {
                 entity.setMemberCount(entity.getMemberCount() + 1);
@@ -360,45 +365,44 @@ public class DbGroupManager implements IGroupManager {
     }
 
     @Override
-    public void joinGroup(String groupId, String userId, String reqMsg) {
+    public GroupJoinResult joinGroup(String groupId, String userId, String reqMsg) {
         long now = System.currentTimeMillis();
-        PersistenceExceptions.runDatabase("join group", () -> retryExecutor.execute(CFG, () -> {
-        try (SqlSession session = MyBatisPlusFactory.openSession()) {
-            GroupRequestMapper mapper = session.getMapper(GroupRequestMapper.class);
-            GroupMapper groupMapper = session.getMapper(GroupMapper.class);
-            GroupEntity group = groupMapper.selectById(groupId);
-            if (group == null) return null;
-
-            LambdaQueryWrapper<GroupRequestEntity> qw = new LambdaQueryWrapper<>();
-            qw.eq(GroupRequestEntity::getGroupId, groupId)
-                    .eq(GroupRequestEntity::getUserId, userId)
-                    .eq(GroupRequestEntity::getHandleResult, 0);
-            if (mapper.selectCount(qw) > 0) return null;
-
-            if (group.getNeedVerification() == 0) {
-                addMember(groupId, userId);
-                return null;
-            }
-
-            GroupRequestEntity req = new GroupRequestEntity();
-            req.setGroupId(groupId);
-            req.setUserId(userId);
-            req.setReqMsg(reqMsg);
-            req.setHandleResult(ApplyHandleResult.PENDING.getCode());
-            req.setCreatedAt(now);
-            mapper.insert(req);
-            session.commit();
-            log.info("Join request: groupId={}, userId={}", groupId, userId);
+        GroupJoinResult result = groupApplyPolicy.validateJoin(groupId, userId);
+        if (result == GroupJoinResult.ALREADY_MEMBER || result == GroupJoinResult.ALREADY_PENDING) {
+            return result;
         }
-                    return null;
+        return PersistenceExceptions.runDatabase("join group", () -> retryExecutor.execute(CFG, () -> {
+            try (SqlSession session = MyBatisPlusFactory.openSession()) {
+                GroupRequestMapper mapper = session.getMapper(GroupRequestMapper.class);
+                GroupMapper groupMapper = session.getMapper(GroupMapper.class);
+                GroupMemberMapper memberMapper = session.getMapper(GroupMemberMapper.class);
+                if (result == GroupJoinResult.JOINED) {
+                    int inserted = addMemberRecord(memberMapper, groupId, userId,
+                            GroupMemberRole.MEMBER.getCode(), ApplySource.SEARCH.getCode(), null, userId, now);
+                    if (inserted > 0) {
+                        GroupEntity entity = groupMapper.selectById(groupId);
+                        if (entity != null) {
+                            entity.setMemberCount(entity.getMemberCount() + 1);
+                            groupMapper.updateById(entity);
+                        }
+                    }
+                    session.commit();
+                    return GroupJoinResult.JOINED;
+                }
+                mapper.upsertPendingApply(groupId, userId, ApplyHandleResult.PENDING.getCode(),
+                        reqMsg, ApplySource.SEARCH.getCode(), now);
+                session.commit();
+                log.info("Join request: groupId={}, userId={}", groupId, userId);
+                return GroupJoinResult.APPLY_CREATED;
+            }
         }));
     }
 
     @Override
-    public void respondJoinRequest(String groupId, String userId, String operatorId,
-                                    String handleMsg, boolean agreed) {
+    public GroupApplyHandleResult respondJoinRequest(String groupId, String userId, String operatorId,
+                                                     String handleMsg, boolean agreed) {
         long now = System.currentTimeMillis();
-        PersistenceExceptions.runDatabase("respond join request", () -> retryExecutor.execute(CFG, () -> {
+        GroupApplyHandleResult result = PersistenceExceptions.runDatabase("respond join request", () -> retryExecutor.execute(CFG, () -> {
         try (SqlSession session = MyBatisPlusFactory.openSession()) {
             GroupRequestMapper mapper = session.getMapper(GroupRequestMapper.class);
             GroupMemberMapper memberMapper = session.getMapper(GroupMemberMapper.class);
@@ -409,23 +413,39 @@ public class DbGroupManager implements IGroupManager {
             LambdaQueryWrapper<GroupRequestEntity> qw = new LambdaQueryWrapper<>();
             qw.eq(GroupRequestEntity::getGroupId, groupId)
                     .eq(GroupRequestEntity::getUserId, userId)
-                    .eq(GroupRequestEntity::getHandleResult, 0);
+                    .eq(GroupRequestEntity::getHandleResult, ApplyHandleResult.PENDING.getCode());
             GroupRequestEntity req = mapper.selectOne(qw);
-            if (req == null) return null;
+            if (req == null) return GroupApplyHandleResult.NOT_FOUND_OR_ALREADY_HANDLED;
 
-            req.setHandleResult(agreed ? 1 : 2);
+            req.setHandleResult(agreed
+                    ? ApplyHandleResult.AGREED.getCode()
+                    : ApplyHandleResult.REJECTED.getCode());
             req.setHandledMsg(handleMsg);
             req.setHandlerUserId(operatorId);
             req.setHandledTime(now);
             mapper.updateById(req);
 
             if (agreed) {
-                addMember(groupId, userId);
+                int inserted = addMemberRecord(memberMapper, groupId, userId,
+                        GroupMemberRole.MEMBER.getCode(), ApplySource.SEARCH.getCode(), null, operatorId, now);
+                if (inserted > 0) {
+                    GroupMapper groupMapper = session.getMapper(GroupMapper.class);
+                    GroupEntity entity = groupMapper.selectById(groupId);
+                    if (entity != null) {
+                        entity.setMemberCount(entity.getMemberCount() + 1);
+                        groupMapper.updateById(entity);
+                    }
+                }
             }
             session.commit();
+            return GroupApplyHandleResult.HANDLED;
         }
-                    return null;
         }));
+        if (agreed && result == GroupApplyHandleResult.HANDLED) {
+            sync.recordChange(userId, "group", groupId, "insert");
+            sync.recordChange(groupId, "member", userId, "insert");
+        }
+        return result;
     }
 
     @Override
@@ -438,7 +458,7 @@ public class DbGroupManager implements IGroupManager {
                     qw.eq(GroupRequestEntity::getGroupId, groupId);
                 }
                 if (onlyPending) {
-                    qw.eq(GroupRequestEntity::getHandleResult, 0);
+                    qw.eq(GroupRequestEntity::getHandleResult, ApplyHandleResult.PENDING.getCode());
                 }
                 qw.orderByDesc(GroupRequestEntity::getCreatedAt);
                 return mapper.selectList(qw).stream()
@@ -467,11 +487,23 @@ public class DbGroupManager implements IGroupManager {
                 LambdaQueryWrapper<GroupRequestEntity> qw = new LambdaQueryWrapper<>();
                 qw.in(GroupRequestEntity::getGroupId, manageableGroupIds);
                 if (onlyPending) {
-                    qw.eq(GroupRequestEntity::getHandleResult, 0);
+                    qw.eq(GroupRequestEntity::getHandleResult, ApplyHandleResult.PENDING.getCode());
                 }
                 qw.orderByDesc(GroupRequestEntity::getCreatedAt);
                 return requestMapper.selectList(qw).stream()
                         .map(this::toGroupApply)
+                        .toList();
+            }
+        });
+    }
+
+    @Override
+    public List<String> getManagerIds(String groupId) {
+        return PersistenceExceptions.runDatabase("get group manager ids", () -> {
+            try (SqlSession session = MyBatisPlusFactory.openSession()) {
+                GroupMemberMapper mapper = session.getMapper(GroupMemberMapper.class);
+                return mapper.selectAdmins(groupId).stream()
+                        .map(GroupMemberEntity::getUserId)
                         .toList();
             }
         });
@@ -571,6 +603,22 @@ public class DbGroupManager implements IGroupManager {
         });
     }
 
+    @Override
+    public GroupApplyPolicy.GroupSnapshot getGroup(String groupId) {
+        return PersistenceExceptions.runDatabase("get group snapshot", () -> {
+            try (SqlSession session = MyBatisPlusFactory.openSession()) {
+                GroupMapper mapper = session.getMapper(GroupMapper.class);
+                GroupEntity entity = mapper.selectById(groupId);
+                if (entity == null) {
+                    return null;
+                }
+                return new GroupApplyPolicy.GroupSnapshot(
+                        GroupStatus.fromCode(entity.getStatus()),
+                        GroupJoinVerification.fromCode(entity.getNeedVerification()));
+            }
+        });
+    }
+
     // ========== 增量同步 ==========
 
     @Override
@@ -601,18 +649,10 @@ public class DbGroupManager implements IGroupManager {
 
     // ========== 内部方法 ==========
 
-    private void addMemberRecord(GroupMemberMapper mapper, String groupId, String userId,
-                                  int roleLevel, int joinSource, String inviterId,
-                                  String operatorId, long now) {
-        GroupMemberEntity me = new GroupMemberEntity();
-        me.setGroupId(groupId);
-        me.setUserId(userId);
-        me.setRoleLevel(roleLevel);
-        me.setJoinSource(joinSource);
-        me.setInviterUserId(inviterId);
-        me.setOperatorUserId(operatorId);
-        me.setJoinedAt(now);
-        mapper.insert(me);
+    private int addMemberRecord(GroupMemberMapper mapper, String groupId, String userId,
+                                int roleLevel, int joinSource, String inviterId,
+                                String operatorId, long now) {
+        return mapper.upsertMember(groupId, userId, roleLevel, joinSource, inviterId, operatorId, now);
     }
 
     private GroupMemberEntity getMemberInSession(GroupMemberMapper mapper, String groupId, String userId) {

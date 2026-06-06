@@ -25,7 +25,9 @@ import com.im.core.auth.IUserCredentialStore;
 import com.im.core.auth.JwtAuthenticator;
 import com.im.core.auth.Pbkdf2PasswordHasher;
 import com.im.core.call.CallStateManager;
+import com.im.core.call.GroupCallManager;
 import com.im.core.call.LiveKitCallManager;
+import com.im.core.call.RedisGroupCallStateStore;
 import com.im.core.conversation.DbConversationManager;
 import com.im.core.db.DatabaseConfiguration;
 import com.im.core.db.MyBatisPlusFactory;
@@ -41,7 +43,9 @@ import com.im.core.dispatcher.PendingAcknowledgementManager;
 import com.im.core.friend.ClusterAwareFriendApplyNotifier;
 import com.im.core.friend.DbFriendManager;
 import com.im.core.friend.FriendApplyNotifier;
+import com.im.core.group.ClusterAwareGroupApplyNotifier;
 import com.im.core.group.DbGroupManager;
+import com.im.core.group.GroupApplyNotifier;
 import com.im.core.handler.ConnectionEventHandler;
 import com.im.core.mq.RedisMessageQueue;
 import com.im.core.redis.RedisConfiguration;
@@ -96,9 +100,10 @@ final class ServerComponentsFactory {
         RuntimeDependencies runtime = createRuntime(config, redisConfig, nodeId);
         ClusterDependencies cluster = createCluster(redisConfig, runtime.sessionManager(), nodeId);
         runtime.friendApplyNotifier().bindCluster(cluster.routeTable(), cluster.clusterMessageBus());
+        runtime.groupApplyNotifier().bindCluster(cluster.routeTable(), cluster.clusterMessageBus());
         BusinessDependencies business = createBusiness(config, cluster.routeTable());
         StorageDependencies storage = createStorage(config, redisConfig, nodeId, business.retryExecutor());
-        CallDependencies call = createCall(config, storage.messageQueue());
+        CallDependencies call = createCall(config, storage.messageQueue(), business.groupManager(), redisConfig);
         ConsumerDependencies consumers = createConsumers(nodeId, runtime, cluster, storage, business);
         ConnectionEventHandler connectionEventHandler = new ConnectionEventHandler(
                 runtime.sessionManager(), runtime.pendingAcknowledgementManager(), cluster.routeTable(), nodeId);
@@ -135,7 +140,8 @@ final class ServerComponentsFactory {
                 sessionManager,
                 new PendingAcknowledgementManager(),
                 IMExecutors.newVirtualThreadExecutor("im-dispatch"),
-                new RuntimeFriendApplyNotifier(nodeId, sessionManager));
+                new RuntimeFriendApplyNotifier(nodeId, sessionManager),
+                new RuntimeGroupApplyNotifier(nodeId, sessionManager));
     }
 
     private static ClusterDependencies createCluster(RedisConfiguration redisConfig,
@@ -178,7 +184,9 @@ final class ServerComponentsFactory {
                 sequenceManager, messageStore, singleMessageStore, groupMessageStore, messageQueue, fileStorage);
     }
 
-    private static CallDependencies createCall(Config config, IMessageQueue messageQueue) {
+    private static CallDependencies createCall(Config config, IMessageQueue messageQueue,
+                                               IGroupManager groupManager,
+                                               RedisConfiguration redisConfig) {
         ICallManager callManager = null;
         if (config.getBoolean("im.call.enabled", false)) {
             callManager = new LiveKitCallManager(
@@ -191,7 +199,11 @@ final class ServerComponentsFactory {
         CallStateManager callStateManager = callManager != null
                 ? new CallStateManager(messageQueue, config.getLong("im.call.timeout-seconds", 30))
                 : null;
-        return new CallDependencies(callManager, callStateManager);
+        GroupCallManager groupCallManager = callManager != null
+                ? new GroupCallManager(groupManager, callManager, new RedisGroupCallStateStore(redisConfig),
+                config.getInt("im.call.group.max-participants", 16))
+                : null;
+        return new CallDependencies(callManager, callStateManager, groupCallManager);
     }
 
     private static ConsumerDependencies createConsumers(String nodeId,
@@ -211,6 +223,7 @@ final class ServerComponentsFactory {
         cluster.clusterMessageBus().subscribe("GROUP_CHAT", clusterDeliveryHandler);
         cluster.clusterMessageBus().subscribe("CLUSTER_COMMAND", new ClusterSessionCommandHandler(runtime.sessionManager()));
         cluster.clusterMessageBus().subscribe("CLUSTER_COMMAND", runtime.friendApplyNotifier()::handleClusterPush);
+        cluster.clusterMessageBus().subscribe("CLUSTER_COMMAND", runtime.groupApplyNotifier()::handleClusterPush);
         return new ConsumerDependencies(persistenceConsumer, deliveryConsumer);
     }
 
@@ -332,10 +345,40 @@ final class ServerComponentsFactory {
         }
     }
 
+    private static final class RuntimeGroupApplyNotifier implements GroupApplyNotifier {
+        private final String nodeId;
+        private final SessionManager sessionManager;
+        private volatile ClusterAwareGroupApplyNotifier delegate;
+
+        private RuntimeGroupApplyNotifier(String nodeId, SessionManager sessionManager) {
+            this.nodeId = nodeId;
+            this.sessionManager = sessionManager;
+        }
+
+        void bindCluster(IRouteTable routeTable, IClusterMessageBus clusterMessageBus) {
+            this.delegate = new ClusterAwareGroupApplyNotifier(nodeId, sessionManager, routeTable, clusterMessageBus);
+        }
+
+        @Override
+        public void notifyApplyCreated(java.util.List<String> managerUserIds, com.im.api.GroupApply apply) {
+            if (delegate != null) delegate.notifyApplyCreated(managerUserIds, apply);
+        }
+
+        @Override
+        public void notifyApplyHandled(String applicantUserId, com.im.api.GroupApply apply) {
+            if (delegate != null) delegate.notifyApplyHandled(applicantUserId, apply);
+        }
+
+        void handleClusterPush(com.im.api.ClusterMessage message) {
+            if (delegate != null) delegate.handleClusterPush(message);
+        }
+    }
+
     record RuntimeDependencies(SessionManager sessionManager,
                                PendingAcknowledgementManager pendingAcknowledgementManager,
                                ExecutorService virtualExecutor,
-                               RuntimeFriendApplyNotifier friendApplyNotifier) {
+                               RuntimeFriendApplyNotifier friendApplyNotifier,
+                               RuntimeGroupApplyNotifier groupApplyNotifier) {
     }
 
     record ClusterDependencies(IRouteTable routeTable,
@@ -362,7 +405,8 @@ final class ServerComponentsFactory {
     }
 
     record CallDependencies(ICallManager callManager,
-                            CallStateManager callStateManager) {
+                            CallStateManager callStateManager,
+                            GroupCallManager groupCallManager) {
     }
 
     private record ConsumerDependencies(PersistenceConsumer persistenceConsumer,

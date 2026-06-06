@@ -2,6 +2,7 @@ package com.im.core.db.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.im.core.db.entity.GroupMemberEntity;
+import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
@@ -23,4 +24,20 @@ public interface GroupMemberMapper extends BaseMapper<GroupMemberEntity> {
 
     @Update("UPDATE im_group_members SET mute_end_time = #{muteEndTime} WHERE group_id = #{groupId} AND role_level < 100")
     int batchSetMuteEndTime(@Param("groupId") String groupId, @Param("muteEndTime") long muteEndTime);
+
+    @Insert("""
+            INSERT IGNORE INTO im_group_members
+                (group_id, user_id, nickname, face_url, role_level, join_source, inviter_user_id,
+                 operator_user_id, mute_end_time, ex, joined_at)
+            VALUES
+                (#{groupId}, #{userId}, '', '', #{roleLevel}, #{joinSource}, COALESCE(#{inviterUserId}, ''),
+                 #{operatorUserId}, 0, '', #{joinedAt})
+            """)
+    int upsertMember(@Param("groupId") String groupId,
+                     @Param("userId") String userId,
+                     @Param("roleLevel") int roleLevel,
+                     @Param("joinSource") int joinSource,
+                     @Param("inviterUserId") String inviterUserId,
+                     @Param("operatorUserId") String operatorUserId,
+                     @Param("joinedAt") long joinedAt);
 }

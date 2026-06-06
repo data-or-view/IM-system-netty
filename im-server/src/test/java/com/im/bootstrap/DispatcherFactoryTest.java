@@ -62,6 +62,7 @@ class DispatcherFactoryTest {
                         sessionManager,
                         new PendingAcknowledgementManager(),
                         fake(ExecutorService.class),
+                        null,
                         null),
                 new ServerComponentsFactory.ClusterDependencies(
                         fake(IRouteTable.class),
@@ -85,7 +86,8 @@ class DispatcherFactoryTest {
                         fake(IFileStorageService.class)),
                 new ServerComponentsFactory.CallDependencies(
                         fake(ICallManager.class),
-                        (CallStateManager) null));
+                        (CallStateManager) null,
+                        null));
     }
 
     private static final class TestAuthenticator implements IAuthenticator {

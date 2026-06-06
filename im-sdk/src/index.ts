@@ -37,7 +37,7 @@ import { EventBus } from "./event-bus.js";
 export * from "./types.js";
 
 // ── 内部导入 ──
-import { type ConnectionState, type IMEvents, type IMOptions, type Message, type FriendApply, type MessageRevoked, type TokenPair, type WSPush, IMError, PUSH_OP } from "./types.js";
+import { type ConnectionState, type IMEvents, type IMOptions, type Message, type FriendApply, type GroupApply, type MessageRevoked, type TokenPair, type WSPush, IMError, PUSH_OP } from "./types.js";
 import { WsTransport } from "./transport/ws.js";
 import { HttpTransport } from "./transport/http.js";
 import { UserAPI } from "./api/user.js";
@@ -110,6 +110,8 @@ export class IMSDK {
         this.emitMessage(push.data as Message);
       } else if (push.op === PUSH_OP.FRIEND_APPLY) {
         this.bus.emit("friendRequest", push.data as FriendApply);
+      } else if (push.op === PUSH_OP.GROUP_APPLY) {
+        this.bus.emit("groupApply", push.data as GroupApply);
       } else if (push.op === PUSH_OP.MESSAGE_REVOKED) {
         this.bus.emit("messageRevoked", push.data as MessageRevoked);
       }

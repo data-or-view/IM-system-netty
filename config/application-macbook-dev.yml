@@ -36,3 +36,12 @@ im:
     access-key: "myuser"
     secret-key: "mysecret123"
     bucket: "im-system"
+
+  # ── RocketMQ ──
+  rocketmq:
+    name-server: "127.0.0.1:9876"
+    producer:
+      group: "im-producer-macbook-dev"
+    send:
+      timeout-ms: 3000
+    retry-times: 2

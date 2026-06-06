@@ -36,6 +36,7 @@ import { useStore } from "@/store/store";
 
 export type CallType = "voice" | "video";
 export type CallPhase = "idle" | "outgoing" | "incoming" | "connecting" | "connected";
+export type CallMode = "single" | "group";
 
 export type CallPeer = {
   userId: string;
@@ -43,11 +44,26 @@ export type CallPeer = {
   faceUrl?: string;
 };
 
+export type GroupCallTarget = {
+  groupId: string;
+  name?: string;
+  faceUrl?: string;
+};
+
+export type RemoteMedia = {
+  participantId: string;
+  name?: string;
+  audioTrack?: RemoteAudioTrack;
+  videoTrack?: RemoteVideoTrack;
+};
+
 export type CallState = {
   phase: CallPhase;
+  mode: CallMode;
   callType: CallType;
   direction?: "incoming" | "outgoing";
   peer?: CallPeer;
+  group?: GroupCallTarget;
   roomId?: string;
   startedAt?: number;
   muted: boolean;
@@ -55,6 +71,7 @@ export type CallState = {
   localVideoTrack?: LocalVideoTrack;
   remoteAudioTrack?: RemoteAudioTrack;
   remoteVideoTrack?: RemoteVideoTrack;
+  remoteMedias: RemoteMedia[];
 };
 
 type StartCallInput = {
@@ -62,9 +79,20 @@ type StartCallInput = {
   callType: CallType;
 };
 
+type StartGroupCallInput = {
+  group: GroupCallTarget;
+  callType?: CallType;
+};
+
+type JoinGroupCallInput = {
+  group: GroupCallTarget;
+};
+
 type CallContextValue = {
   call: CallState;
   startCall: (input: StartCallInput) => Promise<void>;
+  startGroupCall: (input: StartGroupCallInput) => Promise<void>;
+  joinGroupCall: (input: JoinGroupCallInput) => Promise<void>;
   acceptCall: () => Promise<void>;
   rejectCall: () => Promise<void>;
   cancelCall: () => Promise<void>;
@@ -76,9 +104,11 @@ type CallContextValue = {
 const DEFAULT_LIVEKIT_URL = "ws://localhost:7880";
 const EMPTY_CALL: CallState = {
   phase: "idle",
+  mode: "single",
   callType: "voice",
   muted: false,
   cameraOff: false,
+  remoteMedias: [],
 };
 
 const CallContext = createContext<CallContextValue | null>(null);
@@ -118,32 +148,67 @@ export function CallProvider({ children }: { children: ReactNode }) {
     const room = new Room();
     roomRef.current = room;
 
+    const upsertRemote = (participant: RemoteParticipant, patch: Partial<RemoteMedia>) => {
+      setCall((prev) => {
+        const id = participant.identity;
+        const existing = prev.remoteMedias.find((item) => item.participantId === id);
+        const nextItem: RemoteMedia = {
+          participantId: id,
+          name: participant.name || id,
+          ...existing,
+          ...patch,
+        };
+        const remoteMedias = existing
+          ? prev.remoteMedias.map((item) => item.participantId === id ? nextItem : item)
+          : [...prev.remoteMedias, nextItem];
+        return {
+          ...prev,
+          remoteMedias,
+          remoteAudioTrack: nextItem.audioTrack ?? prev.remoteAudioTrack,
+          remoteVideoTrack: nextItem.videoTrack ?? prev.remoteVideoTrack,
+        };
+      });
+    };
+
     const handleTrackSubscribed = (
       track: RemoteTrack,
       _publication: RemoteTrackPublication,
-      _participant: RemoteParticipant,
+      participant: RemoteParticipant,
     ) => {
       if (track.kind === Track.Kind.Audio) {
-        setCall((prev) => ({ ...prev, remoteAudioTrack: track as RemoteAudioTrack }));
+        upsertRemote(participant, { audioTrack: track as RemoteAudioTrack });
       } else if (track.kind === Track.Kind.Video) {
-        setCall((prev) => ({ ...prev, remoteVideoTrack: track as RemoteVideoTrack }));
+        upsertRemote(participant, { videoTrack: track as RemoteVideoTrack });
       }
     };
 
-    const handleTrackUnsubscribed = (track: RemoteTrack) => {
-      if (track.kind === Track.Kind.Audio) {
-        setCall((prev) => (
-          prev.remoteAudioTrack === track ? { ...prev, remoteAudioTrack: undefined } : prev
-        ));
-      } else if (track.kind === Track.Kind.Video) {
-        setCall((prev) => (
-          prev.remoteVideoTrack === track ? { ...prev, remoteVideoTrack: undefined } : prev
-        ));
-      }
+    const handleTrackUnsubscribed = (track: RemoteTrack, _publication: RemoteTrackPublication, participant: RemoteParticipant) => {
+      setCall((prev) => {
+        const remoteMedias = prev.remoteMedias.map((item) => {
+          if (item.participantId !== participant.identity) return item;
+          return {
+            ...item,
+            audioTrack: item.audioTrack === track ? undefined : item.audioTrack,
+            videoTrack: item.videoTrack === track ? undefined : item.videoTrack,
+          };
+        });
+        return {
+          ...prev,
+          remoteMedias,
+          remoteAudioTrack: prev.remoteAudioTrack === track ? undefined : prev.remoteAudioTrack,
+          remoteVideoTrack: prev.remoteVideoTrack === track ? undefined : prev.remoteVideoTrack,
+        };
+      });
     };
 
     room.on(RoomEvent.TrackSubscribed, handleTrackSubscribed);
     room.on(RoomEvent.TrackUnsubscribed, handleTrackUnsubscribed);
+    room.on(RoomEvent.ParticipantDisconnected, (participant) => {
+      setCall((prev) => ({
+        ...prev,
+        remoteMedias: prev.remoteMedias.filter((item) => item.participantId !== participant.identity),
+      }));
+    });
     room.on(RoomEvent.Disconnected, () => {
       localAudioRef.current = null;
       localVideoRef.current = null;
@@ -151,7 +216,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       setCall((prev) => (
         prev.phase === "idle"
           ? prev
-          : { ...prev, localVideoTrack: undefined, remoteAudioTrack: undefined, remoteVideoTrack: undefined }
+          : { ...prev, localVideoTrack: undefined, remoteAudioTrack: undefined, remoteVideoTrack: undefined, remoteMedias: [] }
       ));
     });
 
@@ -174,11 +239,13 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
     setCall({
       phase: "outgoing",
+      mode: "single",
       direction: "outgoing",
       callType,
       peer,
       muted: false,
       cameraOff: callType !== "video",
+      remoteMedias: [],
     });
 
     try {
@@ -193,6 +260,51 @@ export function CallProvider({ children }: { children: ReactNode }) {
       await resetCall();
     }
   }, [connectRoom, resetCall]);
+
+  const joinGroupCall = useCallback(async ({ group }: JoinGroupCallInput) => {
+    if (!group.groupId || callRef.current.phase !== "idle") return;
+    setCall({
+      phase: "connecting",
+      mode: "group",
+      callType: "video",
+      group,
+      muted: false,
+      cameraOff: false,
+      remoteMedias: [],
+    });
+    try {
+      const ack = await im.group.joinCall(group.groupId);
+      const callType = ack.callType ?? "video";
+      liveKitUrlRef.current = ack.sfuEndpoint || liveKitUrlRef.current;
+      await connectRoom(liveKitUrlRef.current, ack.token, callType);
+      setCall((prev) => ({
+        ...prev,
+        phase: "connected",
+        mode: "group",
+        callType,
+        group,
+        roomId: ack.roomId,
+        startedAt: ack.startedAt ?? Date.now(),
+        cameraOff: callType !== "video",
+      }));
+    } catch (err) {
+      console.error("join group call failed:", err);
+      toast("加入群视频失败");
+      await resetCall();
+    }
+  }, [connectRoom, resetCall]);
+
+  const startGroupCall = useCallback(async ({ group, callType = "video" }: StartGroupCallInput) => {
+    if (!group.groupId || callRef.current.phase !== "idle") return;
+    try {
+      await im.group.startCall(group.groupId, callType);
+      await joinGroupCall({ group });
+    } catch (err) {
+      console.error("start group call failed:", err);
+      toast("发起群视频失败");
+      await resetCall();
+    }
+  }, [joinGroupCall, resetCall]);
 
   const acceptCall = useCallback(async () => {
     const current = callRef.current;
@@ -229,7 +341,9 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const hangupCall = useCallback(async () => {
     const current = callRef.current;
     const duration = current.startedAt ? Math.max(0, Math.floor((Date.now() - current.startedAt) / 1000)) : 0;
-    if (current.peer?.userId && current.roomId) {
+    if (current.mode === "group" && current.group?.groupId) {
+      await im.group.leaveCall(current.group.groupId).catch(() => undefined);
+    } else if (current.peer?.userId && current.roomId) {
       await im.message.sendCallSignal(current.peer.userId, SignalingAction.HANGUP, current.roomId, duration).catch(() => undefined);
     }
     await resetCall();
@@ -272,12 +386,14 @@ export function CallProvider({ children }: { children: ReactNode }) {
         if (prev.phase !== "idle") return prev;
         return {
           phase: "incoming",
+          mode: "single",
           direction: "incoming",
           callType: signal.callType ?? "voice",
           peer: resolvePeer(msg.fromUserId, state),
           roomId: signal.roomId,
           muted: false,
           cameraOff: signal.callType !== "video",
+          remoteMedias: [],
         };
       });
       return;
@@ -300,13 +416,15 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const value = useMemo<CallContextValue>(() => ({
     call,
     startCall,
+    startGroupCall,
+    joinGroupCall,
     acceptCall,
     rejectCall,
     cancelCall,
     hangupCall,
     toggleMute,
     toggleCamera,
-  }), [acceptCall, call, cancelCall, hangupCall, rejectCall, startCall, toggleCamera, toggleMute]);
+  }), [acceptCall, call, cancelCall, hangupCall, joinGroupCall, rejectCall, startCall, startGroupCall, toggleCamera, toggleMute]);
 
   return <CallContext.Provider value={value}>{children}</CallContext.Provider>;
 }
