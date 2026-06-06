@@ -61,7 +61,8 @@ class DispatcherFactoryTest {
                 new ServerComponentsFactory.RuntimeDependencies(
                         sessionManager,
                         new PendingAcknowledgementManager(),
-                        fake(ExecutorService.class)),
+                        fake(ExecutorService.class),
+                        null),
                 new ServerComponentsFactory.ClusterDependencies(
                         fake(IRouteTable.class),
                         fake(IClusterMessageBus.class),

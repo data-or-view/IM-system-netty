@@ -23,7 +23,6 @@ import org.apache.ibatis.session.SqlSession;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -32,13 +31,14 @@ import java.util.List;
  * <p>基于 MyBatis-Plus，所有好友关系数据读写 {@code im_friends}、
  * {@code im_friend_requests}、{@code im_blacklist} 表。</p>
  */
-public class DbFriendManager implements IFriendManager {
+public class DbFriendManager implements IFriendManager, FriendApplyPolicy.Gateway {
 
     private static final Logger log = LoggerFactory.getLogger(DbFriendManager.class);
     private static final RetryConfig CFG = RetryStrategies.DB_WRITE;
 
     private final RetryExecutor retryExecutor;
     private final DbIncrementalSync sync;
+    private final FriendApplyPolicy applyPolicy;
 
     public DbFriendManager(RetryExecutor retryExecutor) {
         this(retryExecutor, new DbIncrementalSync(retryExecutor));
@@ -47,6 +47,7 @@ public class DbFriendManager implements IFriendManager {
     public DbFriendManager(RetryExecutor retryExecutor, DbIncrementalSync sync) {
         this.retryExecutor = retryExecutor;
         this.sync = sync;
+        this.applyPolicy = new FriendApplyPolicy(this);
     }
 
     @Override
@@ -55,21 +56,11 @@ public class DbFriendManager implements IFriendManager {
             long now = System.currentTimeMillis();
             try (SqlSession session = MyBatisPlusFactory.openSession()) {
                 FriendRequestMapper mapper = session.getMapper(FriendRequestMapper.class);
-                LambdaQueryWrapper<FriendRequestEntity> qw = new LambdaQueryWrapper<>();
-                qw.eq(FriendRequestEntity::getFromUserId, fromUserId)
-                        .eq(FriendRequestEntity::getToUserId, toUserId)
-                        .eq(FriendRequestEntity::getHandleResult, 0);
-                if (mapper.selectCount(qw) > 0) {
+                if (applyPolicy.validateApply(fromUserId, toUserId) == FriendApplyPolicy.Decision.ALREADY_PENDING) {
                     log.warn("Duplicate friend apply: {} -> {} already pending", fromUserId, toUserId);
                     return null;
                 }
-                FriendRequestEntity entity = new FriendRequestEntity();
-                entity.setFromUserId(fromUserId);
-                entity.setToUserId(toUserId);
-                entity.setReqMsg(reqMsg);
-                entity.setHandleResult(ApplyHandleResult.PENDING.getCode());
-                entity.setCreatedAt(now);
-                mapper.insert(entity);
+                mapper.upsertPendingApply(fromUserId, toUserId, ApplyHandleResult.PENDING.getCode(), reqMsg, now);
                 session.commit();
                 log.info("Friend apply: {} -> {} (req={})", fromUserId, toUserId, reqMsg);
             }
@@ -87,32 +78,23 @@ public class DbFriendManager implements IFriendManager {
                 LambdaQueryWrapper<FriendRequestEntity> qw = new LambdaQueryWrapper<>();
                 qw.eq(FriendRequestEntity::getFromUserId, fromUserId)
                         .eq(FriendRequestEntity::getToUserId, userId)
-                        .eq(FriendRequestEntity::getHandleResult, 0);
+                        .eq(FriendRequestEntity::getHandleResult, ApplyHandleResult.PENDING.getCode());
                 FriendRequestEntity req = reqMapper.selectOne(qw);
                 if (req == null) {
                     log.warn("No pending friend apply from {} to {}", fromUserId, userId);
                     return null;
                 }
-                req.setHandleResult(agreed ? 1 : 2);
+                req.setHandleResult(agreed
+                        ? ApplyHandleResult.AGREED.getCode()
+                        : ApplyHandleResult.REJECTED.getCode());
                 req.setHandlerUserId(userId);
                 req.setHandleMsg(handleMsg);
                 req.setHandleTime(now);
                 reqMapper.updateById(req);
                 if (agreed) {
-                    FriendEntity friendA = new FriendEntity();
-                    friendA.setOwnerUserId(userId);
-                    friendA.setFriendUserId(fromUserId);
-                    friendA.setAddSource(1);
-                    friendA.setOperatorUserId(userId);
-                    friendA.setCreatedAt(now);
-                    friendMapper.insert(friendA);
-                    FriendEntity friendB = new FriendEntity();
-                    friendB.setOwnerUserId(fromUserId);
-                    friendB.setFriendUserId(userId);
-                    friendB.setAddSource(1);
-                    friendB.setOperatorUserId(userId);
-                    friendB.setCreatedAt(now);
-                    friendMapper.insert(friendB);
+                    int addSource = ApplySource.SEARCH.getCode();
+                    friendMapper.upsertFriend(userId, fromUserId, addSource, userId, now);
+                    friendMapper.upsertFriend(fromUserId, userId, addSource, userId, now);
                 }
                 session.commit();
                 log.info("Friend apply response: {} -> {}, agreed={}", fromUserId, userId, agreed);
@@ -134,7 +116,7 @@ public class DbFriendManager implements IFriendManager {
                 FriendRequestMapper mapper = session.getMapper(FriendRequestMapper.class);
                 LambdaQueryWrapper<FriendRequestEntity> qw = new LambdaQueryWrapper<>();
                 qw.eq(FriendRequestEntity::getToUserId, userId);
-                if (onlyPending) qw.eq(FriendRequestEntity::getHandleResult, 0);
+                if (onlyPending) qw.eq(FriendRequestEntity::getHandleResult, ApplyHandleResult.PENDING.getCode());
                 qw.orderByDesc(FriendRequestEntity::getCreatedAt);
                 return mapper.selectList(qw).stream().map(this::toFriendApply).toList();
             }
@@ -249,7 +231,7 @@ public class DbFriendManager implements IFriendManager {
                 BlacklistEntity entity = new BlacklistEntity();
                 entity.setOwnerUserId(ownerUserId);
                 entity.setBlockUserId(blockedUserId);
-                entity.setAddSource(1);
+                entity.setAddSource(ApplySource.SEARCH.getCode());
                 entity.setOperatorUserId(ownerUserId);
                 entity.setCreatedAt(System.currentTimeMillis());
                 mapper.insert(entity);
@@ -357,7 +339,7 @@ public class DbFriendManager implements IFriendManager {
                 FriendRequestMapper mapper = session.getMapper(FriendRequestMapper.class);
                 Long count = mapper.selectCount(new LambdaQueryWrapper<FriendRequestEntity>()
                         .eq(FriendRequestEntity::getToUserId, userId)
-                        .eq(FriendRequestEntity::getHandleResult, 0));
+                        .eq(FriendRequestEntity::getHandleResult, ApplyHandleResult.PENDING.getCode()));
                 return count != null ? count.intValue() : 0;
             }
         });

@@ -1,11 +1,17 @@
 package com.im.api;
 
 import java.util.Objects;
+import java.util.Map;
 
 /**
  * Cluster-scoped control command.
  */
-public record ClusterCommand(ClusterCommandType type, String userId, int platformId, String sessionId, String reason) {
+public record ClusterCommand(ClusterCommandType type,
+                             String userId,
+                             int platformId,
+                             String sessionId,
+                             String reason,
+                             Map<String, Object> payload) {
 
     public ClusterCommand {
         Objects.requireNonNull(type, "type");
@@ -16,6 +22,11 @@ public record ClusterCommand(ClusterCommandType type, String userId, int platfor
         if (reason == null || reason.isBlank()) {
             reason = type.name();
         }
+        payload = payload == null ? Map.of() : Map.copyOf(payload);
+    }
+
+    public ClusterCommand(ClusterCommandType type, String userId, int platformId, String sessionId, String reason) {
+        this(type, userId, platformId, sessionId, reason, Map.of());
     }
 
     public static ClusterCommand kickUser(String userId, String reason) {
@@ -28,5 +39,9 @@ public record ClusterCommand(ClusterCommandType type, String userId, int platfor
 
     public static ClusterCommand kickSession(String userId, int platformId, String sessionId, String reason) {
         return new ClusterCommand(ClusterCommandType.KICK_SESSION, userId, platformId, sessionId, reason);
+    }
+
+    public static ClusterCommand pushEvent(String userId, Map<String, Object> payload) {
+        return new ClusterCommand(ClusterCommandType.PUSH_EVENT, userId, -1, "default", "PUSH_EVENT", payload);
     }
 }

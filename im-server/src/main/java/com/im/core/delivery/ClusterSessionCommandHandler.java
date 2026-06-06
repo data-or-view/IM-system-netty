@@ -33,6 +33,9 @@ public class ClusterSessionCommandHandler implements ClusterMessageHandler {
             case KICK_PLATFORM -> sessionManager.forceLogout(command.userId(), command.platformId());
             case KICK_SESSION -> sessionManager.forceLogoutSession(
                     command.userId(), command.platformId(), command.sessionId());
+            case PUSH_EVENT -> {
+                return;
+            }
         }
         log.info("Cluster session command applied: type={}, userId={}, platform={}, session={}, reason={}",
                 command.type(), command.userId(), command.platformId(), command.sessionId(), command.reason());

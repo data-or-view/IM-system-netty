@@ -242,6 +242,7 @@ public class RedisClusterMessageBus implements IClusterMessageBus {
         map.put("platformId", command.platformId());
         map.put("sessionId", command.sessionId());
         map.put("reason", command.reason());
+        map.put("payload", command.payload());
         return map;
     }
 
@@ -251,7 +252,9 @@ public class RedisClusterMessageBus implements IClusterMessageBus {
         int platformId = ((Number) map.getOrDefault("platformId", -1)).intValue();
         String sessionId = (String) map.getOrDefault("sessionId", "default");
         String reason = (String) map.get("reason");
-        return new ClusterCommand(type, userId, platformId, sessionId, reason);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> payload = (Map<String, Object>) map.getOrDefault("payload", Map.of());
+        return new ClusterCommand(type, userId, platformId, sessionId, reason, payload);
     }
 
     // ── 工具 ──

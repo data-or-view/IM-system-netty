@@ -38,7 +38,9 @@ import com.im.core.delivery.RedisClusterMessageBus;
 import com.im.core.discovery.RedisNodeDiscovery;
 import com.im.core.dispatcher.ApiDispatcher;
 import com.im.core.dispatcher.PendingAcknowledgementManager;
+import com.im.core.friend.ClusterAwareFriendApplyNotifier;
 import com.im.core.friend.DbFriendManager;
+import com.im.core.friend.FriendApplyNotifier;
 import com.im.core.group.DbGroupManager;
 import com.im.core.handler.ConnectionEventHandler;
 import com.im.core.mq.RedisMessageQueue;
@@ -91,8 +93,9 @@ final class ServerComponentsFactory {
         // Keep construction order explicit here: these objects are tightly coupled by
         // lifecycle and cluster guarantees, so hiding them behind more top-level modules
         // makes a single production dependency change harder to audit.
-        RuntimeDependencies runtime = createRuntime(config, redisConfig);
+        RuntimeDependencies runtime = createRuntime(config, redisConfig, nodeId);
         ClusterDependencies cluster = createCluster(redisConfig, runtime.sessionManager(), nodeId);
+        runtime.friendApplyNotifier().bindCluster(cluster.routeTable(), cluster.clusterMessageBus());
         BusinessDependencies business = createBusiness(config, cluster.routeTable());
         StorageDependencies storage = createStorage(config, redisConfig, nodeId, business.retryExecutor());
         CallDependencies call = createCall(config, storage.messageQueue());
@@ -125,13 +128,14 @@ final class ServerComponentsFactory {
                 runtime.virtualExecutor()));
     }
 
-    private static RuntimeDependencies createRuntime(Config config, RedisConfiguration redisConfig) {
+    private static RuntimeDependencies createRuntime(Config config, RedisConfiguration redisConfig, String nodeId) {
         SessionManager sessionManager = new RedisSessionManager(redisConfig);
         applyMultiLoginStrategy(config, sessionManager);
         return new RuntimeDependencies(
                 sessionManager,
                 new PendingAcknowledgementManager(),
-                IMExecutors.newVirtualThreadExecutor("im-dispatch"));
+                IMExecutors.newVirtualThreadExecutor("im-dispatch"),
+                new RuntimeFriendApplyNotifier(nodeId, sessionManager));
     }
 
     private static ClusterDependencies createCluster(RedisConfiguration redisConfig,
@@ -206,6 +210,7 @@ final class ServerComponentsFactory {
         cluster.clusterMessageBus().subscribe("SINGLE_CHAT", clusterDeliveryHandler);
         cluster.clusterMessageBus().subscribe("GROUP_CHAT", clusterDeliveryHandler);
         cluster.clusterMessageBus().subscribe("CLUSTER_COMMAND", new ClusterSessionCommandHandler(runtime.sessionManager()));
+        cluster.clusterMessageBus().subscribe("CLUSTER_COMMAND", runtime.friendApplyNotifier()::handleClusterPush);
         return new ConsumerDependencies(persistenceConsumer, deliveryConsumer);
     }
 
@@ -298,9 +303,39 @@ final class ServerComponentsFactory {
         return new NodeInformation(nodeId, host, servicePort, attrs);
     }
 
+    private static final class RuntimeFriendApplyNotifier implements FriendApplyNotifier {
+        private final String nodeId;
+        private final SessionManager sessionManager;
+        private volatile ClusterAwareFriendApplyNotifier delegate;
+
+        private RuntimeFriendApplyNotifier(String nodeId, SessionManager sessionManager) {
+            this.nodeId = nodeId;
+            this.sessionManager = sessionManager;
+        }
+
+        void bindCluster(IRouteTable routeTable, IClusterMessageBus clusterMessageBus) {
+            this.delegate = new ClusterAwareFriendApplyNotifier(nodeId, sessionManager, routeTable, clusterMessageBus);
+        }
+
+        @Override
+        public void notifyApplyCreated(String toUserId, com.im.api.FriendApply apply) {
+            if (delegate != null) delegate.notifyApplyCreated(toUserId, apply);
+        }
+
+        @Override
+        public void notifyApplyHandled(String fromUserId, com.im.api.FriendApply apply) {
+            if (delegate != null) delegate.notifyApplyHandled(fromUserId, apply);
+        }
+
+        void handleClusterPush(com.im.api.ClusterMessage message) {
+            if (delegate != null) delegate.handleClusterPush(message);
+        }
+    }
+
     record RuntimeDependencies(SessionManager sessionManager,
                                PendingAcknowledgementManager pendingAcknowledgementManager,
-                               ExecutorService virtualExecutor) {
+                               ExecutorService virtualExecutor,
+                               RuntimeFriendApplyNotifier friendApplyNotifier) {
     }
 
     record ClusterDependencies(IRouteTable routeTable,

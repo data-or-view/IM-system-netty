@@ -2,6 +2,7 @@ package com.im.bootstrap;
 
 import com.im.bootstrap.ws.MessageEncoder;
 import com.im.bootstrap.ws.WsRequestAdapter;
+import com.im.bootstrap.ws.WsPushEventEncoder;
 import com.im.core.dispatcher.ApiDispatcher;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.*;
@@ -22,7 +23,7 @@ import java.util.concurrent.ExecutorService;
  *
  * <p>Pipeline 顺序有要求：HttpServerCodec → HttpObjectAggregator → WebSocketServerProtocolHandler
  * （完成 HTTP 升级到 WS）→ connectionEventHandler（管理连接生命周期）
- * → MessageEncoder（出站 Message 编码）→ WsRequestAdapter（入站 JSON 帧转 ApiRequest）。</p>
+ * → MessageEncoder / WsPushEventEncoder（出站推送编码）→ WsRequestAdapter（入站 JSON 帧转 ApiRequest）。</p>
  *
  * <p>MessageEncoder 放在 connectionEventHandler 之后、WsRequestAdapter 之前，
  * 如此出站消息从 pipeline 尾部写入时能经过 encoder；若放在更前，出站 Message 会绕过 encoder。</p>
@@ -72,6 +73,7 @@ public class WsServerBootstrap {
                                 "/ws", null, true, 65536));
                         p.addLast(connectionEventHandler);
                         p.addLast(new MessageEncoder());
+                        p.addLast(new WsPushEventEncoder());
                         p.addLast(new WsRequestAdapter(dispatcher, virtualExecutor, requestAdmission));
                     }
                 });

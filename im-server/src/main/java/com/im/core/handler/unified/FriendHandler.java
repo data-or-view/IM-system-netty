@@ -8,6 +8,7 @@ import com.im.common.exception.UnauthorizedException;
 import com.im.common.exception.ValidationException;
 import com.im.common.exception.ForbiddenException;
 import com.im.common.exception.NotFoundException;
+import com.im.core.friend.FriendApplyNotifier;
 
 import java.util.List;
 import java.util.Map;
@@ -20,9 +21,15 @@ import java.util.Map;
 public class FriendHandler implements RequestHandler {
 
     private final IFriendManager friendManager;
+    private final FriendApplyNotifier friendApplyNotifier;
 
     public FriendHandler(IFriendManager friendManager) {
+        this(friendManager, FriendApplyNotifier.NOOP);
+    }
+
+    public FriendHandler(IFriendManager friendManager, FriendApplyNotifier friendApplyNotifier) {
         this.friendManager = friendManager;
+        this.friendApplyNotifier = friendApplyNotifier != null ? friendApplyNotifier : FriendApplyNotifier.NOOP;
     }
 
     @Override
@@ -50,6 +57,10 @@ public class FriendHandler implements RequestHandler {
         if (fromUserId == null) throw new UnauthorizedException("not authenticated");
         if (toUserId == null) throw new ValidationException("toUserId is required");
         friendManager.applyAddFriend(fromUserId, toUserId, reqMsg);
+        var apply = friendManager.getFriendApplyDetail(fromUserId, toUserId);
+        if (apply != null) {
+            friendApplyNotifier.notifyApplyCreated(toUserId, apply);
+        }
         return Map.of("status", "OK");
     }
 
@@ -61,6 +72,10 @@ public class FriendHandler implements RequestHandler {
         if (userId == null) throw new UnauthorizedException("not authenticated");
         if (fromUserId == null) throw new ValidationException("fromUserId is required");
         friendManager.respondFriendApply(userId, fromUserId, handleMsg, agreed);
+        var apply = friendManager.getFriendApplyDetail(fromUserId, userId);
+        if (apply != null) {
+            friendApplyNotifier.notifyApplyHandled(fromUserId, apply);
+        }
         return Map.of("status", "OK");
     }
 

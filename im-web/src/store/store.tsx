@@ -14,8 +14,8 @@ import React, {
   type ReactNode,
 } from "react";
 import { im } from "@/sdk/im-sdk";
-import { ConversationType, toMessageContentType } from "im-sdk";
-import type { Message as SDKMessage, OutgoingMessageContentTypeValue, SendMessageAck, TokenPair, UserInfo as SDKUserInfo, FriendInfo as SDKFriendInfo, GroupInfo as SDKGroupInfo, GroupMember as SDKGroupMember, GroupApply as SDKGroupApply, Conversation as SDKConversation } from "im-sdk";
+import { ApplyHandleResult, ConversationType, toMessageContentType } from "im-sdk";
+import type { Message as SDKMessage, OutgoingMessageContentTypeValue, SendMessageAck, TokenPair, UserInfo as SDKUserInfo, FriendInfo as SDKFriendInfo, FriendApply as SDKFriendApply, GroupInfo as SDKGroupInfo, GroupMember as SDKGroupMember, GroupApply as SDKGroupApply, Conversation as SDKConversation } from "im-sdk";
 
 // ========== 类型（与 SDK 类型一致） ==========
 
@@ -41,6 +41,7 @@ export interface Message {
 // ========== State ==========
 
 const MAX_MESSAGES_PER_CONVERSATION = 500;
+export const FRIEND_APPLY_UPDATED_EVENT = "im:friend-apply-updated";
 
 interface State {
   token: string | null;
@@ -498,8 +499,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       });
     });
 
-    const unsubFriendRequest = im.on("friendRequest", () => {
+    const unsubFriendRequest = im.on("friendRequest", (apply: SDKFriendApply) => {
+      window.dispatchEvent(new CustomEvent(FRIEND_APPLY_UPDATED_EVENT, { detail: apply }));
       void fetchUnhandledApplyCount();
+      if (apply.handleResult === ApplyHandleResult.AGREED || apply.handleResult === ApplyHandleResult.REJECTED) {
+        void fetchFriends();
+        void fetchConversations();
+      }
     });
 
     const unsubTokenChanged = im.on("tokenChanged", (tokens) => {
@@ -514,7 +520,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       unsubFriendRequest();
       unsubTokenChanged();
     };
-  }, [fetchUnhandledApplyCount, hydrateAfterAuth, markConversationRead, state.activeConversationId]);
+  }, [fetchConversations, fetchFriends, fetchUnhandledApplyCount, hydrateAfterAuth, markConversationRead, state.activeConversationId]);
 
   useEffect(() => {
     const conversationId = state.activeConversationId;

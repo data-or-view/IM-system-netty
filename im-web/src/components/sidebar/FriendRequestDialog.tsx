@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useStore } from "@/store/store";
+import { FRIEND_APPLY_UPDATED_EVENT } from "@/store/store";
 import { im } from "@/sdk/im-sdk";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -40,6 +41,13 @@ export default function FriendRequestDialog({ open, onOpenChange }: Props) {
 
   useEffect(() => {
     if (open) loadApplies();
+  }, [open, loadApplies]);
+
+  useEffect(() => {
+    if (!open) return;
+    const reload = () => void loadApplies();
+    window.addEventListener(FRIEND_APPLY_UPDATED_EVENT, reload);
+    return () => window.removeEventListener(FRIEND_APPLY_UPDATED_EVENT, reload);
   }, [open, loadApplies]);
 
   const handleApprove = async (fromUserId: string, agreed: boolean) => {
