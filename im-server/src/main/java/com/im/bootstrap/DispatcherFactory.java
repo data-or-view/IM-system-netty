@@ -23,6 +23,7 @@ import com.im.core.handler.unified.RegisterHandler;
 import com.im.core.handler.unified.RevokeHandler;
 import com.im.core.handler.unified.TelemetryInterceptor;
 import com.im.core.handler.unified.UserHandler;
+import com.im.core.group.DefaultGroupSystemMessagePublisher;
 import com.im.core.usecase.HeartbeatUseCase;
 import com.im.core.usecase.LoginUseCase;
 import com.im.core.usecase.RegisterUseCase;
@@ -73,7 +74,8 @@ final class DispatcherFactory {
 
         ApiDispatcher dispatcher = new ApiDispatcher();
         registerInterceptors(dispatcher, dependencies.business().authenticator());
-        registerBusinessHandlers(dispatcher, dependencies, loginUseCase, registerUseCase, conversationAccessChecker);
+        registerBusinessHandlers(dispatcher, dependencies, loginUseCase, registerUseCase,
+                conversationAccessChecker, sendMessageUseCase);
         registerMessagingHandlers(dispatcher, dependencies, sendMessageUseCase, revokeUseCase, conversationAccessChecker);
         registerFileHandlers(dispatcher, config, dependencies.storage().fileStorage());
         return dispatcher;
@@ -88,7 +90,8 @@ final class DispatcherFactory {
                                                  DispatcherDependencies dependencies,
                                                  LoginUseCase loginUseCase,
                                                  RegisterUseCase registerUseCase,
-                                                 ConversationAccessChecker conversationAccessChecker) {
+                                                 ConversationAccessChecker conversationAccessChecker,
+                                                 SendMessageUseCase sendMessageUseCase) {
         dispatcher.registerHandlers(new UserHandler(dependencies.business().userManager(), registerUseCase),
                 Operation.USER_REGISTER, Operation.USER_INFO, Operation.USER_SEARCH, Operation.USER_UPDATE);
         dispatcher.registerHandlers(new FriendHandler(
@@ -100,7 +103,8 @@ final class DispatcherFactory {
                 Operation.FRIEND_APPLY_DETAIL, Operation.FRIEND_APPLY_UNHANDLED_COUNT);
         dispatcher.registerHandlers(new GroupHandler(
                         dependencies.business().groupManager(),
-                        dependencies.runtime().groupApplyNotifier()),
+                        dependencies.runtime().groupApplyNotifier(),
+                        new DefaultGroupSystemMessagePublisher(sendMessageUseCase)),
                 Operation.GROUP_CREATE, Operation.GROUP_JOIN, Operation.GROUP_QUIT, Operation.GROUP_KICK,
                 Operation.GROUP_DISBAND, Operation.GROUP_INFO_UPDATE, Operation.GROUP_INFO,
                 Operation.GROUP_LIST, Operation.GROUP_SEARCH, Operation.GROUP_MEMBERS, Operation.GROUP_MUTE_ALL,

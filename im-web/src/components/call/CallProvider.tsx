@@ -9,18 +9,24 @@ import {
   type ReactNode,
 } from "react";
 import {
+  AudioPresets,
+  ConnectionQuality,
   Room,
   RoomEvent,
   Track,
+  VideoPresets,
   createLocalAudioTrack,
   createLocalVideoTrack,
   type LocalAudioTrack,
   type LocalVideoTrack,
+  type Participant,
   type RemoteAudioTrack,
   type RemoteTrack,
   type RemoteTrackPublication,
   type RemoteVideoTrack,
   type RemoteParticipant,
+  type RoomOptions,
+  type TrackPublishOptions,
 } from "livekit-client";
 import {
   MessageContentType,
@@ -102,6 +108,44 @@ type CallContextValue = {
 };
 
 const DEFAULT_LIVEKIT_URL = "ws://localhost:7880";
+const AUDIO_CAPTURE_OPTIONS = {
+  echoCancellation: true,
+  noiseSuppression: true,
+  autoGainControl: true,
+  channelCount: 1,
+} as const;
+const VIDEO_CAPTURE_OPTIONS = {
+  resolution: VideoPresets.h540.resolution,
+  frameRate: 24,
+} as const;
+const AUDIO_PUBLISH_OPTIONS: TrackPublishOptions = {
+  source: Track.Source.Microphone,
+  audioPreset: AudioPresets.speech,
+  dtx: true,
+  red: true,
+};
+const VIDEO_PUBLISH_OPTIONS: TrackPublishOptions = {
+  source: Track.Source.Camera,
+  videoEncoding: VideoPresets.h540.encoding,
+  videoSimulcastLayers: [VideoPresets.h180, VideoPresets.h360],
+  simulcast: true,
+  degradationPreference: "maintain-framerate",
+};
+const LIVEKIT_ROOM_OPTIONS: RoomOptions = {
+  adaptiveStream: true,
+  dynacast: true,
+  audioCaptureDefaults: AUDIO_CAPTURE_OPTIONS,
+  videoCaptureDefaults: VIDEO_CAPTURE_OPTIONS,
+  publishDefaults: {
+    audioPreset: AudioPresets.speech,
+    videoEncoding: VideoPresets.h540.encoding,
+    videoSimulcastLayers: [VideoPresets.h180, VideoPresets.h360],
+    simulcast: true,
+    dtx: true,
+    red: true,
+    degradationPreference: "maintain-framerate",
+  },
+};
 const EMPTY_CALL: CallState = {
   phase: "idle",
   mode: "single",
@@ -122,6 +166,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const localVideoRef = useRef<LocalVideoTrack | null>(null);
   const incomingTokenRef = useRef<string | null>(null);
   const liveKitUrlRef = useRef<string>(import.meta.env.VITE_LIVEKIT_URL ?? DEFAULT_LIVEKIT_URL);
+  const weakNetworkNotifiedRef = useRef(false);
 
   useEffect(() => {
     callRef.current = call;
@@ -145,7 +190,9 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const connectRoom = useCallback(async (url: string, token: string, nextCallType: CallType) => {
     await disconnectCurrentRoom();
 
-    const room = new Room();
+    // Group calls can grow quickly, so let LiveKit stop unused layers instead of
+    // forcing every browser to send and receive the highest quality stream.
+    const room = new Room(LIVEKIT_ROOM_OPTIONS);
     roomRef.current = room;
 
     const upsertRemote = (participant: RemoteParticipant, patch: Partial<RemoteMedia>) => {
@@ -203,6 +250,23 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
     room.on(RoomEvent.TrackSubscribed, handleTrackSubscribed);
     room.on(RoomEvent.TrackUnsubscribed, handleTrackUnsubscribed);
+    room.on(RoomEvent.ConnectionQualityChanged, (quality: ConnectionQuality, participant: Participant) => {
+      if (!participant.isLocal) return;
+      if (quality === ConnectionQuality.Poor || quality === ConnectionQuality.Lost) {
+        if (!weakNetworkNotifiedRef.current) {
+          toast("当前网络较弱，视频会自动降低清晰度以保证通话");
+          weakNetworkNotifiedRef.current = true;
+        }
+      } else if (weakNetworkNotifiedRef.current && (quality === ConnectionQuality.Good || quality === ConnectionQuality.Excellent)) {
+        toast("网络已恢复");
+        weakNetworkNotifiedRef.current = false;
+      }
+    });
+    room.on(RoomEvent.Reconnecting, () => toast("媒体连接正在恢复..."));
+    room.on(RoomEvent.Reconnected, () => toast("媒体连接已恢复"));
+    room.on(RoomEvent.MediaDevicesError, (_error, kind) => {
+      toast(kind === "videoinput" ? "摄像头不可用，请检查浏览器权限" : "麦克风不可用，请检查浏览器权限");
+    });
     room.on(RoomEvent.ParticipantDisconnected, (participant) => {
       setCall((prev) => ({
         ...prev,
@@ -213,6 +277,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       localAudioRef.current = null;
       localVideoRef.current = null;
       roomRef.current = null;
+      weakNetworkNotifiedRef.current = false;
       setCall((prev) => (
         prev.phase === "idle"
           ? prev
@@ -220,16 +285,21 @@ export function CallProvider({ children }: { children: ReactNode }) {
       ));
     });
 
-    await room.connect(url, token);
+    await room.connect(url, token, {
+      autoSubscribe: true,
+      peerConnectionTimeout: 20000,
+      websocketTimeout: 15000,
+      maxRetries: 3,
+    });
 
-    const audioTrack = await createLocalAudioTrack();
+    const audioTrack = await createLocalAudioTrack(AUDIO_CAPTURE_OPTIONS);
     localAudioRef.current = audioTrack;
-    await room.localParticipant.publishTrack(audioTrack);
+    await room.localParticipant.publishTrack(audioTrack, AUDIO_PUBLISH_OPTIONS);
 
     if (nextCallType === "video") {
-      const videoTrack = await createLocalVideoTrack();
+      const videoTrack = await createLocalVideoTrack(VIDEO_CAPTURE_OPTIONS);
       localVideoRef.current = videoTrack;
-      await room.localParticipant.publishTrack(videoTrack);
+      await room.localParticipant.publishTrack(videoTrack, VIDEO_PUBLISH_OPTIONS);
       setCall((prev) => ({ ...prev, localVideoTrack: videoTrack }));
     }
   }, [disconnectCurrentRoom]);

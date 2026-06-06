@@ -14,6 +14,7 @@ import com.im.common.exception.ValidationException;
 import com.im.common.exception.NotFoundException;
 import com.im.common.id.IdGenerator;
 import com.im.core.group.GroupApplyNotifier;
+import com.im.core.group.GroupSystemMessagePublisher;
 
 import java.util.List;
 import java.util.Map;
@@ -28,14 +29,22 @@ public class GroupHandler implements RequestHandler {
 
     private final IGroupManager groupManager;
     private final GroupApplyNotifier groupApplyNotifier;
+    private final GroupSystemMessagePublisher groupSystemMessagePublisher;
 
     public GroupHandler(IGroupManager groupManager) {
         this(groupManager, GroupApplyNotifier.NOOP);
     }
 
     public GroupHandler(IGroupManager groupManager, GroupApplyNotifier groupApplyNotifier) {
+        this(groupManager, groupApplyNotifier, GroupSystemMessagePublisher.NOOP);
+    }
+
+    public GroupHandler(IGroupManager groupManager, GroupApplyNotifier groupApplyNotifier,
+                        GroupSystemMessagePublisher groupSystemMessagePublisher) {
         this.groupManager = groupManager;
         this.groupApplyNotifier = groupApplyNotifier != null ? groupApplyNotifier : GroupApplyNotifier.NOOP;
+        this.groupSystemMessagePublisher = groupSystemMessagePublisher != null
+                ? groupSystemMessagePublisher : GroupSystemMessagePublisher.NOOP;
     }
 
     @Override
@@ -84,6 +93,9 @@ public class GroupHandler implements RequestHandler {
         if (groupId == null) throw new ValidationException("groupId is required");
         String reqMsg = req.getString("reqMsg", "");
         GroupJoinResult result = groupManager.joinGroup(groupId, userId, reqMsg);
+        if (result == GroupJoinResult.JOINED) {
+            groupSystemMessagePublisher.memberJoined(groupId, userId, userId);
+        }
         if (result == GroupJoinResult.APPLY_CREATED) {
             GroupApply apply = findGroupApply(groupId, userId, true);
             if (apply != null) {
@@ -209,6 +221,9 @@ public class GroupHandler implements RequestHandler {
             GroupApply apply = findGroupApply(groupId, userId, false);
             if (apply != null) {
                 groupApplyNotifier.notifyApplyHandled(userId, apply);
+            }
+            if (agreed) {
+                groupSystemMessagePublisher.memberJoined(groupId, userId, operatorId);
             }
         }
         return Map.of("status", "OK");

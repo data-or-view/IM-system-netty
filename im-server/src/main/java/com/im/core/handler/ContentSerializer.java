@@ -14,7 +14,7 @@ import java.util.Map;
  *   TEXT    → {"text":"..."}
  *   FILE    → {"uuid":"...","fileName":"...","fileSize":123,"url":"..."}
  *   IMAGE   → {"sourcePicture":{...},"bigPicture":{...},"snapshotPicture":{...}}
- *   SYSTEM  → 空（body 为空，信息存 IMCommand.headers 的 _sys_type / _sys_msg）
+ *   SYSTEM  → {"systemType":"...","message":"..."}
  *   SIGNAL  → {"_act":1,"_room":"...","_token":"..."}
  *   VOICE   → {"uuid":"...","url":"...","fileSize":123,"duration":30}
  *   VIDEO   → {"videoUrl":"...","videoUuid":"...","videoType":"...","videoSize":123,"duration":120,"snapshotUrl":"...","snapshotWidth":640,"snapshotHeight":480,"snapshotSize":23456}
@@ -31,10 +31,11 @@ public class ContentSerializer {
 
     /**
      * 将消息内容序列化为 JSON 字节数组。
-     * SYSTEM 类型返回空数组（无 body）。
+     * SYSTEM 消息也写入 body，因为当前 Message 模型没有独立 headers 字段；
+     * 如果继续丢弃 body，Web 端只能看到空白系统消息。
      */
     public static byte[] toBytes(IMessageContent content) {
-        if (content == null || content.getContentType() == ContentType.SYSTEM) {
+        if (content == null) {
             return new byte[0];
         }
         try {
@@ -52,9 +53,6 @@ public class ContentSerializer {
      * @return 反序列化后的消息内容
      */
     public static IMessageContent fromBytes(ContentType contentType, byte[] body) {
-        if (contentType == ContentType.SYSTEM) {
-            return new SystemContent(null, null);
-        }
         if (body == null || body.length == 0) {
             throw new IllegalArgumentException("body must not be empty for content type: " + contentType);
         }
@@ -72,9 +70,6 @@ public class ContentSerializer {
      */
     @SuppressWarnings("unchecked")
     public static IMessageContent fromMap(ContentType contentType, Map<String, Object> map) {
-        if (contentType == ContentType.SYSTEM) {
-            return new SystemContent(null, null);
-        }
         if (map == null || map.isEmpty()) {
             throw new IllegalArgumentException("content map must not be empty for type: " + contentType);
         }

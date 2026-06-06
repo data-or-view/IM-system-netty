@@ -9,7 +9,8 @@
     "test": "npm run build && node --test dist/test/*.test.js",
     "scenario:smoke": "npm run build && node dist/scenarios/smoke.js",
     "scenario:group-chat": "npm run build && node dist/scenarios/group-chat.js",
-    "scenario:group-call": "npm run build && node dist/scenarios/group-call.js"
+    "scenario:group-call": "npm run build && node dist/scenarios/group-call.js",
+    "scenario:group-join-system": "npm run build && node dist/scenarios/group-join-system-message.js"
   },
   "dependencies": {
     "ws": "^8.20.1"

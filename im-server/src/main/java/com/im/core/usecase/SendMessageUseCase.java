@@ -97,6 +97,19 @@ public class SendMessageUseCase {
 
         if (!webhookService.beforeSendGroup(params, fromUserId, groupId, content)) return null;
 
+        SendMessageResult result = publishGroupMessage(params, fromUserId, groupId, content);
+
+        webhookService.afterSendGroup(params, fromUserId, groupId, content);
+
+        return result;
+    }
+
+    public SendMessageResult publishGroupSystem(String fromUserId, String groupId, IMessageContent content) {
+        return publishGroupMessage(Map.of(), fromUserId, groupId, content);
+    }
+
+    private SendMessageResult publishGroupMessage(Map<String, Object> params, String fromUserId,
+                                                  String groupId, IMessageContent content) {
         String conversationId = ConversationIds.group(groupId);
         long seq = 0;
         if (sequenceManager != null) {
@@ -108,8 +121,6 @@ public class SendMessageUseCase {
             messageQueue.publishAsync(MessageQueueTopics.PERSIST, msg);
             messageQueue.publishAsync(MessageQueueTopics.DELIVER, msg);
         }
-
-        webhookService.afterSendGroup(params, fromUserId, groupId, content);
 
         return new SendMessageResult(conversationId, seq, "GROUP_CHAT_ACK");
     }

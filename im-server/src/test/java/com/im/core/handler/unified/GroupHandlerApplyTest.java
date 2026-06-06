@@ -11,6 +11,7 @@ import com.im.api.IGroupManager;
 import com.im.api.IncrementalSyncResult;
 import com.im.api.Operation;
 import com.im.common.exception.ForbiddenException;
+import com.im.core.group.GroupSystemMessagePublisher;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -78,6 +79,39 @@ class GroupHandlerApplyTest {
     }
 
     @Test
+    void directJoinPublishesGroupSystemMessage() {
+        RecordingGroupManager manager = new RecordingGroupManager();
+        manager.joinResult = GroupJoinResult.JOINED;
+        RecordingGroupSystemMessagePublisher publisher = new RecordingGroupSystemMessagePublisher();
+        GroupHandler handler = new GroupHandler(manager, null, publisher);
+        ApiRequest request = request(Operation.GROUP_JOIN, Map.of("groupId", "grp_1"), "alice");
+
+        handler.handle(request);
+
+        assertEquals(1, publisher.memberJoinedCalls);
+        assertEquals("grp_1", publisher.groupId);
+        assertEquals("alice", publisher.userId);
+        assertEquals("alice", publisher.operatorId);
+    }
+
+    @Test
+    void approvingJoinPublishesGroupSystemMessage() {
+        RecordingGroupManager manager = new RecordingGroupManager();
+        manager.role = "admin";
+        RecordingGroupSystemMessagePublisher publisher = new RecordingGroupSystemMessagePublisher();
+        GroupHandler handler = new GroupHandler(manager, null, publisher);
+        ApiRequest request = request(Operation.GROUP_APPLY_APPROVE,
+                Map.of("groupId", "grp_1", "userId", "alice", "agreed", true), "admin");
+
+        handler.handle(request);
+
+        assertEquals(1, publisher.memberJoinedCalls);
+        assertEquals("grp_1", publisher.groupId);
+        assertEquals("alice", publisher.userId);
+        assertEquals("admin", publisher.operatorId);
+    }
+
+    @Test
     void createGroupGeneratesGroupIdOnServerAndIgnoresClientGroupId() {
         RecordingGroupManager manager = new RecordingGroupManager();
         GroupHandler handler = new GroupHandler(manager);
@@ -109,6 +143,7 @@ class GroupHandlerApplyTest {
         String respondHandleMsg;
         boolean respondAgreed;
         String createdGroupId;
+        GroupJoinResult joinResult = GroupJoinResult.APPLY_CREATED;
 
         @Override public void createGroup(String groupId, String ownerId, String groupName, String faceUrl, List<String> members, int groupType, int needVerification) {
             createdGroupId = groupId;
@@ -122,7 +157,7 @@ class GroupHandlerApplyTest {
         @Override public void transferOwner(String groupId, String oldOwnerId, String newOwnerId) {}
         @Override public void setMemberRole(String groupId, String operatorId, String targetUserId, int roleLevel) {}
         @Override public void muteMember(String groupId, String targetUserId, long muteEndTime) {}
-        @Override public GroupJoinResult joinGroup(String groupId, String userId, String reqMsg) { return GroupJoinResult.APPLY_CREATED; }
+        @Override public GroupJoinResult joinGroup(String groupId, String userId, String reqMsg) { return joinResult; }
 
         @Override
         public GroupApplyHandleResult respondJoinRequest(String groupId, String userId, String operatorId, String handleMsg, boolean agreed) {
@@ -153,5 +188,20 @@ class GroupHandlerApplyTest {
         @Override public List<GroupInformation> searchGroups(String keyword, int limit) { return List.of(); }
         @Override public IncrementalSyncResult<String> getIncrementalGroups(String userId, long version) { return new IncrementalSyncResult<>(List.of(), version, false); }
         @Override public IncrementalSyncResult<GroupMemberInformation> getIncrementalMembers(String groupId, long version) { return new IncrementalSyncResult<>(List.of(), version, false); }
+    }
+
+    private static class RecordingGroupSystemMessagePublisher implements GroupSystemMessagePublisher {
+        int memberJoinedCalls;
+        String groupId;
+        String userId;
+        String operatorId;
+
+        @Override
+        public void memberJoined(String groupId, String userId, String operatorId) {
+            memberJoinedCalls++;
+            this.groupId = groupId;
+            this.userId = userId;
+            this.operatorId = operatorId;
+        }
     }
 }
