@@ -22,6 +22,7 @@ import com.im.core.handler.unified.LoginHandler;
 import com.im.core.handler.unified.MessageHandler;
 import com.im.core.handler.unified.RegisterHandler;
 import com.im.core.handler.unified.RevokeHandler;
+import com.im.core.handler.unified.SystemMessageHandler;
 import com.im.core.handler.unified.TelemetryInterceptor;
 import com.im.core.handler.unified.UserHandler;
 import com.im.core.group.DefaultGroupSystemMessagePublisher;
@@ -114,6 +115,13 @@ final class DispatcherFactory {
         dispatcher.registerHandlers(new ConversationHandler(
                         dependencies.business().conversationManager(), conversationAccessChecker),
                 Operation.CONVERSATION_LIST, Operation.CONVERSATION_SET, Operation.CONVERSATION_READ);
+        dispatcher.registerHandlers(new SystemMessageHandler(
+                        dependencies.storage().systemMessageStore(),
+                        dependencies.business().userManager(),
+                        dependencies.runtime().systemMessageNotifier()),
+                Operation.SYSTEM_CHANNEL_LIST, Operation.SYSTEM_MESSAGE_LIST, Operation.SYSTEM_MESSAGE_DETAIL,
+                Operation.SYSTEM_MESSAGE_READ, Operation.SYSTEM_MESSAGE_READ_ALL,
+                Operation.SYSTEM_MESSAGE_UNREAD_COUNT, Operation.ADMIN_SYSTEM_MESSAGE_PUBLISH);
         dispatcher.registerHandler(Operation.LOGIN,
                 new LoginHandler(loginUseCase, dependencies.runtime().sessionManager(), dependencies.cluster().routeTable(),
                         dependencies.nodeId(), dependencies.cluster().clusterMessageBus(),

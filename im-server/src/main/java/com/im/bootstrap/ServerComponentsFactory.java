@@ -14,6 +14,8 @@ import com.im.api.INodeDiscovery;
 import com.im.api.IRouteTable;
 import com.im.api.ISequenceManager;
 import com.im.api.ISingleMessageStore;
+import com.im.api.ISystemMessageStore;
+import com.im.api.SystemMessageNotifier;
 import com.im.api.IUserManager;
 import com.im.api.MultiLoginStrategy;
 import com.im.api.NodeInformation;
@@ -65,6 +67,8 @@ import com.im.core.session.SessionManager;
 import com.im.core.store.DbMessageStore;
 import com.im.core.store.GroupMessageStoreAdapter;
 import com.im.core.store.SingleMessageStoreAdapter;
+import com.im.core.system.ClusterAwareSystemMessageNotifier;
+import com.im.core.system.DbSystemMessageStore;
 import com.im.core.user.CachedUserManager;
 import com.im.core.user.DbUserManager;
 import com.im.core.serialization.jackson.JacksonSerializer;
@@ -111,6 +115,7 @@ final class ServerComponentsFactory {
         ClusterDependencies cluster = createCluster(redisConfig, runtime.sessionManager(), nodeId);
         runtime.friendApplyNotifier().bindCluster(cluster.routeTable(), cluster.clusterMessageBus());
         runtime.groupApplyNotifier().bindCluster(cluster.routeTable(), cluster.clusterMessageBus());
+        runtime.systemMessageNotifier().bindCluster(cluster.routeTable(), cluster.clusterMessageBus());
         BusinessDependencies business = createBusiness(config, redisConfig, cluster.routeTable());
         StorageDependencies storage = createStorage(config, redisConfig, nodeId, business.retryExecutor());
         CallDependencies call = createCall(config, storage.messageQueue(), business.groupManager(), redisConfig);
@@ -151,7 +156,8 @@ final class ServerComponentsFactory {
                 new PendingAcknowledgementManager(),
                 IMExecutors.newVirtualThreadExecutor("im-dispatch"),
                 new RuntimeFriendApplyNotifier(nodeId, sessionManager),
-                new RuntimeGroupApplyNotifier(nodeId, sessionManager));
+                new RuntimeGroupApplyNotifier(nodeId, sessionManager),
+                new RuntimeSystemMessageNotifier(nodeId, sessionManager));
     }
 
     private static ClusterDependencies createCluster(RedisConfiguration redisConfig,
@@ -236,7 +242,7 @@ final class ServerComponentsFactory {
                 config.getInt("im.minio.presign-expire-seconds", 900));
         return new StorageDependencies(
                 sequenceManager, messageStore, singleMessageStore, groupMessageStore, messageQueue,
-                fileStorage, directFileTransferUseCase);
+                fileStorage, directFileTransferUseCase, new DbSystemMessageStore());
     }
 
     private static CallDependencies createCall(Config config, IMessageQueue messageQueue,
@@ -279,6 +285,7 @@ final class ServerComponentsFactory {
         cluster.clusterMessageBus().subscribe("CLUSTER_COMMAND", new ClusterSessionCommandHandler(runtime.sessionManager()));
         cluster.clusterMessageBus().subscribe("CLUSTER_COMMAND", runtime.friendApplyNotifier()::handleClusterPush);
         cluster.clusterMessageBus().subscribe("CLUSTER_COMMAND", runtime.groupApplyNotifier()::handleClusterPush);
+        cluster.clusterMessageBus().subscribe("CLUSTER_COMMAND", runtime.systemMessageNotifier()::handleClusterPush);
         return new ConsumerDependencies(persistenceConsumer, deliveryConsumer);
     }
 
@@ -429,11 +436,36 @@ final class ServerComponentsFactory {
         }
     }
 
+    private static final class RuntimeSystemMessageNotifier implements SystemMessageNotifier {
+        private final String nodeId;
+        private final SessionManager sessionManager;
+        private volatile ClusterAwareSystemMessageNotifier delegate;
+
+        private RuntimeSystemMessageNotifier(String nodeId, SessionManager sessionManager) {
+            this.nodeId = nodeId;
+            this.sessionManager = sessionManager;
+        }
+
+        void bindCluster(IRouteTable routeTable, IClusterMessageBus clusterMessageBus) {
+            this.delegate = new ClusterAwareSystemMessageNotifier(nodeId, sessionManager, routeTable, clusterMessageBus);
+        }
+
+        @Override
+        public void notify(java.util.List<String> userIds, com.im.api.SystemMessageSummary summary) {
+            if (delegate != null) delegate.notify(userIds, summary);
+        }
+
+        void handleClusterPush(com.im.api.ClusterMessage message) {
+            if (delegate != null) delegate.handleClusterPush(message);
+        }
+    }
+
     record RuntimeDependencies(SessionManager sessionManager,
                                PendingAcknowledgementManager pendingAcknowledgementManager,
                                ExecutorService virtualExecutor,
                                RuntimeFriendApplyNotifier friendApplyNotifier,
-                               RuntimeGroupApplyNotifier groupApplyNotifier) {
+                               RuntimeGroupApplyNotifier groupApplyNotifier,
+                               RuntimeSystemMessageNotifier systemMessageNotifier) {
     }
 
     record ClusterDependencies(IRouteTable routeTable,
@@ -457,7 +489,8 @@ final class ServerComponentsFactory {
                                IGroupMessageStore groupMessageStore,
                                IMessageQueue messageQueue,
                                IFileStorageService fileStorage,
-                               DirectFileTransferUseCase directFileTransferUseCase) {
+                               DirectFileTransferUseCase directFileTransferUseCase,
+                               ISystemMessageStore systemMessageStore) {
     }
 
     record CallDependencies(ICallManager callManager,

@@ -14,6 +14,7 @@ import com.im.api.IMessageStore;
 import com.im.api.IRouteTable;
 import com.im.api.ISequenceManager;
 import com.im.api.ISingleMessageStore;
+import com.im.api.ISystemMessageStore;
 import com.im.api.IUserManager;
 import com.im.api.Operation;
 import com.im.common.retry.RetryExecutor;
@@ -73,6 +74,7 @@ class DispatcherFactoryTest {
                         new PendingAcknowledgementManager(),
                         fake(ExecutorService.class),
                         null,
+                        null,
                         null),
                 new ServerComponentsFactory.ClusterDependencies(
                         fake(IRouteTable.class),
@@ -94,7 +96,8 @@ class DispatcherFactoryTest {
                         fake(IGroupMessageStore.class),
                         fake(IMessageQueue.class),
                         fake(IFileStorageService.class),
-                        directFileTransferUseCase()),
+                        directFileTransferUseCase(),
+                        fake(ISystemMessageStore.class)),
                 new ServerComponentsFactory.CallDependencies(
                         fake(ICallManager.class),
                         (CallStateManager) null,

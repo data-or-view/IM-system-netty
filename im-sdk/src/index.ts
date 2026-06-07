@@ -37,7 +37,7 @@ import { EventBus } from "./event-bus.js";
 export * from "./types.js";
 
 // ── 内部导入 ──
-import { type ConnectionState, type IMEvents, type IMOptions, type Message, type FriendApply, type GroupApply, type MessageRevoked, type TokenPair, type WSPush, IMError, PUSH_OP } from "./types.js";
+import { type ConnectionState, type IMEvents, type IMOptions, type Message, type FriendApply, type GroupApply, type SystemMessageSummary, type MessageRevoked, type TokenPair, type WSPush, IMError, PUSH_OP } from "./types.js";
 import { WsTransport } from "./transport/ws.js";
 import { HttpTransport } from "./transport/http.js";
 import { UserAPI } from "./api/user.js";
@@ -46,6 +46,7 @@ import { GroupAPI } from "./api/group.js";
 import { MessageAPI } from "./api/message.js";
 import { ConversationAPI } from "./api/conversation.js";
 import { FileAPI } from "./api/file.js";
+import { SystemAPI } from "./api/system.js";
 
 // ── SDK 主类 ──
 
@@ -62,6 +63,8 @@ export class IMSDK {
   conversation: ConversationAPI;
   /** 文件模块 */
   file: FileAPI;
+  /** 系统通知模块 */
+  system: SystemAPI;
 
   private transport: WsTransport;
   private httpTransport?: HttpTransport;
@@ -103,6 +106,7 @@ export class IMSDK {
     this.group = new GroupAPI(this.httpTransport);
     this.message = new MessageAPI(this.transport, this.httpTransport);
     this.conversation = new ConversationAPI(this.httpTransport);
+    this.system = new SystemAPI(this.httpTransport);
 
     // 转发 push 事件到 SDK 级别 listener
     this.transport.bus.on("push", (raw: unknown) => {
@@ -114,6 +118,8 @@ export class IMSDK {
         this.bus.emit("friendRequest", push.data as FriendApply);
       } else if (push.op === PUSH_OP.GROUP_APPLY) {
         this.bus.emit("groupApply", push.data as GroupApply);
+      } else if (push.op === PUSH_OP.SYSTEM_MESSAGE) {
+        this.bus.emit("systemMessage", push.data as SystemMessageSummary);
       } else if (push.op === PUSH_OP.MESSAGE_REVOKED) {
         this.bus.emit("messageRevoked", push.data as MessageRevoked);
       }

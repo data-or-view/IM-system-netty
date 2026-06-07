@@ -80,6 +80,15 @@ public enum Operation {
     FILE_MULTIPART_COMPLETE("file.multipart.complete", "POST", "/api/file/multipart/complete", true, TransportType.HTTP_ONLY),
     FILE_MULTIPART_ABORT("file.multipart.abort", "POST", "/api/file/multipart/abort", true, TransportType.HTTP_ONLY),
 
+    // ── 系统通知 ──
+    SYSTEM_CHANNEL_LIST("system.channel.list", "GET", "/api/system/channels", true, TransportType.HTTP_ONLY),
+    SYSTEM_MESSAGE_LIST("system.message.list", "GET", "/api/system/messages", true, TransportType.HTTP_ONLY),
+    SYSTEM_MESSAGE_DETAIL("system.message.detail", "GET", "/api/system/messages/detail", true, TransportType.HTTP_ONLY),
+    SYSTEM_MESSAGE_READ("system.message.read", "POST", "/api/system/messages/read", true, TransportType.HTTP_ONLY),
+    SYSTEM_MESSAGE_READ_ALL("system.message.read_all", "POST", "/api/system/messages/read-all", true, TransportType.HTTP_ONLY),
+    SYSTEM_MESSAGE_UNREAD_COUNT("system.message.unread_count", "GET", "/api/system/messages/unread-count", true, TransportType.HTTP_ONLY),
+    ADMIN_SYSTEM_MESSAGE_PUBLISH("admin.system.message.publish", "POST", "/api/admin/system/messages/publish", true, TransportType.HTTP_ONLY),
+
     // ── WS 独有（无 HTTP 映射） ──
     LOGIN("login", null, null, false, TransportType.WS_ONLY),
     REGISTER("register", null, null, false, TransportType.WS_ONLY),

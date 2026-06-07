@@ -10,7 +10,8 @@
     "scenario:smoke": "npm run build && node dist/scenarios/smoke.js",
     "scenario:group-chat": "npm run build && node dist/scenarios/group-chat.js",
     "scenario:group-call": "npm run build && node dist/scenarios/group-call.js",
-    "scenario:group-join-system": "npm run build && node dist/scenarios/group-join-system-message.js"
+    "scenario:group-join-system": "npm run build && node dist/scenarios/group-join-system-message.js",
+    "scenario:system-message": "npm run build && node dist/scenarios/system-message.js"
   },
   "dependencies": {
     "ws": "^8.20.1"

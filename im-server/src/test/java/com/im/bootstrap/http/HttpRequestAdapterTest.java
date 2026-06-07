@@ -62,7 +62,7 @@ class HttpRequestAdapterTest {
                 HttpMethod.OPTIONS,
                 "/api/user/login"
         );
-        request.headers().set(HttpHeaderNames.ORIGIN, "http://127.0.0.1:5173");
+        request.headers().set(HttpHeaderNames.ORIGIN, "http://127.0.0.1:39073");
         request.headers().set(HttpHeaderNames.ACCESS_CONTROL_REQUEST_METHOD, "POST");
         request.headers().set(HttpHeaderNames.ACCESS_CONTROL_REQUEST_HEADERS, "content-type,x-request-id");
 
@@ -71,11 +71,32 @@ class HttpRequestAdapterTest {
         FullHttpResponse response = channel.readOutbound();
         assertNotNull(response);
         assertEquals(HttpResponseStatus.OK, response.status());
-        assertEquals("*", response.headers().get(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN));
+        assertEquals("http://127.0.0.1:39073", response.headers().get(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN));
         String allowHeaders = response.headers().get(HttpHeaderNames.ACCESS_CONTROL_ALLOW_HEADERS);
         assertNotNull(allowHeaders);
         assertEquals(true, allowHeaders.toLowerCase().contains("x-request-id"));
         assertEquals("X-Request-Id", response.headers().get(HttpHeaderNames.ACCESS_CONTROL_EXPOSE_HEADERS));
+    }
+
+    @Test
+    void corsPreflightDoesNotEchoUnknownOrigin() {
+        ApiDispatcher dispatcher = new ApiDispatcher();
+        ExecutorService directExecutor = new DirectExecutorService();
+        EmbeddedChannel channel = new EmbeddedChannel(new HttpRequestAdapter(dispatcher, directExecutor));
+        DefaultFullHttpRequest request = new DefaultFullHttpRequest(
+                HttpVersion.HTTP_1_1,
+                HttpMethod.OPTIONS,
+                "/api/user/login"
+        );
+        request.headers().set(HttpHeaderNames.ORIGIN, "http://127.0.0.1:5173");
+        request.headers().set(HttpHeaderNames.ACCESS_CONTROL_REQUEST_METHOD, "POST");
+
+        assertFalse(channel.writeInbound(request));
+
+        FullHttpResponse response = channel.readOutbound();
+        assertNotNull(response);
+        assertEquals(HttpResponseStatus.OK, response.status());
+        assertEquals(null, response.headers().get(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN));
     }
 
     @Test

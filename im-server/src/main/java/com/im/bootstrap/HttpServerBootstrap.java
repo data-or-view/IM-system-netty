@@ -38,7 +38,9 @@ public class HttpServerBootstrap {
      */
     public static Channel start(EventLoopGroup bossGroup, EventLoopGroup workerGroup,
                                 int port, boolean useEpoll,
+                                String corsAllowedOrigins,
                                 ChannelHandler httpHandler) throws InterruptedException {
+        com.im.bootstrap.http.CorsConfig.configure(corsAllowedOrigins);
         ServerBootstrap httpBootstrap = new ServerBootstrap()
                 .group(bossGroup, workerGroup)
                 .channel(useEpoll ? EpollServerSocketChannel.class : NioServerSocketChannel.class)

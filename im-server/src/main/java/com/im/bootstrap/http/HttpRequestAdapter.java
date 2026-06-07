@@ -17,12 +17,9 @@ import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.handler.codec.http.FullHttpRequest;
+import io.netty.handler.codec.http.HttpHeaderNames;
 import io.netty.handler.codec.http.HttpMethod;
-import io.netty.handler.codec.http.HttpUtil;
-import io.netty.handler.codec.http.multipart.DefaultHttpDataFactory;
-import io.netty.handler.codec.http.multipart.FileUpload;
-import io.netty.handler.codec.http.multipart.HttpPostRequestDecoder;
-import io.netty.handler.codec.http.multipart.InterfaceHttpData;
+import io.netty.handler.codec.http.HttpResponseStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -67,9 +64,10 @@ public class HttpRequestAdapter extends SimpleChannelInboundHandler<FullHttpRequ
 
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, FullHttpRequest req) {
+        String requestOrigin = req.headers().get(HttpHeaderNames.ORIGIN);
         // CORS 预检
         if (req.method() == HttpMethod.OPTIONS) {
-            JsonResponse.ok(ctx, Map.of());
+            JsonResponse.ok(ctx, Map.of(), null, requestOrigin);
             return;
         }
 
@@ -84,7 +82,7 @@ public class HttpRequestAdapter extends SimpleChannelInboundHandler<FullHttpRequ
         Operation operation = Operation.fromHttp(method, path);
         if (operation == null) {
             log.warn("No route: {} {}", method, path);
-            JsonResponse.notFound(ctx, "no route: " + method + " " + path);
+            JsonResponse.error(ctx, HttpResponseStatus.NOT_FOUND, "no route: " + method + " " + path, null, requestOrigin);
             return;
         }
 
@@ -125,7 +123,7 @@ public class HttpRequestAdapter extends SimpleChannelInboundHandler<FullHttpRequ
                         params.putAll(bodyMap);
                     } catch (Exception e) {
                         log.warn("Invalid JSON body for {} {}: {}", method, path, e.getMessage());
-                        JsonResponse.imError(ctx, ImErrorCode.BAD_REQUEST, "invalid json body");
+                        JsonResponse.imError(ctx, ImErrorCode.BAD_REQUEST, "invalid json body", null, requestOrigin);
                         return;
                     }
                 }
@@ -138,6 +136,9 @@ public class HttpRequestAdapter extends SimpleChannelInboundHandler<FullHttpRequ
         String auth = req.headers().get(ImHeaders.AUTHORIZATION);
         if (auth != null) {
             headers.put(ImHeaders.AUTHORIZATION, auth);
+        }
+        if (requestOrigin != null) {
+            headers.put("Origin", requestOrigin);
         }
         String requestId = RequestIds.firstNonBlank(
                 req.headers().get(ImHeaders.REQUEST_ID),

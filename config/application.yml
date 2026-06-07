@@ -27,6 +27,8 @@ im:
   http:
     enabled: true                # 启用 HTTP REST API
     port: 8082                   # HTTP REST 端口
+    cors:
+      allowed-origins: "http://127.0.0.1:39073,http://localhost:39073"
 
   # ── 节点 ──
   node:

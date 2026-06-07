@@ -30,6 +30,9 @@ import com.im.core.db.mapper.SequenceMapper;
 import com.im.core.db.mapper.SeqUserMapper;
 import com.im.core.db.mapper.SyncChangeMapper;
 import com.im.core.db.mapper.SyncVersionMapper;
+import com.im.core.db.mapper.SystemChannelMapper;
+import com.im.core.db.mapper.SystemMessageInboxMapper;
+import com.im.core.db.mapper.SystemMessageMapper;
 import com.im.core.db.mapper.UserMapper;
 
 import javax.sql.DataSource;
@@ -180,6 +183,9 @@ public final class MyBatisPlusFactory {
         configuration.addMapper(SyncVersionMapper.class);
         configuration.addMapper(SyncChangeMapper.class);
         configuration.addMapper(ObjectMapper.class);
+        configuration.addMapper(SystemChannelMapper.class);
+        configuration.addMapper(SystemMessageMapper.class);
+        configuration.addMapper(SystemMessageInboxMapper.class);
 
         return new MybatisSqlSessionFactoryBuilder().build(configuration);
     }

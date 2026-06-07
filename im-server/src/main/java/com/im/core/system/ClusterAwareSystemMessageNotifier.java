@@ -1,14 +1,15 @@
-package com.im.core.friend;
+package com.im.core.system;
 
 import com.im.api.ClusterCommand;
 import com.im.api.ClusterMessage;
-import com.im.api.FriendApply;
 import com.im.api.IClusterMessageBus;
 import com.im.api.IConnectionSession;
 import com.im.api.IRouteTable;
 import com.im.api.ISessionManager;
 import com.im.api.ProtocolFields;
 import com.im.api.RouteBinding;
+import com.im.api.SystemMessageNotifier;
+import com.im.api.SystemMessageSummary;
 import com.im.bootstrap.ws.WsPushEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -17,21 +18,21 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-public class ClusterAwareFriendApplyNotifier implements FriendApplyNotifier {
+public class ClusterAwareSystemMessageNotifier implements SystemMessageNotifier {
 
-    public static final String OP_FRIEND_APPLY = "friend.apply";
+    public static final String OP_SYSTEM_MESSAGE = "system.message";
 
-    private static final Logger log = LoggerFactory.getLogger(ClusterAwareFriendApplyNotifier.class);
+    private static final Logger log = LoggerFactory.getLogger(ClusterAwareSystemMessageNotifier.class);
 
     private final String localNodeId;
     private final ISessionManager sessionManager;
     private final IRouteTable routeTable;
     private final IClusterMessageBus clusterMessageBus;
 
-    public ClusterAwareFriendApplyNotifier(String localNodeId,
-                                           ISessionManager sessionManager,
-                                           IRouteTable routeTable,
-                                           IClusterMessageBus clusterMessageBus) {
+    public ClusterAwareSystemMessageNotifier(String localNodeId,
+                                             ISessionManager sessionManager,
+                                             IRouteTable routeTable,
+                                             IClusterMessageBus clusterMessageBus) {
         this.localNodeId = localNodeId;
         this.sessionManager = sessionManager;
         this.routeTable = routeTable;
@@ -39,13 +40,11 @@ public class ClusterAwareFriendApplyNotifier implements FriendApplyNotifier {
     }
 
     @Override
-    public void notifyApplyCreated(String toUserId, FriendApply apply) {
-        push(toUserId, apply);
-    }
-
-    @Override
-    public void notifyApplyHandled(String fromUserId, FriendApply apply) {
-        push(fromUserId, apply);
+    public void notify(List<String> userIds, SystemMessageSummary summary) {
+        WsPushEvent event = new WsPushEvent(OP_SYSTEM_MESSAGE, toData(summary));
+        for (String userId : userIds != null ? userIds : List.<String>of()) {
+            push(userId, event);
+        }
     }
 
     public void handleClusterPush(ClusterMessage message) {
@@ -55,13 +54,12 @@ public class ClusterAwareFriendApplyNotifier implements FriendApplyNotifier {
         ClusterCommand command = message.getCommand();
         Object op = command.payload().get(ProtocolFields.OP);
         Object data = command.payload().get(ProtocolFields.DATA);
-        if (OP_FRIEND_APPLY.equals(op)) {
-            pushLocal(command.userId(), new WsPushEvent(OP_FRIEND_APPLY, data));
+        if (OP_SYSTEM_MESSAGE.equals(op)) {
+            pushLocal(command.userId(), new WsPushEvent(OP_SYSTEM_MESSAGE, data));
         }
     }
 
-    private void push(String userId, FriendApply apply) {
-        WsPushEvent event = new WsPushEvent(OP_FRIEND_APPLY, toData(apply));
+    private void push(String userId, WsPushEvent event) {
         List<RouteBinding> bindings = routeTable != null ? routeTable.lookupAllBindings(userId) : List.of();
         for (RouteBinding binding : bindings) {
             if (binding.isExpired(System.currentTimeMillis())) {
@@ -85,7 +83,7 @@ public class ClusterAwareFriendApplyNotifier implements FriendApplyNotifier {
 
     private void forward(String userId, WsPushEvent event, String targetNodeId) {
         if (clusterMessageBus == null) {
-            log.warn("Remote friend apply push dropped: userId={}, targetNode={}", userId, targetNodeId);
+            log.warn("Remote system message push dropped: userId={}, targetNode={}", userId, targetNodeId);
             return;
         }
         Map<String, Object> payload = new LinkedHashMap<>();
@@ -94,16 +92,15 @@ public class ClusterAwareFriendApplyNotifier implements FriendApplyNotifier {
         clusterMessageBus.sendToNode(ClusterMessage.fromCommand(localNodeId, ClusterCommand.pushEvent(userId, payload)), targetNodeId);
     }
 
-    private static Map<String, Object> toData(FriendApply apply) {
+    private static Map<String, Object> toData(SystemMessageSummary summary) {
         Map<String, Object> data = new LinkedHashMap<>();
-        data.put("fromUserId", apply.getFromUserId());
-        data.put("toUserId", apply.getToUserId());
-        data.put("reqMsg", apply.getReqMsg());
-        data.put("handlerUserId", apply.getHandlerUserId());
-        data.put("handleMsg", apply.getHandleMsg());
-        data.put("handleResult", apply.getHandleResult().name());
-        data.put("createTime", apply.getCreateTime());
-        data.put("handleTime", apply.getHandleTime());
+        data.put("messageId", summary.getMessageId());
+        data.put("channelId", summary.getChannelId());
+        data.put("channelName", summary.getChannelName());
+        data.put("title", summary.getTitle());
+        data.put("summary", summary.getSummary());
+        data.put("priority", summary.getPriority());
+        data.put("createdAt", summary.getCreatedAt());
         return data;
     }
 }

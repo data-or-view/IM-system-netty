@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { useStore } from "@/store/store";
+import { SYSTEM_CONVERSATION_ID, useStore } from "@/store/store";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
@@ -15,6 +15,7 @@ import { Send, Paperclip, MoreHorizontal, Undo2, Info, Phone, Video } from "luci
 import { toast } from "sonner";
 import { im } from "@/sdk/im-sdk";
 import { MessageContentRenderer } from "@/components/MessageContentRenderer";
+import SystemMessagePanel from "@/components/SystemMessagePanel";
 import { ConversationType, MessageContentType, toMessageContentType, type GroupCallSession, type OutgoingMessageContentTypeValue, type SendMessageAck } from "im-sdk";
 import { useCall } from "@/components/call/CallProvider";
 
@@ -30,10 +31,12 @@ export default function ChatArea() {
   const conv = state.conversations.find(
     (c) => c.conversationId === state.activeConversationId
   );
+  const isSystemConversation = state.activeConversationId === SYSTEM_CONVERSATION_ID;
   const messages = conv ? state.messages[conv.conversationId] || [] : [];
 
   // Load history when conversation changes
   useEffect(() => {
+    if (isSystemConversation) return;
     if (!conv?.conversationId) return;
     if (!conv.latestMsg && !conv.latestMsgSendTime && messages.length === 0) return;
     const loadHistory = async () => {
@@ -62,7 +65,7 @@ export default function ChatArea() {
       }
     };
     loadHistory();
-  }, [conv?.conversationId, conv?.latestMsg, conv?.latestMsgSendTime, dispatch, messages.length]);
+  }, [conv?.conversationId, conv?.latestMsg, conv?.latestMsgSendTime, dispatch, isSystemConversation, messages.length]);
 
   useEffect(() => {
     let cancelled = false;
@@ -104,7 +107,7 @@ export default function ChatArea() {
   }, [conv?.conversationType, conv?.groupId, messages]);
 
   const handleSend = () => {
-    if (!input.trim() || !conv) return;
+    if (!input.trim() || !conv || isSystemConversation) return;
     const content = input.trim();
     setInput("");
 
@@ -212,7 +215,7 @@ export default function ChatArea() {
   }, [dispatch]);
 
   const handleHeaderClick = () => {
-    if (!conv) return;
+    if (!conv || isSystemConversation) return;
     if (conv.conversationType === ConversationType.GROUP && conv.groupId) {
       navigate(`/chat/group/${conv.groupId}`);
     } else if (conv.userId) {
@@ -275,6 +278,10 @@ export default function ChatArea() {
         </div>
       </div>
     );
+  }
+
+  if (isSystemConversation) {
+    return <SystemMessagePanel />;
   }
 
   return (

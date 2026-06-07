@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useStore, type Conversation, type FriendInfo, type GroupInfo } from "@/store/store";
+import { SYSTEM_CONVERSATION_ID, useStore, type Conversation, type FriendInfo, type GroupInfo } from "@/store/store";
 import { ConversationType, MessageReceiveOption } from "im-sdk";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -80,7 +80,7 @@ export default function Sidebar() {
           </div>
 
           <div className="grid grid-cols-3 rounded-lg bg-muted p-1">
-            <TabButton active={tab === "chats"} onClick={() => setTab("chats")} label="聊天" count={state.conversations.length}>
+            <TabButton active={tab === "chats"} onClick={() => setTab("chats")} label="聊天" count={state.conversations.length + 1}>
               <MessageCircle className="h-3.5 w-3.5" />
             </TabButton>
             <TabButton active={tab === "friends"} onClick={() => setTab("friends")} label="好友" count={state.friends.length}>
@@ -176,12 +176,50 @@ function ChatList() {
       title="正在聊天"
       description="最近会话和未读消息"
       empty={state.connected ? "暂无正在聊天的会话" : "未连接到服务器"}
-      isEmpty={state.conversations.length === 0}
+      isEmpty={false}
     >
+      <SystemConversationItem />
       {state.conversations.map((conv) => (
         <ConversationItem key={conv.conversationId} conv={conv} />
       ))}
     </ListShell>
+  );
+}
+
+function SystemConversationItem() {
+  const { state, dispatch } = useStore();
+  const isActive = state.activeConversationId === SYSTEM_CONVERSATION_ID;
+  const latest = state.latestSystemMessage;
+  const subtitle = latest?.summary || latest?.title || "平台通知、业务提醒和账号消息";
+
+  return (
+    <button
+      onClick={() => dispatch({ type: "SET_ACTIVE_CONVERSATION", conversationId: SYSTEM_CONVERSATION_ID })}
+      className={cn(
+        "flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-accent/50",
+        isActive && "bg-accent"
+      )}
+    >
+      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground">
+        <Bell className="h-5 w-5" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center justify-between gap-2">
+          <span className="truncate text-sm font-medium">系统通知</span>
+          {latest?.createdAt && (
+            <span className="shrink-0 text-xs text-muted-foreground">{formatTime(latest.createdAt)}</span>
+          )}
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          <span className="truncate text-xs text-muted-foreground">{subtitle}</span>
+          {state.systemUnreadCount > 0 && (
+            <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-primary px-1 text-[10px] text-primary-foreground">
+              {state.systemUnreadCount > 99 ? "99+" : state.systemUnreadCount}
+            </span>
+          )}
+        </div>
+      </div>
+    </button>
   );
 }
 

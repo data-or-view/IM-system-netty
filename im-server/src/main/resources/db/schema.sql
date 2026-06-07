@@ -372,7 +372,62 @@ CREATE TABLE IF NOT EXISTS im_sync_changes (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='增量同步变更日志表';
 
 -- ============================================================
--- 17. 消息状态机说明
+-- 17. 系统信息频道
+-- ============================================================
+CREATE TABLE IF NOT EXISTS im_system_channels (
+    id              BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '物理主键',
+    channel_id      VARCHAR(64)  NOT NULL COMMENT '频道ID',
+    channel_name    VARCHAR(128) NOT NULL COMMENT '频道名称',
+    channel_type    VARCHAR(64)  NOT NULL DEFAULT 'system' COMMENT '频道类型',
+    description     VARCHAR(255) NOT NULL DEFAULT '' COMMENT '描述',
+    status          TINYINT      NOT NULL DEFAULT 1 COMMENT '状态: 1=启用, 0=禁用',
+    created_at      BIGINT       NOT NULL DEFAULT 0 COMMENT '创建时间',
+    updated_at      BIGINT       NOT NULL DEFAULT 0 COMMENT '更新时间',
+    UNIQUE KEY uk_channel_id (channel_id),
+    INDEX idx_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='系统信息频道表';
+
+-- ============================================================
+-- 18. 系统信息主体
+-- ============================================================
+CREATE TABLE IF NOT EXISTS im_system_messages (
+    id              BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '物理主键',
+    message_id      VARCHAR(64)  NOT NULL COMMENT '系统消息ID',
+    channel_id      VARCHAR(64)  NOT NULL COMMENT '频道ID',
+    title           VARCHAR(255) NOT NULL COMMENT '标题',
+    summary         VARCHAR(512) NOT NULL DEFAULT '' COMMENT '摘要',
+    content         TEXT         NOT NULL COMMENT '正文',
+    content_type    VARCHAR(32)  NOT NULL DEFAULT 'text' COMMENT '内容类型',
+    sender_type     VARCHAR(32)  NOT NULL DEFAULT 'system' COMMENT '发送者类型',
+    sender_id       VARCHAR(64)  NOT NULL DEFAULT 'im-system' COMMENT '发送者ID',
+    priority        INT          NOT NULL DEFAULT 0 COMMENT '优先级',
+    send_scope      VARCHAR(32)  NOT NULL DEFAULT 'USER_LIST' COMMENT '发送范围',
+    created_at      BIGINT       NOT NULL DEFAULT 0 COMMENT '创建时间',
+    expire_at       BIGINT       NOT NULL DEFAULT 0 COMMENT '过期时间',
+    UNIQUE KEY uk_message_id (message_id),
+    INDEX idx_channel_created (channel_id, created_at),
+    INDEX idx_created (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='系统信息主体表';
+
+-- ============================================================
+-- 19. 系统信息收件箱
+-- ============================================================
+CREATE TABLE IF NOT EXISTS im_system_message_inbox (
+    id              BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '物理主键',
+    message_id      VARCHAR(64) NOT NULL COMMENT '系统消息ID',
+    user_id         VARCHAR(64) NOT NULL COMMENT '接收用户ID',
+    channel_id      VARCHAR(64) NOT NULL COMMENT '频道ID',
+    read_at         BIGINT      NOT NULL DEFAULT 0 COMMENT '已读时间',
+    deleted         TINYINT     NOT NULL DEFAULT 0 COMMENT '是否删除',
+    archived        TINYINT     NOT NULL DEFAULT 0 COMMENT '是否归档',
+    created_at      BIGINT      NOT NULL DEFAULT 0 COMMENT '创建时间',
+    UNIQUE KEY uk_user_message (user_id, message_id),
+    INDEX idx_user_channel_created (user_id, channel_id, created_at),
+    INDEX idx_user_unread (user_id, read_at, deleted)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='系统信息收件箱表';
+
+-- ============================================================
+-- 20. 消息状态机说明
 -- ============================================================
 -- im_messages.status:
 --   0 = 正常

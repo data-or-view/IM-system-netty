@@ -73,6 +73,7 @@ export const PUSH_OP = {
   MESSAGE: "message",
   FRIEND_APPLY: "friend.apply",
   GROUP_APPLY: "group.apply",
+  SYSTEM_MESSAGE: "system.message",
   MESSAGE_REVOKED: "msg_revoke",
 } as const;
 
@@ -250,6 +251,42 @@ export interface GroupApply {
   inviterUserId?: string;
   createTime: number;
   handledTime?: number;
+}
+
+// ── System Message ──
+
+export interface SystemChannel {
+  channelId: string;
+  channelName: string;
+  channelType?: string;
+  description?: string;
+  status?: number;
+  createdAt?: number;
+  updatedAt?: number;
+}
+
+export interface SystemMessageSummary {
+  messageId: string;
+  channelId: string;
+  channelName?: string;
+  title: string;
+  summary?: string;
+  priority?: number;
+  createdAt: number;
+}
+
+export interface SystemMessageInboxItem extends SystemMessageSummary {
+  userId: string;
+  content?: string;
+  contentType?: string;
+  readAt?: number;
+  deleted?: boolean;
+  archived?: boolean;
+}
+
+export interface SystemUnreadCount {
+  count: number;
+  byChannel?: Record<string, number>;
 }
 
 // ── Conversation ──
@@ -666,6 +703,8 @@ export interface IMEvents {
   friendRequest: (apply: FriendApply) => void;
   /** 收到加群申请或审批结果 */
   groupApply: (apply: GroupApply) => void;
+  /** 收到系统通知。完整内容通过 system.detail(messageId) 拉取。 */
+  systemMessage: (message: SystemMessageSummary) => void;
   /** 收到消息撤回通知 */
   messageRevoked: (event: MessageRevoked) => void;
   /** 所有服务端推送的兜底事件 */

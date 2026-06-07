@@ -5,6 +5,7 @@ import { MessageAPI } from "../dist/api/message.js";
 import { UserAPI } from "../dist/api/user.js";
 import { FriendAPI } from "../dist/api/friend.js";
 import { GroupAPI } from "../dist/api/group.js";
+import { SystemAPI } from "../dist/api/system.js";
 import { createIM } from "../dist/index.js";
 import { HttpTransport } from "../dist/transport/http.js";
 import { WsTransport } from "../dist/transport/ws.js";
@@ -307,6 +308,36 @@ test("friend and group mutation payloads match backend HTTP contract", async () 
   assert.deepEqual(calls[3], { method: "POST", path: "/api/group/mute/all", body: { groupId: "g1", mute: true } });
 });
 
+test("system API uses system message HTTP endpoints", async () => {
+  const { http, calls } = createHttpCapture((method, path) => {
+    if (path === "/api/system/channels") return { channels: [{ channelId: "wallet", channelName: "钱包通知" }] };
+    if (path === "/api/system/messages") return { messages: [{ messageId: "m1", channelId: "wallet", title: "余额变动" }] };
+    if (path === "/api/system/messages/unread-count") return { count: 1, byChannel: { wallet: 1 } };
+    if (path === "/api/admin/system/messages/publish") return { message: { messageId: "m2", channelId: "wallet", title: "余额变动", createdAt: 1 } };
+    return {};
+  });
+  const systemApi = new SystemAPI(http);
+
+  assert.deepEqual(await systemApi.channels(), [{ channelId: "wallet", channelName: "钱包通知" }]);
+  assert.deepEqual(await systemApi.messages({ channelId: "wallet", onlyUnread: true }), [{ messageId: "m1", channelId: "wallet", title: "余额变动" }]);
+  assert.deepEqual(await systemApi.unreadCount(), { count: 1, byChannel: { wallet: 1 } });
+  assert.deepEqual(await systemApi.publish({
+    channelId: "wallet",
+    title: "余额变动",
+    content: "你的账户收到一笔入账",
+    targetUserIds: ["u1"],
+  }), { messageId: "m2", channelId: "wallet", title: "余额变动", createdAt: 1 });
+
+  assert.deepEqual(calls.map((c) => `${c.method} ${c.path}`), [
+    "GET /api/system/channels",
+    "GET /api/system/messages",
+    "GET /api/system/messages/unread-count",
+    "POST /api/admin/system/messages/publish",
+  ]);
+  assert.deepEqual(calls[1].query, { channelId: "wallet", onlyUnread: true });
+  assert.deepEqual(calls[3].body.targetUserIds, ["u1"]);
+});
+
 test("transport.request rejects immediately when websocket is not connected", async () => {
   const transport = new WsTransport({ requestTimeout: 10_000 });
 
@@ -491,6 +522,27 @@ test("sdk emits typed and raw push events for revoke and unknown pushes", () => 
 
   assert.deepEqual(revoked, [{ conversationId: "c1", seq: 7, revokerId: "u1" }]);
   assert.deepEqual(rawPushes.map((p) => p.op), ["msg_revoke", "conversation.updated"]);
+});
+
+test("sdk emits systemMessage for system message pushes", () => {
+  const im = createIM({ wsUrl: "ws://example.test/ws" });
+  const messages = [];
+  const rawPushes = [];
+  im.on("systemMessage", (message) => messages.push(message));
+  im.on("push", (event) => rawPushes.push(event));
+
+  im.transport.handleMessage(JSON.stringify({
+    op: "system.message",
+    data: {
+      messageId: "m1",
+      channelId: "wallet",
+      title: "余额变动",
+      createdAt: 1,
+    },
+  }));
+
+  assert.deepEqual(messages, [{ messageId: "m1", channelId: "wallet", title: "余额变动", createdAt: 1 }]);
+  assert.equal(rawPushes[0].op, "system.message");
 });
 
 test("sdk treats offline bare message payloads as message pushes", () => {

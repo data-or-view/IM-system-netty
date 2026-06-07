@@ -33,6 +33,10 @@ public class JsonResponse {
         write(ctx, HttpResponseStatus.OK, data, null);
     }
 
+    public static void ok(ChannelHandlerContext ctx, Object data, String requestId, String requestOrigin) {
+        write(ctx, HttpResponseStatus.OK, data, requestId, requestOrigin);
+    }
+
     public static void ok(ChannelHandlerContext ctx, Object data, String requestId) {
         write(ctx, HttpResponseStatus.OK, data, requestId);
     }
@@ -42,11 +46,16 @@ public class JsonResponse {
     }
 
     public static void error(ChannelHandlerContext ctx, HttpResponseStatus status, String message) {
+        error(ctx, status, message, null, null);
+    }
+
+    public static void error(ChannelHandlerContext ctx, HttpResponseStatus status, String message,
+                             String requestId, String requestOrigin) {
         try {
             String json = MAPPER.writeValueAsString(new ErrorBody(status.code(), status.code(), message));
-            writeRaw(ctx, status, json);
+            writeRaw(ctx, status, json, requestId, requestOrigin);
         } catch (Exception e) {
-            writeRaw(ctx, status, "{\"code\":" + status.code() + ",\"imCode\":" + status.code() + ",\"message\":\"" + message + "\"}");
+            writeRaw(ctx, status, "{\"code\":" + status.code() + ",\"imCode\":" + status.code() + ",\"message\":\"" + message + "\"}", requestId, requestOrigin);
         }
     }
 
@@ -59,13 +68,18 @@ public class JsonResponse {
     }
 
     public static void imError(ChannelHandlerContext ctx, ImErrorCode imCode, String detail, String requestId) {
+        imError(ctx, imCode, detail, requestId, null);
+    }
+
+    public static void imError(ChannelHandlerContext ctx, ImErrorCode imCode, String detail,
+                               String requestId, String requestOrigin) {
         HttpResponseStatus httpStatus = toHttpStatus(imCode);
         String msg = detail != null ? detail : imCode.getMessage();
         try {
             String json = MAPPER.writeValueAsString(new ErrorBody(httpStatus.code(), imCode.getCode(), msg));
-            writeRaw(ctx, httpStatus, json, requestId);
+            writeRaw(ctx, httpStatus, json, requestId, requestOrigin);
         } catch (Exception e) {
-            writeRaw(ctx, httpStatus, "{\"code\":" + httpStatus.code() + ",\"imCode\":" + imCode.getCode() + ",\"message\":\"" + msg + "\"}", requestId);
+            writeRaw(ctx, httpStatus, "{\"code\":" + httpStatus.code() + ",\"imCode\":" + imCode.getCode() + ",\"message\":\"" + msg + "\"}", requestId, requestOrigin);
         }
     }
 
@@ -103,9 +117,14 @@ public class JsonResponse {
     }
 
     private static void write(ChannelHandlerContext ctx, HttpResponseStatus status, Object data, String requestId) {
+        write(ctx, status, data, requestId, null);
+    }
+
+    private static void write(ChannelHandlerContext ctx, HttpResponseStatus status, Object data,
+                              String requestId, String requestOrigin) {
         try {
             String json = MAPPER.writeValueAsString(data);
-            writeRaw(ctx, status, json, requestId);
+            writeRaw(ctx, status, json, requestId, requestOrigin);
         } catch (Exception e) {
             writeRaw(ctx, HttpResponseStatus.INTERNAL_SERVER_ERROR,
                     "{\"code\":500,\"message\":\"serialization error\"}");
@@ -117,11 +136,19 @@ public class JsonResponse {
     }
 
     private static void writeRaw(ChannelHandlerContext ctx, HttpResponseStatus status, String json, String requestId) {
+        writeRaw(ctx, status, json, requestId, null);
+    }
+
+    private static void writeRaw(ChannelHandlerContext ctx, HttpResponseStatus status, String json,
+                                 String requestId, String requestOrigin) {
         ByteBuf content = Unpooled.copiedBuffer(json, StandardCharsets.UTF_8);
         FullHttpResponse resp = new DefaultFullHttpResponse(HttpVersion.HTTP_1_1, status, content);
         resp.headers().set(HttpHeaderNames.CONTENT_TYPE, APPLICATION_JSON);
         resp.headers().set(HttpHeaderNames.CONTENT_LENGTH, content.readableBytes());
-        resp.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
+        String allowOrigin = CorsConfig.allowOrigin(requestOrigin);
+        if (!allowOrigin.isBlank()) {
+            resp.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, allowOrigin);
+        }
         resp.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_METHODS, CORS_ALLOW_METHODS);
         resp.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_HEADERS, CORS_ALLOW_HEADERS);
         resp.headers().set(HttpHeaderNames.ACCESS_CONTROL_EXPOSE_HEADERS, CORS_EXPOSE_HEADERS);

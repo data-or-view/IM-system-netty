@@ -62,7 +62,10 @@ public final class SchemaInitializer {
             "im_sequences",
             "im_seq_users",
             "im_sync_versions",
-            "im_sync_changes"
+            "im_sync_changes",
+            "im_system_channels",
+            "im_system_messages",
+            "im_system_message_inbox"
     );
 
     /** 逆序（rebuild 时先删子表） */

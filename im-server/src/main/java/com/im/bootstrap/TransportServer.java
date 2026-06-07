@@ -127,6 +127,7 @@ final class TransportServer implements Lifecycle {
         }
         httpChannel = HttpServerBootstrap.start(bossGroup, workerGroup,
                 config.getInt("im.http.port", 8082), useEpoll,
+                config.getString("im.http.cors.allowed-origins").orElse("http://127.0.0.1:39073,http://localhost:39073"),
                 new com.im.bootstrap.http.HttpRequestAdapter(dispatcher, virtualExecutor, requestAdmission));
     }
 

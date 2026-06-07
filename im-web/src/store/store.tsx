@@ -15,7 +15,7 @@ import React, {
 } from "react";
 import { im } from "@/sdk/im-sdk";
 import { ApplyHandleResult, ConversationType, toMessageContentType } from "im-sdk";
-import type { Message as SDKMessage, OutgoingMessageContentTypeValue, SendMessageAck, TokenPair, UserInfo as SDKUserInfo, FriendInfo as SDKFriendInfo, FriendApply as SDKFriendApply, GroupInfo as SDKGroupInfo, GroupMember as SDKGroupMember, GroupApply as SDKGroupApply, Conversation as SDKConversation } from "im-sdk";
+import type { Message as SDKMessage, OutgoingMessageContentTypeValue, SendMessageAck, SystemMessageInboxItem, SystemMessageSummary, TokenPair, UserInfo as SDKUserInfo, FriendInfo as SDKFriendInfo, FriendApply as SDKFriendApply, GroupInfo as SDKGroupInfo, GroupMember as SDKGroupMember, GroupApply as SDKGroupApply, Conversation as SDKConversation } from "im-sdk";
 
 // ========== 类型（与 SDK 类型一致） ==========
 
@@ -41,6 +41,7 @@ export interface Message {
 // ========== State ==========
 
 const MAX_MESSAGES_PER_CONVERSATION = 500;
+export const SYSTEM_CONVERSATION_ID = "__system_notifications__";
 export const FRIEND_APPLY_UPDATED_EVENT = "im:friend-apply-updated";
 export const GROUP_APPLY_UPDATED_EVENT = "im:group-apply-updated";
 
@@ -61,6 +62,9 @@ interface State {
   unhandledGroupApplyCount: number;
 
   activeConversationId: string | null;
+  systemMessages: SystemMessageInboxItem[];
+  systemUnreadCount: number;
+  latestSystemMessage: SystemMessageSummary | null;
   groupMembers: Record<string, GroupMember[]>;
   groupInfoCache: Record<string, GroupInfo>;
   userProfileCache: Record<string, UserInfo>;
@@ -80,6 +84,9 @@ const initialState: State = {
   unhandledApplyCount: 0,
   unhandledGroupApplyCount: 0,
   activeConversationId: null,
+  systemMessages: [],
+  systemUnreadCount: 0,
+  latestSystemMessage: null,
   groupMembers: {},
   groupInfoCache: {},
   userProfileCache: {},
@@ -103,6 +110,8 @@ type Action =
   | { type: "SET_UNHANDLED_APPLY_COUNT"; count: number }
   | { type: "SET_UNHANDLED_GROUP_APPLY_COUNT"; count: number }
   | { type: "SET_ACTIVE_CONVERSATION"; conversationId: string | null }
+  | { type: "SET_SYSTEM_MESSAGES"; messages: SystemMessageInboxItem[]; unreadCount: number }
+  | { type: "UPSERT_SYSTEM_MESSAGE"; message: SystemMessageSummary }
   | { type: "ADD_FRIEND"; friend: FriendInfo }
   | { type: "REMOVE_FRIEND"; friendUserId: string }
   | { type: "ADD_CONVERSATION"; conversation: Conversation }
@@ -236,6 +245,30 @@ function reducer(state: State, action: Action): State {
         : state.conversations;
       return { ...state, activeConversationId: action.conversationId, conversations: cleared };
     }
+    case "SET_SYSTEM_MESSAGES":
+      return {
+        ...state,
+        systemMessages: action.messages,
+        systemUnreadCount: action.unreadCount,
+        latestSystemMessage: action.messages[0] ?? state.latestSystemMessage,
+      };
+    case "UPSERT_SYSTEM_MESSAGE": {
+      const inboxItem: SystemMessageInboxItem = {
+        ...action.message,
+        userId: state.userId || "",
+        content: "",
+        readAt: 0,
+      };
+      return {
+        ...state,
+        latestSystemMessage: action.message,
+        systemUnreadCount: state.systemUnreadCount + 1,
+        systemMessages: [
+          inboxItem,
+          ...state.systemMessages.filter((message) => message.messageId !== action.message.messageId),
+        ],
+      };
+    }
     case "ADD_FRIEND": {
       if (state.friends.some((f) => f.friendUserId === action.friend.friendUserId)) return state;
       return { ...state, friends: [...state.friends, action.friend] };
@@ -310,6 +343,7 @@ interface StoreContextType {
   fetchGroupInfo: (groupId: string) => Promise<void>;
   fetchUserProfile: (userId: string) => Promise<void>;
   markConversationRead: (conversationId: string, seq?: number) => Promise<void>;
+  refreshSystemMessages: () => Promise<void>;
 }
 
 const StoreContext = createContext<StoreContextType | null>(null);
@@ -445,6 +479,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const refreshSystemMessages = useCallback(async () => {
+    try {
+      const [messages, unread] = await Promise.all([
+        im.system.messages({ limit: 30 }),
+        im.system.unreadCount(),
+      ]);
+      dispatch({ type: "SET_SYSTEM_MESSAGES", messages, unreadCount: unread.count ?? 0 });
+    } catch (err) {
+      console.error("refreshSystemMessages failed:", err);
+    }
+  }, []);
+
   const hydrateAfterAuth = useCallback(async () => {
     await Promise.all([
       fetchConversations(),
@@ -452,8 +498,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       fetchMyGroups(),
       fetchUnhandledApplyCount(),
       fetchUnhandledGroupApplyCount(),
+      refreshSystemMessages(),
     ]);
-  }, [fetchConversations, fetchFriends, fetchMyGroups, fetchUnhandledApplyCount, fetchUnhandledGroupApplyCount]);
+  }, [fetchConversations, fetchFriends, fetchMyGroups, fetchUnhandledApplyCount, fetchUnhandledGroupApplyCount, refreshSystemMessages]);
 
   // ── SDK 事件监听 ──
   useEffect(() => {
@@ -518,6 +565,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
     });
 
+    const unsubSystemMessage = im.on("systemMessage", (message: SystemMessageSummary) => {
+      dispatch({ type: "UPSERT_SYSTEM_MESSAGE", message });
+    });
+
     const unsubTokenChanged = im.on("tokenChanged", (tokens) => {
       persistTokens(tokens);
       dispatch({ type: "SET_TOKENS", token: tokens.token, refreshToken: tokens.refreshToken });
@@ -529,9 +580,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       unsubRevoke();
       unsubFriendRequest();
       unsubGroupApply();
+      unsubSystemMessage();
       unsubTokenChanged();
     };
-  }, [fetchConversations, fetchFriends, fetchMyGroups, fetchUnhandledApplyCount, fetchUnhandledGroupApplyCount, hydrateAfterAuth, markConversationRead, state.activeConversationId]);
+  }, [fetchConversations, fetchFriends, fetchMyGroups, fetchUnhandledApplyCount, fetchUnhandledGroupApplyCount, hydrateAfterAuth, markConversationRead, refreshSystemMessages, state.activeConversationId]);
 
   useEffect(() => {
     const conversationId = state.activeConversationId;
@@ -716,6 +768,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         fetchGroupInfo,
         fetchUserProfile,
         markConversationRead,
+        refreshSystemMessages,
       }}
     >
       {children}
