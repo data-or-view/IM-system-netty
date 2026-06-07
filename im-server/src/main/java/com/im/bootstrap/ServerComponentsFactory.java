@@ -28,6 +28,8 @@ import com.im.core.call.CallStateManager;
 import com.im.core.call.GroupCallManager;
 import com.im.core.call.LiveKitCallManager;
 import com.im.core.call.RedisGroupCallStateStore;
+import com.im.core.cache.RedisJsonCache;
+import com.im.core.cache.SafeCache;
 import com.im.core.conversation.DbConversationManager;
 import com.im.core.db.DatabaseConfiguration;
 import com.im.core.db.MyBatisPlusFactory;
@@ -47,8 +49,11 @@ import com.im.core.friend.ClusterAwareFriendApplyNotifier;
 import com.im.core.friend.DbFriendManager;
 import com.im.core.friend.FriendApplyNotifier;
 import com.im.core.group.ClusterAwareGroupApplyNotifier;
+import com.im.core.group.CachedGroupManager;
 import com.im.core.group.DbGroupManager;
 import com.im.core.group.GroupApplyNotifier;
+import com.im.core.group.GroupMemberIdsSnapshot;
+import com.im.core.group.GroupMemberListSnapshot;
 import com.im.core.handler.ConnectionEventHandler;
 import com.im.core.mq.RedisMessageQueue;
 import com.im.core.redis.RedisConfiguration;
@@ -60,7 +65,9 @@ import com.im.core.session.SessionManager;
 import com.im.core.store.DbMessageStore;
 import com.im.core.store.GroupMessageStoreAdapter;
 import com.im.core.store.SingleMessageStoreAdapter;
+import com.im.core.user.CachedUserManager;
 import com.im.core.user.DbUserManager;
+import com.im.core.serialization.jackson.JacksonSerializer;
 import com.im.infrastructure.storage.file.MinioFileStorageService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -104,7 +111,7 @@ final class ServerComponentsFactory {
         ClusterDependencies cluster = createCluster(redisConfig, runtime.sessionManager(), nodeId);
         runtime.friendApplyNotifier().bindCluster(cluster.routeTable(), cluster.clusterMessageBus());
         runtime.groupApplyNotifier().bindCluster(cluster.routeTable(), cluster.clusterMessageBus());
-        BusinessDependencies business = createBusiness(config, cluster.routeTable());
+        BusinessDependencies business = createBusiness(config, redisConfig, cluster.routeTable());
         StorageDependencies storage = createStorage(config, redisConfig, nodeId, business.retryExecutor());
         CallDependencies call = createCall(config, storage.messageQueue(), business.groupManager(), redisConfig);
         ConsumerDependencies consumers = createConsumers(nodeId, runtime, cluster, storage, business);
@@ -156,18 +163,55 @@ final class ServerComponentsFactory {
                 new RedisNodeDiscovery(redisConfig));
     }
 
-    private static BusinessDependencies createBusiness(Config config, IRouteTable routeTable) {
+    private static BusinessDependencies createBusiness(Config config,
+                                                       RedisConfiguration redisConfig,
+                                                       IRouteTable routeTable) {
         JwtAuthenticator authenticator = new JwtAuthenticator(
                 config.getString("im.token.secret", "im-system-dev-secret-change-in-production"));
         RetryExecutor retryExecutor = new FailsafeRetryExecutor();
-        IGroupManager groupManager = new DbGroupManager(retryExecutor);
+        IGroupManager groupManager = new CachedGroupManager(
+                new DbGroupManager(retryExecutor),
+                new SafeCache<>(new RedisJsonCache<>(
+                        redisConfig,
+                        key -> key,
+                        new JacksonSerializer<>(),
+                        com.im.api.GroupInformation.class,
+                        "cache:group:info:",
+                        java.time.Duration.ofSeconds(config.getLong("im.cache.group-info-ttl-seconds", 120))),
+                        "group-info"),
+                new SafeCache<>(new RedisJsonCache<>(
+                        redisConfig,
+                        key -> key,
+                        new JacksonSerializer<>(),
+                        GroupMemberListSnapshot.class,
+                        "cache:group:members:",
+                        java.time.Duration.ofSeconds(config.getLong("im.cache.group-member-list-ttl-seconds", 30))),
+                        "group-member-list"),
+                new SafeCache<>(new RedisJsonCache<>(
+                        redisConfig,
+                        key -> key,
+                        new JacksonSerializer<>(),
+                        GroupMemberIdsSnapshot.class,
+                        "cache:group:member-ids:",
+                        java.time.Duration.ofSeconds(config.getLong("im.cache.group-member-ids-ttl-seconds", 30))),
+                        "group-member-ids"));
         IConversationManager conversationManager = new DbConversationManager(retryExecutor);
         IFriendManager friendManager = new DbFriendManager(retryExecutor);
-        DbUserManager userManager = new DbUserManager(retryExecutor, routeTable);
+        DbUserManager dbUserManager = new DbUserManager(retryExecutor, routeTable);
+        IUserManager userManager = new CachedUserManager(
+                dbUserManager,
+                new SafeCache<>(new RedisJsonCache<>(
+                        redisConfig,
+                        key -> key,
+                        new JacksonSerializer<>(),
+                        com.im.api.UserInformation.class,
+                        "cache:user:profile:",
+                        java.time.Duration.ofSeconds(config.getLong("im.cache.user-profile-ttl-seconds", 120))),
+                        "user-profile"));
         IPasswordHasher passwordHasher = new Pbkdf2PasswordHasher();
         return new BusinessDependencies(
                 authenticator, retryExecutor, groupManager, conversationManager, friendManager,
-                userManager, userManager, passwordHasher);
+                userManager, dbUserManager, passwordHasher);
     }
 
     private static StorageDependencies createStorage(Config config,
