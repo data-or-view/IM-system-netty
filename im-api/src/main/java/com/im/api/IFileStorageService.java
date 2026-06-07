@@ -45,6 +45,21 @@ public interface IFileStorageService {
     String getUrl(String bucket, String objectId);
 
     /**
+     * 生成客户端直传对象的预签名 PUT URL。
+     */
+    default String presignPutObject(String bucket, String objectId, String mimeType, int expiresSeconds) {
+        throw new UnsupportedOperationException("presignPutObject not implemented");
+    }
+
+    /**
+     * 生成客户端直传分片的预签名 PUT URL。
+     */
+    default String presignUploadPart(String bucket, String objectId, String uploadId,
+                                     int partNumber, int expiresSeconds) {
+        throw new UnsupportedOperationException("presignUploadPart not implemented");
+    }
+
+    /**
      * 判断对象是否存在。
      */
     boolean exists(String bucket, String objectId);

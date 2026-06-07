@@ -40,6 +40,7 @@ public class UserHandler implements RequestHandler {
     public Object handle(ApiRequest req) {
         return switch (req.operation()) {
             case "user.register" -> handleRegister(req);
+            case "user.me" -> handleMe(req);
             case "user.info" -> handleInfo(req);
             case "user.search" -> handleSearch(req);
             case "user.update" -> handleUpdate(req);
@@ -54,6 +55,14 @@ public class UserHandler implements RequestHandler {
 
         RegisterResult result = registerUseCase.execute(null, nickname, faceUrl, password);
         return Map.of("userId", result.userId(), "nickname", result.nickname(), "status", "OK");
+    }
+
+    private Object handleMe(ApiRequest req) {
+        String userId = req.currentUserId();
+        if (userId == null) throw new UnauthorizedException("not authenticated");
+        UserInformation info = userManager.getUserInformation(userId);
+        if (info == null) throw new NotFoundException("user not found");
+        return info;
     }
 
     private Object handleInfo(ApiRequest req) {

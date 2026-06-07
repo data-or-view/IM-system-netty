@@ -328,6 +328,59 @@ test("realtime login rejects immediately when websocket is not connected", async
   assert.equal(transport.requestManager.pendingCount, 0);
 });
 
+test("user.me fetches authenticated profile over HTTP", async () => {
+  const calls = [];
+  const api = new UserAPI(
+    new WsTransport({ requestTimeout: 20 }),
+    {
+      get: async (path, query) => {
+        calls.push({ method: "GET", path, query });
+        return { userId: "u1", nickname: "Alice" };
+      },
+      post: async () => ({}),
+    },
+  );
+
+  const profile = await api.me();
+
+  assert.deepEqual(profile, { userId: "u1", nickname: "Alice" });
+  assert.deepEqual(calls[0], { method: "GET", path: "/api/user/me", query: undefined });
+});
+
+test("user.updateAvatar uploads file, updates faceUrl, and returns refreshed profile", async () => {
+  const calls = [];
+  const api = new UserAPI(
+    new WsTransport({ requestTimeout: 20 }),
+    {
+      get: async (path, query) => {
+        calls.push({ method: "GET", path, query });
+        return { userId: "u1", nickname: "Alice", faceUrl: "https://files.test/avatar.png" };
+      },
+      post: async (path, body) => {
+        calls.push({ method: "POST", path, body });
+        return {};
+      },
+    },
+    async (fileName, body, mimeType) => {
+      calls.push({ method: "UPLOAD", fileName, body, mimeType });
+      return { fileId: "f1", fileUrl: "https://files.test/avatar.png" };
+    },
+  );
+
+  const profile = await api.updateAvatar(new Blob(["abc"], { type: "image/png" }), "avatar.png");
+
+  assert.deepEqual(profile, { userId: "u1", nickname: "Alice", faceUrl: "https://files.test/avatar.png" });
+  assert.equal(calls[0].method, "UPLOAD");
+  assert.equal(calls[0].fileName, "avatar.png");
+  assert.equal(calls[0].mimeType, "image/png");
+  assert.deepEqual(calls[1], {
+    method: "POST",
+    path: "/api/user/update",
+    body: { faceUrl: "https://files.test/avatar.png" },
+  });
+  assert.deepEqual(calls[2], { method: "GET", path: "/api/user/me", query: undefined });
+});
+
 test("sdk.login stores returned tokens and emits tokenChanged", async () => {
   const im = createIM({ wsUrl: "ws://example.test/ws" });
   const tokens = [];
@@ -531,13 +584,26 @@ test("http transport calls default fetch with the global object binding", async 
   }
 });
 
-test("file.upload sends binary body through HTTP transport with auth header", async () => {
+test("file.upload signs, uploads to object storage, then completes through HTTP transport", async () => {
   const calls = [];
   const http = new HttpTransport({
     baseUrl: "http://127.0.0.1:8084",
     getToken: () => "access-1",
     fetchImpl: async (url, init) => {
       calls.push({ url: String(url), init });
+      if (String(url) === "https://oss.test/upload-a") {
+        return new Response("", { status: 200 });
+      }
+      if (String(url).endsWith("/api/file/upload/sign")) {
+        return new Response(JSON.stringify({
+          code: 0,
+          data: {
+            fileId: "f1",
+            uploadUrl: "https://oss.test/upload-a",
+            headers: { "Content-Type": "text/plain" },
+          },
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
       return new Response(JSON.stringify({
         code: 0,
         data: {
@@ -554,22 +620,34 @@ test("file.upload sends binary body through HTTP transport with auth header", as
   const result = await http.uploadFile("a.txt", new Uint8Array([1, 2, 3]), "text/plain");
 
   assert.equal(result.fileUrl, "http://files/a.txt");
-  assert.equal(calls[0].url, "http://127.0.0.1:8084/api/file/upload?fileName=a.txt&mimeType=text%2Fplain");
+  assert.equal(calls[0].url, "http://127.0.0.1:8084/api/file/upload/sign");
   assert.equal(calls[0].init.method, "POST");
   assert.equal(calls[0].init.headers.Authorization, "Bearer access-1");
-  assert.equal(calls[0].init.headers["Content-Type"], "application/octet-stream");
-  assert.deepEqual(Array.from(new Uint8Array(calls[0].init.body)), [1, 2, 3]);
+  assert.deepEqual(JSON.parse(calls[0].init.body), {
+    fileName: "a.txt",
+    fileSize: 3,
+    mimeType: "text/plain",
+  });
+  assert.equal(calls[1].url, "https://oss.test/upload-a");
+  assert.equal(calls[1].init.method, "PUT");
+  assert.equal(calls[1].init.headers["Content-Type"], "text/plain");
+  assert.deepEqual(Array.from(new Uint8Array(calls[1].init.body)), [1, 2, 3]);
+  assert.equal(calls[2].url, "http://127.0.0.1:8084/api/file/upload/complete");
+  assert.deepEqual(JSON.parse(calls[2].init.body), { fileId: "f1" });
 });
 
-test("file.multipartUpload sends part bytes through HTTP transport", async () => {
+test("file.multipartUpload signs part and uploads bytes to object storage", async () => {
   const calls = [];
   const http = new HttpTransport({
     baseUrl: "http://127.0.0.1:8084/",
     fetchImpl: async (url, init) => {
       calls.push({ url: String(url), init });
+      if (String(url) === "https://oss.test/part-2") {
+        return new Response("", { status: 200, headers: { ETag: "etag-1" } });
+      }
       return new Response(JSON.stringify({
         code: 0,
-        data: { etag: "etag-1" },
+        data: { uploadUrl: "https://oss.test/part-2", headers: {} },
       }), { status: 200, headers: { "Content-Type": "application/json" } });
     },
   });
@@ -577,9 +655,12 @@ test("file.multipartUpload sends part bytes through HTTP transport", async () =>
   const etag = await http.uploadPart("upload-1", 2, new Uint8Array([9, 8]));
 
   assert.equal(etag, "etag-1");
-  assert.equal(calls[0].url, "http://127.0.0.1:8084/api/file/multipart/upload?uploadId=upload-1&partNumber=2");
+  assert.equal(calls[0].url, "http://127.0.0.1:8084/api/file/multipart/part-sign");
   assert.equal(calls[0].init.method, "POST");
-  assert.deepEqual(Array.from(new Uint8Array(calls[0].init.body)), [9, 8]);
+  assert.deepEqual(JSON.parse(calls[0].init.body), { uploadId: "upload-1", partNumber: 2 });
+  assert.equal(calls[1].url, "https://oss.test/part-2");
+  assert.equal(calls[1].init.method, "PUT");
+  assert.deepEqual(Array.from(new Uint8Array(calls[1].init.body)), [9, 8]);
 });
 
 test("sdk file api requires httpUrl instead of falling back to websocket", async () => {

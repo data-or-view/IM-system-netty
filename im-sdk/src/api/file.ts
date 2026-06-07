@@ -23,7 +23,7 @@ export class FileAPI {
    * 当前后端 WS 只消费文本帧，这里暂时只提交文件元数据；
    * 真正的二进制上传需要后续接入 HTTP upload transport。
    */
-  upload(fileName: string, fileData: Uint8Array, mimeType = "application/octet-stream"): Promise<FileUploadResult> {
+  upload(fileName: string, fileData: Uint8Array | Blob, mimeType = "application/octet-stream"): Promise<FileUploadResult> {
     const http = this.transport;
     return http ? http.uploadFile(fileName, fileData, mimeType) : this.missingHttp();
   }

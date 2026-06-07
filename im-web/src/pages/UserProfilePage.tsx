@@ -1,10 +1,18 @@
-import { useEffect, useState } from "react";
+import { ChangeEvent, useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useStore } from "@/store/store";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
-import { ArrowLeft, MessageCircle, UserMinus, Ban, UserPlus, Loader2 } from "lucide-react";
+import { ArrowLeft, MessageCircle, UserMinus, Ban, UserPlus, Loader2, Camera } from "lucide-react";
 import { toast } from "sonner";
 import { im } from "@/sdk/im-sdk";
 import type { UserInfo } from "im-sdk";
@@ -12,21 +20,41 @@ import type { UserInfo } from "im-sdk";
 export default function UserProfilePage() {
   const { userId } = useParams<{ userId: string }>();
   const navigate = useNavigate();
-  const { state, fetchUserProfile, removeFriend } = useStore();
+  const { state, dispatch, fetchUserProfile, removeFriend } = useStore();
   const [profile, setProfile] = useState<UserInfo | null>(null);
   const [loading, setLoading] = useState(true);
+  const [editOpen, setEditOpen] = useState(false);
+  const [nickname, setNickname] = useState("");
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!userId) return;
     setLoading(true);
-    im.user.info(userId).then((info) => {
+    const request = userId === state.userId ? im.user.me() : im.user.info(userId);
+    request.then((info) => {
       setProfile(info as unknown as UserInfo);
+      dispatch({ type: "SET_USER_PROFILE", userId, info: info as unknown as UserInfo });
     }).catch(() => {
       toast("获取用户信息失败");
     }).finally(() => {
       setLoading(false);
     });
-  }, [userId, fetchUserProfile]);
+  }, [userId, state.userId, dispatch, fetchUserProfile]);
+
+  useEffect(() => {
+    if (!editOpen || !profile) return;
+    setNickname(profile.nickname || "");
+    setAvatarFile(null);
+    setAvatarPreview(null);
+  }, [editOpen, profile]);
+
+  useEffect(() => {
+    return () => {
+      if (avatarPreview) URL.revokeObjectURL(avatarPreview);
+    };
+  }, [avatarPreview]);
 
   if (loading) {
     return (
@@ -46,6 +74,7 @@ export default function UserProfilePage() {
 
   const isSelf = userId === state.userId;
   const isFriend = state.friends.some((f) => f.friendUserId === userId);
+  const avatarSrc = avatarPreview || profile.faceUrl;
 
   const handleSendMessage = () => {
     navigate("/chat");
@@ -80,6 +109,43 @@ export default function UserProfilePage() {
     }
   };
 
+  const handleAvatarChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] ?? null;
+    setAvatarFile(file);
+    setAvatarPreview((current) => {
+      if (current) URL.revokeObjectURL(current);
+      return file ? URL.createObjectURL(file) : null;
+    });
+  };
+
+  const handleSaveProfile = async () => {
+    if (!profile || !userId) return;
+    const nextNickname = nickname.trim();
+    if (!nextNickname) {
+      toast("昵称不能为空");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      let updated = profile;
+      if (avatarFile) {
+        updated = await im.user.updateAvatar(avatarFile, avatarFile.name || "avatar");
+      }
+      if (nextNickname !== (updated.nickname || "")) {
+        updated = await im.user.updateProfile({ nickname: nextNickname });
+      }
+      setProfile(updated);
+      dispatch({ type: "SET_USER_PROFILE", userId, info: updated as unknown as UserInfo });
+      setEditOpen(false);
+      toast("资料已更新");
+    } catch {
+      toast("保存失败");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div className="flex flex-1 flex-col">
       {/* Header */}
@@ -93,6 +159,7 @@ export default function UserProfilePage() {
       <div className="flex flex-1 flex-col items-center justify-center px-6">
         {/* User avatar and info */}
         <Avatar className="mb-4 h-20 w-20">
+          {profile.faceUrl && <AvatarImage src={profile.faceUrl} alt={profile.nickname || userId} />}
           <AvatarFallback className="text-xl">
             {(profile.nickname || userId).charAt(0).toUpperCase()}
           </AvatarFallback>
@@ -110,8 +177,8 @@ export default function UserProfilePage() {
         {/* Actions */}
         <div className="flex w-full max-w-xs flex-col gap-2">
           {isSelf && (
-            <Button variant="outline" className="w-full" disabled>
-              编辑资料（待实现）
+            <Button variant="outline" className="w-full" onClick={() => setEditOpen(true)}>
+              编辑资料
             </Button>
           )}
 
@@ -140,6 +207,58 @@ export default function UserProfilePage() {
           )}
         </div>
       </div>
+
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>编辑资料</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="flex justify-center">
+              <label className="relative cursor-pointer">
+                <Avatar className="h-20 w-20 border">
+                  {avatarSrc && <AvatarImage src={avatarSrc} alt={nickname || userId} />}
+                  <AvatarFallback className="text-xl">
+                    {(nickname || userId).charAt(0).toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
+                <span className="absolute bottom-0 right-0 flex h-7 w-7 items-center justify-center rounded-full border bg-background shadow-sm">
+                  <Camera className="h-4 w-4" />
+                </span>
+                <input
+                  className="sr-only"
+                  type="file"
+                  accept="image/*"
+                  onChange={handleAvatarChange}
+                />
+              </label>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium" htmlFor="profile-nickname">
+                昵称
+              </label>
+              <Input
+                id="profile-nickname"
+                value={nickname}
+                maxLength={32}
+                onChange={(event) => setNickname(event.target.value)}
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditOpen(false)} disabled={saving}>
+              取消
+            </Button>
+            <Button onClick={handleSaveProfile} disabled={saving}>
+              {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              保存
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -14,6 +14,7 @@ import java.io.InputStream;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -127,6 +128,39 @@ public class MinioFileStorageService implements IFileStorageService {
         } catch (Exception e) {
             // 降级：直接拼接公开 URL
             return endpoint + "/" + bucket + "/" + objectId;
+        }
+    }
+
+    @Override
+    public String presignPutObject(String bucket, String objectId, String mimeType, int expiresSeconds) {
+        try {
+            ensureBucket(bucket);
+            return client.getPresignedObjectUrl(GetPresignedObjectUrlArgs.builder()
+                    .method(Method.PUT)
+                    .bucket(bucket)
+                    .object(objectId)
+                    .expiry(expiresSeconds, TimeUnit.SECONDS)
+                    .build());
+        } catch (Exception e) {
+            throw new FileStorageException("MinIO presign PUT failed: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public String presignUploadPart(String bucket, String objectId, String uploadId,
+                                    int partNumber, int expiresSeconds) {
+        try {
+            return client.getPresignedObjectUrl(GetPresignedObjectUrlArgs.builder()
+                    .method(Method.PUT)
+                    .bucket(bucket)
+                    .object(objectId)
+                    .expiry(expiresSeconds, TimeUnit.SECONDS)
+                    .extraQueryParams(Map.of(
+                            "partNumber", String.valueOf(partNumber),
+                            "uploadId", uploadId))
+                    .build());
+        } catch (Exception e) {
+            throw new FileStorageException("MinIO presign UploadPart failed: " + e.getMessage(), e);
         }
     }
 

@@ -95,12 +95,14 @@ export class IMSDK {
       requestIdFactory: opts.requestIdFactory,
     }) : undefined;
 
-    this.user = new UserAPI(this.transport, this.httpTransport);
+    this.file = new FileAPI(this.httpTransport);
+    this.user = new UserAPI(this.transport, this.httpTransport, (fileName, fileData, mimeType) =>
+      this.file.upload(fileName, fileData, mimeType)
+    );
     this.friend = new FriendAPI(this.httpTransport);
     this.group = new GroupAPI(this.httpTransport);
     this.message = new MessageAPI(this.transport, this.httpTransport);
     this.conversation = new ConversationAPI(this.httpTransport);
-    this.file = new FileAPI(this.httpTransport);
 
     // 转发 push 事件到 SDK 级别 listener
     this.transport.bus.on("push", (raw: unknown) => {

@@ -42,17 +42,27 @@ export class HttpTransport {
     return this.postJson<T>(path, body);
   }
 
-  uploadFile(fileName: string, fileData: Uint8Array, mimeType: string): Promise<FileUploadResult> {
-    return this.postBinary("/api/file/upload", { fileName, mimeType }, fileData);
+  uploadFile(fileName: string, fileData: UploadBody, mimeType: string): Promise<FileUploadResult> {
+    return this.postJson<PresignedUploadResponse>("/api/file/upload/sign", {
+      fileName,
+      fileSize: this.bodySize(fileData),
+      mimeType,
+    }).then(async (signed) => {
+      await this.putObject(signed.uploadUrl, fileData, signed.headers);
+      return this.postJson<FileUploadResult>("/api/file/upload/complete", { fileId: signed.fileId });
+    });
   }
 
   multipartInit(fileName: string, fileSize: number, mimeType: string): Promise<{ uploadId: string; fileId?: string; objectId?: string }> {
     return this.postJson("/api/file/multipart/init", { fileName, fileSize, mimeType });
   }
 
-  uploadPart(uploadId: string, partNumber: number, data: Uint8Array): Promise<string> {
-    return this.postBinary<{ etag?: string }>("/api/file/multipart/upload", { uploadId, partNumber }, data)
-      .then((result) => result.etag ?? "");
+  uploadPart(uploadId: string, partNumber: number, data: UploadBody): Promise<string> {
+    return this.postJson<PresignedPartResponse>("/api/file/multipart/part-sign", { uploadId, partNumber })
+      .then(async (signed) => {
+        const response = await this.putObject(signed.uploadUrl, data, signed.headers);
+        return response.headers.get("ETag") ?? response.headers.get("etag") ?? "";
+      });
   }
 
   multipartComplete(uploadId: string, parts: Array<{ partNumber: number; etag: string }>): Promise<FileUploadResult> {
@@ -63,15 +73,8 @@ export class HttpTransport {
     return this.postJson("/api/file/multipart/abort", { uploadId }).then(() => undefined);
   }
 
-  private postBinary<T>(path: string, query: Record<string, string | number>, body: Uint8Array): Promise<T> {
-    return this.request<T>(`${path}${this.queryString(query)}`, {
-      method: "POST",
-      headers: {
-        ...this.authHeader(),
-        "Content-Type": "application/octet-stream",
-      },
-      body: this.toArrayBuffer(body),
-    });
+  downloadSign(fileId: string): Promise<FileUploadResult> {
+    return this.postJson("/api/file/download/sign", { fileId });
   }
 
   private postJson<T>(path: string, body: Record<string, unknown>): Promise<T> {
@@ -83,6 +86,18 @@ export class HttpTransport {
       },
       body: JSON.stringify(body),
     });
+  }
+
+  private async putObject(url: string, body: UploadBody, signedHeaders: Record<string, string> = {}): Promise<Response> {
+    const response = await this.fetchImpl(url, {
+      method: "PUT",
+      headers: signedHeaders,
+      body: this.toRequestBody(body),
+    });
+    if (!response.ok) {
+      throw new IMError(response.status, `Object storage upload failed: HTTP ${response.status}`);
+    }
+    return response;
   }
 
   private async request<T>(path: string, init: RequestInit): Promise<T> {
@@ -129,6 +144,17 @@ export class HttpTransport {
     return copy;
   }
 
+  private toRequestBody(body: UploadBody): BodyInit {
+    if (body instanceof Uint8Array) {
+      return this.toArrayBuffer(body);
+    }
+    return body;
+  }
+
+  private bodySize(body: UploadBody): number {
+    return body instanceof Uint8Array ? body.byteLength : body.size;
+  }
+
   private queryString(query: Record<string, unknown>): string {
     const params = new URLSearchParams();
     for (const [key, value] of Object.entries(query)) {
@@ -139,6 +165,19 @@ export class HttpTransport {
     const encoded = params.toString();
     return encoded ? `?${encoded}` : "";
   }
+}
+
+type UploadBody = Uint8Array | Blob;
+
+interface PresignedUploadResponse {
+  fileId: string;
+  uploadUrl: string;
+  headers?: Record<string, string>;
+}
+
+interface PresignedPartResponse {
+  uploadUrl: string;
+  headers?: Record<string, string>;
 }
 
 function defaultRequestId(): string {

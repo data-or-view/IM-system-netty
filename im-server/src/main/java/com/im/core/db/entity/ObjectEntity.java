@@ -32,6 +32,9 @@ public class ObjectEntity {
     @TableField("engine")
     private String engine;
 
+    @TableField("bucket")
+    private String bucket;
+
     @TableField("object_key")
     private String objectKey;
 
@@ -64,6 +67,9 @@ public class ObjectEntity {
 
     public String getEngine() { return engine; }
     public void setEngine(String engine) { this.engine = engine; }
+
+    public String getBucket() { return bucket; }
+    public void setBucket(String bucket) { this.bucket = bucket; }
 
     public String getObjectKey() { return objectKey; }
     public void setObjectKey(String objectKey) { this.objectKey = objectKey; }

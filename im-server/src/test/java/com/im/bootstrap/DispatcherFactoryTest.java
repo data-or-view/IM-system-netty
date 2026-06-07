@@ -21,8 +21,16 @@ import com.im.config.Config;
 import com.im.core.auth.IPasswordHasher;
 import com.im.core.auth.IUserCredentialStore;
 import com.im.core.call.CallStateManager;
+import com.im.core.call.GroupCallManager;
+import com.im.core.call.GroupCallSession;
+import com.im.core.call.GroupCallStateStore;
 import com.im.core.dispatcher.ApiDispatcher;
 import com.im.core.dispatcher.PendingAcknowledgementManager;
+import com.im.core.file.DirectFileTransferUseCase;
+import com.im.core.file.FileObjectMetadata;
+import com.im.core.file.FileObjectMetadataStore;
+import com.im.core.file.UploadSession;
+import com.im.core.file.UploadSessionStore;
 import com.im.core.redis.RedisConfiguration;
 import com.im.core.session.SessionManager;
 import org.junit.jupiter.api.Test;
@@ -30,7 +38,9 @@ import org.junit.jupiter.api.Test;
 import java.lang.reflect.Proxy;
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 
@@ -83,11 +93,90 @@ class DispatcherFactoryTest {
                         fake(ISingleMessageStore.class),
                         fake(IGroupMessageStore.class),
                         fake(IMessageQueue.class),
-                        fake(IFileStorageService.class)),
+                        fake(IFileStorageService.class),
+                        directFileTransferUseCase()),
                 new ServerComponentsFactory.CallDependencies(
                         fake(ICallManager.class),
                         (CallStateManager) null,
-                        null));
+                        new GroupCallManager(fake(IGroupManager.class), fake(ICallManager.class),
+                                new NoopGroupCallStateStore(), 16)));
+    }
+
+    private static final class NoopGroupCallStateStore implements GroupCallStateStore {
+        @Override
+        public GroupCallSession getActiveByGroup(String groupId) {
+            return null;
+        }
+
+        @Override
+        public GroupCallSession createIfAbsent(GroupCallSession session) {
+            return session;
+        }
+
+        @Override
+        public GroupCallSession addParticipant(String groupId, String userId) {
+            return null;
+        }
+
+        @Override
+        public GroupCallSession removeParticipant(String groupId, String userId) {
+            return null;
+        }
+
+        @Override
+        public GroupCallSession end(String groupId) {
+            return null;
+        }
+    }
+
+    private static DirectFileTransferUseCase directFileTransferUseCase() {
+        return new DirectFileTransferUseCase(
+                fake(IFileStorageService.class),
+                new InMemoryUploadSessionStore(),
+                new InMemoryFileObjectMetadataStore(),
+                "im-system",
+                900);
+    }
+
+    private static final class InMemoryUploadSessionStore implements UploadSessionStore {
+        private final Map<String, UploadSession> byFileId = new HashMap<>();
+        private final Map<String, UploadSession> byUploadId = new HashMap<>();
+
+        @Override
+        public void save(UploadSession session) {
+            byFileId.put(session.fileId(), session);
+            if (session.uploadId() != null) byUploadId.put(session.uploadId(), session);
+        }
+
+        @Override
+        public UploadSession getByFileId(String fileId) {
+            return byFileId.get(fileId);
+        }
+
+        @Override
+        public UploadSession getByUploadId(String uploadId) {
+            return byUploadId.get(uploadId);
+        }
+
+        @Override
+        public void delete(UploadSession session) {
+            byFileId.remove(session.fileId());
+            if (session.uploadId() != null) byUploadId.remove(session.uploadId());
+        }
+    }
+
+    private static final class InMemoryFileObjectMetadataStore implements FileObjectMetadataStore {
+        private final Map<String, FileObjectMetadata> objects = new HashMap<>();
+
+        @Override
+        public void save(FileObjectMetadata metadata) {
+            objects.put(metadata.fileId(), metadata);
+        }
+
+        @Override
+        public FileObjectMetadata findByFileId(String fileId) {
+            return objects.get(fileId);
+        }
     }
 
     private static final class TestAuthenticator implements IAuthenticator {

@@ -26,6 +26,7 @@ import {
   UserMinus,
   Contact,
   Bell,
+  User,
 } from "lucide-react";
 import UserSearchDialog from "./sidebar/UserSearchDialog";
 import GroupSearchDialog from "./sidebar/GroupSearchDialog";
@@ -49,12 +50,25 @@ export default function Sidebar() {
       <div className="flex h-full w-80 flex-col border-r bg-card">
         <div className="border-b px-3 py-3">
           <div className="mb-3 flex items-center justify-between gap-2">
-            <div className="min-w-0">
-              <div className="truncate text-sm font-semibold">{state.userId}</div>
-              <div className="text-xs text-muted-foreground">
-                {state.connected ? "已连接" : "未连接"}
+            <button
+              className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1 py-1 text-left transition-colors hover:bg-accent"
+              onClick={() => state.userId && navigate(`/chat/user/${state.userId}`)}
+            >
+              <Avatar className="h-8 w-8">
+                <AvatarImage src={state.userId ? state.userProfileCache[state.userId]?.faceUrl : undefined} />
+                <AvatarFallback>
+                  <User className="h-4 w-4" />
+                </AvatarFallback>
+              </Avatar>
+              <div className="min-w-0">
+                <div className="truncate text-sm font-semibold">
+                  {state.userId ? state.userProfileCache[state.userId]?.nickname || state.userId : "未登录"}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {state.connected ? "已连接" : "未连接"}
+                </div>
               </div>
-            </div>
+            </button>
             <div className="flex gap-1">
               <IconAction tip="添加好友" onClick={() => setSearchUserOpen(true)}>
                 <UserPlus className="h-4 w-4" />

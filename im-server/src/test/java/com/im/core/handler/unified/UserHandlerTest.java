@@ -6,6 +6,7 @@ import com.im.api.Operation;
 import com.im.api.UserInformation;
 import com.im.common.exception.ForbiddenException;
 import com.im.common.exception.NotFoundException;
+import com.im.common.exception.UnauthorizedException;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -46,8 +47,33 @@ class UserHandlerTest {
         assertEquals(userManager.registeredUserId, response.get("userId"));
     }
 
+    @Test
+    void meReturnsAuthenticatedUserInformation() {
+        RecordingUserManager userManager = new RecordingUserManager();
+        UserInformation alice = new UserInformation("u1", "Alice");
+        userManager.lookupResult = alice;
+        UserHandler handler = new UserHandler(userManager);
+        ApiRequest request = new ApiRequest(Operation.USER_ME, Map.of(), Map.of(), null, null);
+        request.setAttribute(ApiRequest.ATTR_USER_ID, "u1");
+
+        Object response = handler.handle(request);
+
+        assertEquals(alice, response);
+        assertEquals("u1", userManager.lookupUserId);
+    }
+
+    @Test
+    void meRequiresAuthentication() {
+        UserHandler handler = new UserHandler(new RecordingUserManager());
+        ApiRequest request = new ApiRequest(Operation.USER_ME, Map.of(), Map.of(), null, null);
+
+        assertThrows(UnauthorizedException.class, () -> handler.handle(request));
+    }
+
     private static final class RecordingUserManager implements IUserManager {
         private RuntimeException lookupException;
+        private UserInformation lookupResult;
+        private String lookupUserId;
         private int registerCalls;
         private String registeredUserId;
 
@@ -59,10 +85,11 @@ class UserHandlerTest {
 
         @Override
         public UserInformation getUserInformation(String userId) {
+            lookupUserId = userId;
             if (lookupException != null) {
                 throw lookupException;
             }
-            return null;
+            return lookupResult;
         }
 
         @Override

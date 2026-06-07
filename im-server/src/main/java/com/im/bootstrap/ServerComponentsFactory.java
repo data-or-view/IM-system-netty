@@ -40,6 +40,9 @@ import com.im.core.delivery.RedisClusterMessageBus;
 import com.im.core.discovery.RedisNodeDiscovery;
 import com.im.core.dispatcher.ApiDispatcher;
 import com.im.core.dispatcher.PendingAcknowledgementManager;
+import com.im.core.file.DbFileObjectMetadataStore;
+import com.im.core.file.DirectFileTransferUseCase;
+import com.im.core.file.RedisUploadSessionStore;
 import com.im.core.friend.ClusterAwareFriendApplyNotifier;
 import com.im.core.friend.DbFriendManager;
 import com.im.core.friend.FriendApplyNotifier;
@@ -180,8 +183,16 @@ final class ServerComponentsFactory {
                 config.getString("im.minio.endpoint").orElse("http://127.0.0.1:9000"),
                 config.getString("im.minio.access-key").orElse("minioadmin"),
                 config.getString("im.minio.secret-key").orElse("minioadmin"));
+        String fileBucket = config.getString("im.minio.bucket").orElse("im-system");
+        DirectFileTransferUseCase directFileTransferUseCase = new DirectFileTransferUseCase(
+                fileStorage,
+                new RedisUploadSessionStore(redisConfig),
+                new DbFileObjectMetadataStore(fileBucket),
+                fileBucket,
+                config.getInt("im.minio.presign-expire-seconds", 900));
         return new StorageDependencies(
-                sequenceManager, messageStore, singleMessageStore, groupMessageStore, messageQueue, fileStorage);
+                sequenceManager, messageStore, singleMessageStore, groupMessageStore, messageQueue,
+                fileStorage, directFileTransferUseCase);
     }
 
     private static CallDependencies createCall(Config config, IMessageQueue messageQueue,
@@ -401,7 +412,8 @@ final class ServerComponentsFactory {
                                ISingleMessageStore singleMessageStore,
                                IGroupMessageStore groupMessageStore,
                                IMessageQueue messageQueue,
-                               IFileStorageService fileStorage) {
+                               IFileStorageService fileStorage,
+                               DirectFileTransferUseCase directFileTransferUseCase) {
     }
 
     record CallDependencies(ICallManager callManager,

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useStore } from "@/store/store";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
@@ -21,7 +21,7 @@ function roleLabel(role: GroupMemberRoleValue): { text: string; className: strin
 export default function GroupInfoPage() {
   const { groupId } = useParams<{ groupId: string }>();
   const navigate = useNavigate();
-  const { state, fetchGroupMembers, fetchGroupInfo } = useStore();
+  const { state, dispatch, fetchGroupMembers, fetchGroupInfo } = useStore();
   const [currentUserRole, setCurrentUserRole] = useState<GroupMemberRoleValue>(GroupMemberRole.MEMBER);
   const [loading, setLoading] = useState(true);
   const [kicking, setKicking] = useState<Record<string, boolean>>({});
@@ -36,6 +36,20 @@ export default function GroupInfoPage() {
 
   const groupInfo = groupId ? state.groupInfoCache[groupId] : undefined;
   const members = groupId ? state.groupMembers[groupId] || [] : [];
+
+  useEffect(() => {
+    for (const member of members) {
+      dispatch({
+        type: "SET_USER_PROFILE",
+        userId: member.userId,
+        info: {
+          userId: member.userId,
+          nickname: member.nickname,
+          faceUrl: member.faceUrl,
+        },
+      });
+    }
+  }, [dispatch, members]);
 
   // Determine current user's role
   useEffect(() => {
@@ -117,6 +131,7 @@ export default function GroupInfoPage() {
         {/* Group basic info */}
         <div className="flex flex-col items-center py-6">
           <Avatar className="mb-3 h-16 w-16">
+            <AvatarImage src={groupInfo.faceUrl} alt={groupInfo.groupName} />
             <AvatarFallback className="text-lg">
               {groupInfo.groupName.charAt(0).toUpperCase()}
             </AvatarFallback>
@@ -141,10 +156,20 @@ export default function GroupInfoPage() {
               return (
                 <div
                   key={member.userId}
-                  className="flex items-center justify-between rounded-lg px-3 py-2 transition-colors hover:bg-accent"
+                  role="button"
+                  tabIndex={0}
+                  className="flex w-full cursor-pointer items-center justify-between rounded-lg px-3 py-2 text-left transition-colors hover:bg-accent"
+                  onClick={() => navigate(`/chat/user/${member.userId}`)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      navigate(`/chat/user/${member.userId}`);
+                    }
+                  }}
                 >
                   <div className="flex items-center gap-3">
                     <Avatar className="h-9 w-9">
+                      <AvatarImage src={member.faceUrl} alt={member.nickname || member.userId} />
                       <AvatarFallback className="text-xs">
                         {(member.nickname || member.userId).charAt(0).toUpperCase()}
                       </AvatarFallback>
@@ -170,7 +195,10 @@ export default function GroupInfoPage() {
                       variant="ghost"
                       size="sm"
                       className="text-destructive"
-                      onClick={() => handleKick(member.userId)}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void handleKick(member.userId);
+                      }}
                       disabled={!!kicking[member.userId]}
                     >
                       {kicking[member.userId] ? (

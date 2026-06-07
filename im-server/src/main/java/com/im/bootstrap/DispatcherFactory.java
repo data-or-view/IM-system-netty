@@ -11,6 +11,7 @@ import com.im.core.handler.WebhookService;
 import com.im.core.handler.unified.AuthInterceptor;
 import com.im.core.handler.unified.ChatHandler;
 import com.im.core.handler.unified.ConversationHandler;
+import com.im.core.handler.unified.FileDirectTransferHandler;
 import com.im.core.handler.unified.FileMultipartHandler;
 import com.im.core.handler.unified.FileUploadHandler;
 import com.im.core.handler.unified.FriendHandler;
@@ -77,7 +78,7 @@ final class DispatcherFactory {
         registerBusinessHandlers(dispatcher, dependencies, loginUseCase, registerUseCase,
                 conversationAccessChecker, sendMessageUseCase);
         registerMessagingHandlers(dispatcher, dependencies, sendMessageUseCase, revokeUseCase, conversationAccessChecker);
-        registerFileHandlers(dispatcher, config, dependencies.storage().fileStorage());
+        registerFileHandlers(dispatcher, config, dependencies);
         return dispatcher;
     }
 
@@ -93,7 +94,8 @@ final class DispatcherFactory {
                                                  ConversationAccessChecker conversationAccessChecker,
                                                  SendMessageUseCase sendMessageUseCase) {
         dispatcher.registerHandlers(new UserHandler(dependencies.business().userManager(), registerUseCase),
-                Operation.USER_REGISTER, Operation.USER_INFO, Operation.USER_SEARCH, Operation.USER_UPDATE);
+                Operation.USER_REGISTER, Operation.USER_ME, Operation.USER_INFO,
+                Operation.USER_SEARCH, Operation.USER_UPDATE);
         dispatcher.registerHandlers(new FriendHandler(
                         dependencies.business().friendManager(),
                         dependencies.runtime().friendApplyNotifier()),
@@ -147,12 +149,19 @@ final class DispatcherFactory {
                 new RevokeHandler(revokeUseCase, dependencies.runtime().sessionManager()));
     }
 
-    private static void registerFileHandlers(ApiDispatcher dispatcher, Config config, IFileStorageService fileStorage) {
+    private static void registerFileHandlers(ApiDispatcher dispatcher, Config config,
+                                             DispatcherDependencies dependencies) {
+        IFileStorageService fileStorage = dependencies.storage().fileStorage();
         dispatcher.registerHandler(Operation.FILE_UPLOAD,
                 new FileUploadHandler(new FileUploadUseCase(
                         fileStorage, config.getLong("im.minio.max-file-size", 100L * 1024 * 1024))));
-        dispatcher.registerHandlers(new FileMultipartHandler(new MultipartUploadUseCase(fileStorage)),
-                Operation.FILE_MULTIPART_INIT, Operation.FILE_MULTIPART_UPLOAD,
+        FileDirectTransferHandler directHandler = new FileDirectTransferHandler(
+                dependencies.storage().directFileTransferUseCase());
+        dispatcher.registerHandlers(directHandler,
+                Operation.FILE_UPLOAD_SIGN, Operation.FILE_UPLOAD_COMPLETE, Operation.FILE_DOWNLOAD_SIGN,
+                Operation.FILE_MULTIPART_INIT, Operation.FILE_MULTIPART_PART_SIGN,
                 Operation.FILE_MULTIPART_COMPLETE, Operation.FILE_MULTIPART_ABORT);
+        dispatcher.registerHandler(Operation.FILE_MULTIPART_UPLOAD,
+                new FileMultipartHandler(new MultipartUploadUseCase(fileStorage)));
     }
 }

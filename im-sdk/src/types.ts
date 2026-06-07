@@ -8,6 +8,7 @@ export type ConnectionState = "disconnected" | "connecting" | "connected" | "rec
 export const OP = {
   // User
   USER_REGISTER: "user.register",
+  USER_ME: "user.me",
   USER_INFO: "user.info",
   USER_SEARCH: "user.search",
   USER_UPDATE: "user.update",
@@ -51,7 +52,11 @@ export const OP = {
   CHAT_REVOKE: "msg_revoke",
   // File
   FILE_UPLOAD: "file.upload",
+  FILE_UPLOAD_SIGN: "file.upload.sign",
+  FILE_UPLOAD_COMPLETE: "file.upload.complete",
+  FILE_DOWNLOAD_SIGN: "file.download.sign",
   FILE_MULTIPART_INIT: "file.multipart.init",
+  FILE_MULTIPART_PART_SIGN: "file.multipart.part.sign",
   FILE_MULTIPART_UPLOAD: "file.multipart.upload",
   FILE_MULTIPART_COMPLETE: "file.multipart.complete",
   FILE_MULTIPART_ABORT: "file.multipart.abort",

@@ -1,6 +1,14 @@
-import { OP, type RegisterResult, type UserInfo, type WSResponse } from "../types.js";
+import { IMError, OP, type FileUploadResult, type RegisterResult, type UserInfo, type WSResponse } from "../types.js";
 import type { WsTransport } from "../transport/ws.js";
 import { type HttpAPI, requireHttp } from "./http-api.js";
+
+export type ProfileUpdateParams = {
+  nickname?: string;
+  faceUrl?: string;
+  ex?: string;
+};
+
+type AvatarUploader = (fileName: string, fileData: Uint8Array | Blob, mimeType?: string) => Promise<FileUploadResult>;
 
 /**
  * 用户模块 API。
@@ -9,7 +17,11 @@ import { type HttpAPI, requireHttp } from "./http-api.js";
  * login 暂时保留 WS，因为后端登录同时承担连接绑定和上线语义。
  */
 export class UserAPI {
-  constructor(private wsTransport: WsTransport, private httpTransport?: HttpAPI) {}
+  constructor(
+    private wsTransport: WsTransport,
+    private httpTransport?: HttpAPI,
+    private uploadAvatarFile?: AvatarUploader,
+  ) {}
 
   /** 注册新用户 */
   register(params: { password?: string; nickname?: string; faceUrl?: string } = {}): Promise<RegisterResult> {
@@ -42,6 +54,11 @@ export class UserAPI {
     return requireHttp(this.httpTransport).get<UserInfo>("/api/user/info", { userId });
   }
 
+  /** 获取当前登录用户信息 */
+  me(): Promise<UserInfo> {
+    return requireHttp(this.httpTransport).get<UserInfo>("/api/user/me");
+  }
+
   /** 搜索用户 */
   search(keyword: string, limit = 20): Promise<UserInfo[]> {
     return requireHttp(this.httpTransport).get<{ users?: UserInfo[] } | UserInfo[]>("/api/user/search", {
@@ -53,5 +70,23 @@ export class UserAPI {
   /** 更新用户信息 */
   update(params: Record<string, unknown>): Promise<void> {
     return requireHttp(this.httpTransport).post("/api/user/update", params).then(() => undefined);
+  }
+
+  /** 更新当前登录用户资料 */
+  updateProfile(params: ProfileUpdateParams): Promise<UserInfo> {
+    return this.update(params).then(() => this.me());
+  }
+
+  /** 上传头像并更新当前登录用户的 faceUrl。 */
+  async updateAvatar(file: Uint8Array | Blob, fileName = "avatar"): Promise<UserInfo> {
+    if (!this.uploadAvatarFile) {
+      throw new IMError(-1, "Avatar upload requires httpUrl");
+    }
+    const mimeType = file instanceof Blob && file.type ? file.type : "application/octet-stream";
+    const uploaded = await this.uploadAvatarFile(fileName, file, mimeType);
+    if (!uploaded.fileUrl) {
+      throw new IMError(-1, "Avatar upload did not return fileUrl");
+    }
+    return this.updateProfile({ faceUrl: uploaded.fileUrl });
   }
 }

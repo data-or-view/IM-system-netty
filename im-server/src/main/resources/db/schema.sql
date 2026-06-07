@@ -327,6 +327,7 @@ CREATE TABLE IF NOT EXISTS im_objects (
     user_id           VARCHAR(64)  NOT NULL COMMENT '上传用户ID',
     hash              VARCHAR(128) NOT NULL DEFAULT '' COMMENT '文件SHA256（用于去重）',
     engine            VARCHAR(32)  NOT NULL DEFAULT '' COMMENT '存储后端: minio/oss/cos/kodo/aws',
+    bucket            VARCHAR(128) NOT NULL DEFAULT 'im-system' COMMENT '存储桶',
     object_key        VARCHAR(512) NOT NULL DEFAULT '' COMMENT '在存储后端的实际Key',
     file_size         BIGINT       NOT NULL DEFAULT 0  COMMENT '文件大小(字节)',
     content_type      VARCHAR(128) NOT NULL DEFAULT '' COMMENT 'MIME类型',

@@ -16,6 +16,7 @@ public enum Operation {
 
     // ── 用户 ──
     USER_REGISTER("user.register", "POST", "/api/user/register", false, TransportType.HTTP_ONLY),
+    USER_ME("user.me", "GET", "/api/user/me", true, TransportType.HTTP_ONLY),
     USER_INFO("user.info", "GET", "/api/user/info", true, TransportType.HTTP_ONLY),
     USER_SEARCH("user.search", "GET", "/api/user/search", true, TransportType.HTTP_ONLY),
     USER_UPDATE("user.update", "POST", "/api/user/update", true, TransportType.HTTP_ONLY),
@@ -70,7 +71,11 @@ public enum Operation {
 
     // ── 文件 ──
     FILE_UPLOAD("file.upload", "POST", "/api/file/upload", true, TransportType.HTTP_ONLY),
+    FILE_UPLOAD_SIGN("file.upload.sign", "POST", "/api/file/upload/sign", true, TransportType.HTTP_ONLY),
+    FILE_UPLOAD_COMPLETE("file.upload.complete", "POST", "/api/file/upload/complete", true, TransportType.HTTP_ONLY),
+    FILE_DOWNLOAD_SIGN("file.download.sign", "POST", "/api/file/download/sign", true, TransportType.HTTP_ONLY),
     FILE_MULTIPART_INIT("file.multipart.init", "POST", "/api/file/multipart/init", true, TransportType.HTTP_ONLY),
+    FILE_MULTIPART_PART_SIGN("file.multipart.part.sign", "POST", "/api/file/multipart/part-sign", true, TransportType.HTTP_ONLY),
     FILE_MULTIPART_UPLOAD("file.multipart.upload", "POST", "/api/file/multipart/upload", true, TransportType.HTTP_ONLY),
     FILE_MULTIPART_COMPLETE("file.multipart.complete", "POST", "/api/file/multipart/complete", true, TransportType.HTTP_ONLY),
     FILE_MULTIPART_ABORT("file.multipart.abort", "POST", "/api/file/multipart/abort", true, TransportType.HTTP_ONLY),

@@ -168,8 +168,7 @@ export default function ChatArea() {
     if (!conv) return;
     setUploading(true);
     try {
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      const uploaded = await im.file.upload(file.name, bytes, file.type || "application/octet-stream");
+      const uploaded = await im.file.upload(file.name, file, file.type || "application/octet-stream");
       const fileContent = {
         uuid: uploaded.fileId,
         fileName: uploaded.fileName || file.name,
