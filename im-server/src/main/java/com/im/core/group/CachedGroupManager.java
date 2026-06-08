@@ -3,6 +3,7 @@ package com.im.core.group;
 import com.im.api.GroupAbstractInfo;
 import com.im.api.GroupApply;
 import com.im.api.GroupApplyHandleResult;
+import com.im.api.GroupDisbandResult;
 import com.im.api.GroupInformation;
 import com.im.api.GroupJoinResult;
 import com.im.api.GroupMemberInformation;
@@ -54,9 +55,10 @@ public class CachedGroupManager implements IGroupManager {
     }
 
     @Override
-    public void disbandGroup(String groupId, String operatorId) {
-        delegate.disbandGroup(groupId, operatorId);
+    public GroupDisbandResult disbandGroup(String groupId, String operatorId) {
+        GroupDisbandResult result = delegate.disbandGroup(groupId, operatorId);
         invalidateGroupCaches(groupId);
+        return result;
     }
 
     @Override

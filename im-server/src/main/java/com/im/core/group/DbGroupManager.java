@@ -13,6 +13,7 @@ import com.im.core.db.mapper.GroupRequestMapper;
 import com.im.core.db.mapper.UserMapper;
 import com.im.core.sync.DbIncrementalSync;
 import com.im.common.exception.ForbiddenException;
+import com.im.common.exception.NotFoundException;
 import com.im.common.exception.PersistenceExceptions;
 import com.im.common.retry.RetryConfig;
 import com.im.common.retry.RetryExecutor;
@@ -110,31 +111,25 @@ public class DbGroupManager implements IGroupManager, GroupApplyPolicy.Gateway {
     }
 
     @Override
-    public void disbandGroup(String groupId, String operatorId) {
-        Set<String> affectedMembers;
-        affectedMembers = PersistenceExceptions.runDatabase("get affected group members before disband", () -> {
-            try (SqlSession session = MyBatisPlusFactory.openSession()) {
-                GroupMemberMapper memberMapper = session.getMapper(GroupMemberMapper.class);
-                return memberMapper.selectList(
-                        new LambdaQueryWrapper<GroupMemberEntity>()
-                                .eq(GroupMemberEntity::getGroupId, groupId)
-                                .select(GroupMemberEntity::getUserId)
-                ).stream().map(GroupMemberEntity::getUserId).collect(Collectors.toSet());
-            }
-        });
-
-        PersistenceExceptions.runDatabase("disband group", () -> retryExecutor.execute(CFG, () -> {
+    public GroupDisbandResult disbandGroup(String groupId, String operatorId) {
+        GroupDisbandResult result = PersistenceExceptions.runDatabase("disband group", () -> retryExecutor.execute(CFG, () -> {
         try (SqlSession session = MyBatisPlusFactory.openSession()) {
             GroupMapper groupMapper = session.getMapper(GroupMapper.class);
             GroupMemberMapper memberMapper = session.getMapper(GroupMemberMapper.class);
 
             GroupEntity entity = groupMapper.selectById(groupId);
-            if (entity == null) return null;
+            if (entity == null) throw new NotFoundException("group not found");
             if (!entity.getOwnerUserId().equals(operatorId)) {
                 log.warn("Only owner can disband group: groupId={}, operator={}", groupId, operatorId);
-                return null;
+                throw new ForbiddenException("only group owner can disband group");
             }
+            List<String> affectedMembers = memberMapper.selectList(
+                    new LambdaQueryWrapper<GroupMemberEntity>()
+                            .eq(GroupMemberEntity::getGroupId, groupId)
+                            .select(GroupMemberEntity::getUserId)
+            ).stream().map(GroupMemberEntity::getUserId).toList();
             entity.setStatus(GROUP_STATUS_DISBANDED);
+            entity.setMemberCount(0);
             entity.setUpdatedAt(System.currentTimeMillis());
             groupMapper.updateById(entity);
             LambdaQueryWrapper<GroupMemberEntity> qw = new LambdaQueryWrapper<>();
@@ -142,14 +137,15 @@ public class DbGroupManager implements IGroupManager, GroupApplyPolicy.Gateway {
             memberMapper.delete(qw);
             session.commit();
             log.info("Group disbanded: groupId={}", groupId);
+            return new GroupDisbandResult(groupId, operatorId, entity.getGroupName(), affectedMembers);
         }
-                    return null;
         }));
 
-        for (String uid : affectedMembers) {
+        for (String uid : result.getAffectedMemberIds()) {
             sync.recordChange(uid, "group", groupId, "delete");
             sync.recordChange(groupId, "member", uid, "delete");
         }
+        return result;
     }
 
     @Override
@@ -609,6 +605,17 @@ public class DbGroupManager implements IGroupManager, GroupApplyPolicy.Gateway {
                 GroupMapper mapper = session.getMapper(GroupMapper.class);
                 GroupEntity entity = mapper.selectById(groupId);
                 return entity != null ? toGroupInfo(entity) : null;
+            }
+        });
+    }
+
+    @Override
+    public GroupStatus getGroupStatus(String groupId) {
+        return PersistenceExceptions.runDatabase("get group status", () -> {
+            try (SqlSession session = MyBatisPlusFactory.openSession()) {
+                GroupMapper mapper = session.getMapper(GroupMapper.class);
+                GroupEntity entity = mapper.selectById(groupId);
+                return entity != null ? GroupStatus.fromCode(entity.getStatus()) : null;
             }
         });
     }

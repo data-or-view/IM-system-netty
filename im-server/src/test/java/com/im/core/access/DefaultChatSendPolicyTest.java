@@ -5,6 +5,7 @@ import com.im.api.FriendInformation;
 import com.im.api.GroupApply;
 import com.im.api.GroupInformation;
 import com.im.api.GroupMemberInformation;
+import com.im.api.GroupStatus;
 import com.im.api.IFriendManager;
 import com.im.api.IGroupManager;
 import com.im.api.IUserManager;
@@ -82,6 +83,19 @@ class DefaultChatSendPolicyTest {
     }
 
     @Test
+    void rejectsGroupChatWhenGroupWasDisbanded() {
+        FakeGroupManager groupManager = new FakeGroupManager();
+        groupManager.statuses.put("group-1", GroupStatus.DISBANDED);
+        DefaultChatSendPolicy policy = new DefaultChatSendPolicy(users("alice"), new FakeFriendManager(), groupManager, false);
+
+        ImException ex = assertThrows(ImException.class,
+                () -> policy.requireCanSendGroup("alice", "group-1"));
+
+        assertEquals(ImErrorCode.FORBIDDEN, ex.getErrorCode());
+        assertEquals("群聊已解散，无法发送消息", ex.getDetail());
+    }
+
+    @Test
     void rejectsGroupChatWhenSenderIsMuted() {
         FakeGroupManager groupManager = new FakeGroupManager();
         groupManager.members.add("group-1|alice");
@@ -134,11 +148,15 @@ class DefaultChatSendPolicyTest {
     private static final class FakeGroupManager implements IGroupManager {
         private final Set<String> members = new HashSet<>();
         private final Set<String> muted = new HashSet<>();
+        private final Map<String, GroupStatus> statuses = new HashMap<>();
 
         @Override public boolean isMember(String groupId, String userId) { return members.contains(groupId + "|" + userId); }
+        @Override public GroupStatus getGroupStatus(String groupId) { return statuses.get(groupId); }
         @Override public boolean isMemberMuted(String groupId, String userId) { return muted.contains(groupId + "|" + userId); }
         @Override public void createGroup(String groupId, String ownerId, String groupName, String faceUrl, List<String> members, int groupType, int needVerification) {}
-        @Override public void disbandGroup(String groupId, String operatorId) {}
+        @Override public com.im.api.GroupDisbandResult disbandGroup(String groupId, String operatorId) {
+            return new com.im.api.GroupDisbandResult(groupId, operatorId, groupId, List.of());
+        }
         @Override public void setGroupInformation(String groupId, String groupName, String notification, String introduction, String faceUrl, int needVerification, int lookMemberInfo, int applyMemberFriend, String notificationUserId) {}
         @Override public void addMember(String groupId, String userId) {}
         @Override public void addMembers(String groupId, List<String> userIds) {}

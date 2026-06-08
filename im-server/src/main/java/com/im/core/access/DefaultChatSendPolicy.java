@@ -4,6 +4,7 @@ import com.im.api.IChatSendPolicy;
 import com.im.api.IFriendManager;
 import com.im.api.IGroupManager;
 import com.im.api.IUserManager;
+import com.im.api.GroupStatus;
 import com.im.common.exception.ValidationException;
 import com.im.common.exception.ForbiddenException;
 import com.im.common.exception.NotFoundException;
@@ -52,6 +53,9 @@ public class DefaultChatSendPolicy implements IChatSendPolicy {
         fromUserId = Preconditions.requireText(fromUserId, "fromUserId");
         groupId = Preconditions.requireText(groupId, "groupId");
         if (groupManager != null && !groupManager.isMember(groupId, fromUserId)) {
+            if (groupManager.getGroupStatus(groupId) == GroupStatus.DISBANDED) {
+                throw new ForbiddenException("群聊已解散，无法发送消息");
+            }
             throw new ForbiddenException("not a group member");
         }
         if (groupManager != null && groupManager.isMemberMuted(groupId, fromUserId)) {

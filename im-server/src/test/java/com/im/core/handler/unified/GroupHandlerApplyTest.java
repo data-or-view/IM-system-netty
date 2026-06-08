@@ -4,6 +4,7 @@ import com.im.api.ApiRequest;
 import com.im.api.ApplyHandleResult;
 import com.im.api.GroupApply;
 import com.im.api.GroupApplyHandleResult;
+import com.im.api.GroupDisbandResult;
 import com.im.api.GroupInformation;
 import com.im.api.GroupJoinResult;
 import com.im.api.GroupMemberInformation;
@@ -14,7 +15,9 @@ import com.im.api.Operation;
 import com.im.api.Conversation;
 import com.im.api.Message;
 import com.im.common.exception.ForbiddenException;
+import com.im.common.exception.NotFoundException;
 import com.im.core.group.GroupSystemMessagePublisher;
+import com.im.core.system.SystemMessagePublishUseCase;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -162,6 +165,45 @@ class GroupHandlerApplyTest {
         assertEquals(null, conversationManager.deletedConversationId);
     }
 
+    @Test
+    void disbandingGroupRemovesConversationForAffectedMembersAndPublishesSystemMessage() {
+        RecordingGroupManager manager = new RecordingGroupManager();
+        manager.disbandResult = new GroupDisbandResult("grp_1", "owner", "研发群", List.of("owner", "alice"));
+        RecordingConversationManager conversationManager = new RecordingConversationManager();
+        RecordingSystemMessageStore systemMessageStore = new RecordingSystemMessageStore();
+        GroupHandler handler = new GroupHandler(manager, null, GroupSystemMessagePublisher.NOOP,
+                conversationManager, new SystemMessagePublishUseCase(systemMessageStore, null));
+        ApiRequest request = request(Operation.GROUP_DISBAND, Map.of("groupId", "grp_1"), "owner");
+
+        handler.handle(request);
+
+        assertEquals(List.of("owner:group_grp_1", "alice:group_grp_1"), conversationManager.deletedConversations);
+        assertEquals("group", systemMessageStore.channelId);
+        assertEquals("群聊已解散", systemMessageStore.title);
+        assertEquals("研发群已被群主解散", systemMessageStore.content);
+        assertEquals(List.of("owner", "alice"), systemMessageStore.inboxUserIds);
+    }
+
+    @Test
+    void nonOwnerCannotDisbandGroup() {
+        RecordingGroupManager manager = new RecordingGroupManager();
+        manager.disbandFailure = new ForbiddenException("only group owner can disband group");
+        GroupHandler handler = new GroupHandler(manager);
+        ApiRequest request = request(Operation.GROUP_DISBAND, Map.of("groupId", "grp_1"), "member");
+
+        assertThrows(ForbiddenException.class, () -> handler.handle(request));
+    }
+
+    @Test
+    void missingGroupCannotBeDisbanded() {
+        RecordingGroupManager manager = new RecordingGroupManager();
+        manager.disbandFailure = new NotFoundException("group not found");
+        GroupHandler handler = new GroupHandler(manager);
+        ApiRequest request = request(Operation.GROUP_DISBAND, Map.of("groupId", "missing"), "owner");
+
+        assertThrows(NotFoundException.class, () -> handler.handle(request));
+    }
+
     private static ApiRequest request(Operation operation, Map<String, Object> params, String userId) {
         ApiRequest request = new ApiRequest(operation, params, Map.of(), null, null);
         request.setAttribute("_uid", userId);
@@ -182,11 +224,16 @@ class GroupHandlerApplyTest {
         String createdGroupId;
         GroupJoinResult joinResult = GroupJoinResult.APPLY_CREATED;
         boolean quitResult = true;
+        GroupDisbandResult disbandResult = new GroupDisbandResult("grp_1", "owner", "grp_1", List.of());
+        RuntimeException disbandFailure;
 
         @Override public void createGroup(String groupId, String ownerId, String groupName, String faceUrl, List<String> members, int groupType, int needVerification) {
             createdGroupId = groupId;
         }
-        @Override public void disbandGroup(String groupId, String operatorId) {}
+        @Override public GroupDisbandResult disbandGroup(String groupId, String operatorId) {
+            if (disbandFailure != null) throw disbandFailure;
+            return disbandResult;
+        }
         @Override public void setGroupInformation(String groupId, String groupName, String notification, String introduction, String faceUrl, int needVerification, int lookMemberInfo, int applyMemberFriend, String notificationUserId) {}
         @Override public void addMember(String groupId, String userId) {}
         @Override public void addMembers(String groupId, List<String> userIds) {}
@@ -255,6 +302,7 @@ class GroupHandlerApplyTest {
     private static final class RecordingConversationManager implements IConversationManager {
         String deletedOwnerUserId;
         String deletedConversationId;
+        List<String> deletedConversations = new java.util.ArrayList<>();
 
         @Override public List<Conversation> getConversations(String ownerUserId) { return List.of(); }
         @Override public Conversation getConversation(String ownerUserId, String conversationId) { return null; }
@@ -268,6 +316,30 @@ class GroupHandlerApplyTest {
         public void deleteConversation(String ownerUserId, String conversationId) {
             deletedOwnerUserId = ownerUserId;
             deletedConversationId = conversationId;
+            deletedConversations.add(ownerUserId + ":" + conversationId);
         }
+    }
+
+    private static final class RecordingSystemMessageStore implements com.im.api.ISystemMessageStore {
+        String channelId;
+        String title;
+        String content;
+        List<String> inboxUserIds = new java.util.ArrayList<>();
+
+        @Override public List<com.im.api.SystemChannel> listChannels() { return List.of(); }
+        @Override public void ensureChannel(com.im.api.SystemChannel channel) { channelId = channel.getChannelId(); }
+        @Override public void saveMessage(com.im.api.SystemMessage message) {
+            title = message.getTitle();
+            content = message.getContent();
+        }
+        @Override public void addInbox(String messageId, String userId, String channelId, long createdAt) {
+            inboxUserIds.add(userId);
+        }
+        @Override public List<com.im.api.SystemMessageInboxItem> listInbox(String userId, String channelId, boolean onlyUnread, int limit, long cursor) { return List.of(); }
+        @Override public com.im.api.SystemMessageInboxItem getInboxMessage(String userId, String messageId) { return null; }
+        @Override public void markRead(String userId, String messageId, long readAt) {}
+        @Override public int markAllRead(String userId, String channelId, long readAt) { return 0; }
+        @Override public int unreadCount(String userId, String channelId) { return 0; }
+        @Override public Map<String, Integer> unreadCountByChannel(String userId) { return Map.of(); }
     }
 }

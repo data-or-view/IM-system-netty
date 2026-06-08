@@ -31,6 +31,7 @@ import com.im.core.usecase.LoginUseCase;
 import com.im.core.usecase.RegisterUseCase;
 import com.im.core.usecase.RevokeUseCase;
 import com.im.core.usecase.SendMessageUseCase;
+import com.im.core.system.SystemMessagePublishUseCase;
 import com.im.core.webhook.LocalWebhookManager;
 import com.im.infrastructure.storage.usecase.FileUploadUseCase;
 import com.im.infrastructure.storage.usecase.MultipartUploadUseCase;
@@ -69,6 +70,9 @@ final class DispatcherFactory {
                 dependencies.storage().sequenceManager(),
                 webhookService,
                 chatSendPolicy);
+        SystemMessagePublishUseCase systemMessagePublishUseCase = new SystemMessagePublishUseCase(
+                dependencies.storage().systemMessageStore(),
+                dependencies.runtime().systemMessageNotifier());
         RevokeUseCase revokeUseCase = new RevokeUseCase(
                 dependencies.storage().messageStore(), dependencies.business().groupManager());
         ConversationAccessChecker conversationAccessChecker = new ConversationAccessChecker(
@@ -77,7 +81,7 @@ final class DispatcherFactory {
         ApiDispatcher dispatcher = new ApiDispatcher();
         registerInterceptors(dispatcher, dependencies.business().authenticator());
         registerBusinessHandlers(dispatcher, dependencies, loginUseCase, registerUseCase,
-                conversationAccessChecker, sendMessageUseCase);
+                conversationAccessChecker, sendMessageUseCase, systemMessagePublishUseCase);
         registerMessagingHandlers(dispatcher, dependencies, sendMessageUseCase, revokeUseCase, conversationAccessChecker);
         registerFileHandlers(dispatcher, config, dependencies);
         return dispatcher;
@@ -93,7 +97,8 @@ final class DispatcherFactory {
                                                  LoginUseCase loginUseCase,
                                                  RegisterUseCase registerUseCase,
                                                  ConversationAccessChecker conversationAccessChecker,
-                                                 SendMessageUseCase sendMessageUseCase) {
+                                                 SendMessageUseCase sendMessageUseCase,
+                                                 SystemMessagePublishUseCase systemMessagePublishUseCase) {
         dispatcher.registerHandlers(new UserHandler(dependencies.business().userManager(), registerUseCase),
                 Operation.USER_REGISTER, Operation.USER_ME, Operation.USER_INFO,
                 Operation.USER_SEARCH, Operation.USER_UPDATE);
@@ -109,7 +114,8 @@ final class DispatcherFactory {
                         dependencies.business().groupManager(),
                         dependencies.runtime().groupApplyNotifier(),
                         new DefaultGroupSystemMessagePublisher(sendMessageUseCase),
-                        dependencies.business().conversationManager()),
+                        dependencies.business().conversationManager(),
+                        systemMessagePublishUseCase),
                 Operation.GROUP_CREATE, Operation.GROUP_JOIN, Operation.GROUP_QUIT, Operation.GROUP_KICK,
                 Operation.GROUP_DISBAND, Operation.GROUP_INFO_UPDATE, Operation.GROUP_INFO,
                 Operation.GROUP_LIST, Operation.GROUP_SEARCH, Operation.GROUP_MEMBERS, Operation.GROUP_MUTE_ALL,

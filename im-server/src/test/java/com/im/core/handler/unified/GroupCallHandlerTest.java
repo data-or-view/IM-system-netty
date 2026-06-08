@@ -117,7 +117,7 @@ class GroupCallHandlerTest {
         @Override public String getRole(String groupId, String userId) { return roles.getOrDefault(groupId + ":" + userId, isMember(groupId, userId) ? "member" : null); }
         @Override public Set<String> getMemberIds(String groupId) { return members.getOrDefault(groupId, Set.of()); }
         @Override public void createGroup(String groupId, String ownerId, String groupName, String faceUrl, List<String> members, int groupType, int needVerification) { throw new UnsupportedOperationException(); }
-        @Override public void disbandGroup(String groupId, String operatorId) { throw new UnsupportedOperationException(); }
+        @Override public com.im.api.GroupDisbandResult disbandGroup(String groupId, String operatorId) { throw new UnsupportedOperationException(); }
         @Override public void setGroupInformation(String groupId, String groupName, String notification, String introduction, String faceUrl, int needVerification, int lookMemberInfo, int applyMemberFriend, String notificationUserId) { throw new UnsupportedOperationException(); }
         @Override public void addMember(String groupId, String userId) { throw new UnsupportedOperationException(); }
         @Override public void addMembers(String groupId, List<String> userIds) { throw new UnsupportedOperationException(); }

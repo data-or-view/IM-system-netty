@@ -133,7 +133,9 @@ class CachedGroupManagerTest {
         private boolean quitResult = true;
 
         @Override public void createGroup(String groupId, String ownerId, String groupName, String faceUrl, List<String> members, int groupType, int needVerification) {}
-        @Override public void disbandGroup(String groupId, String operatorId) {}
+        @Override public com.im.api.GroupDisbandResult disbandGroup(String groupId, String operatorId) {
+            return new com.im.api.GroupDisbandResult(groupId, operatorId, groupId, List.of());
+        }
         @Override public void setGroupInformation(String groupId, String groupName, String notification, String introduction, String faceUrl, int needVerification, int lookMemberInfo, int applyMemberFriend, String notificationUserId) {}
         @Override public void addMember(String groupId, String userId) {}
         @Override public void addMembers(String groupId, List<String> userIds) {}

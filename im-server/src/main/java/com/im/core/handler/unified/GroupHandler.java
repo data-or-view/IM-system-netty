@@ -3,6 +3,7 @@ package com.im.core.handler.unified;
 import com.im.api.ApiRequest;
 import com.im.api.GroupApplyHandleResult;
 import com.im.api.GroupApply;
+import com.im.api.GroupDisbandResult;
 import com.im.api.GroupInformation;
 import com.im.api.GroupJoinResult;
 import com.im.api.GroupMemberInformation;
@@ -18,6 +19,8 @@ import com.im.common.id.IdGenerator;
 import com.im.common.validation.Preconditions;
 import com.im.core.group.GroupApplyNotifier;
 import com.im.core.group.GroupSystemMessagePublisher;
+import com.im.core.system.SystemMessagePublishUseCase;
+import com.im.api.SystemMessage;
 
 import java.util.List;
 import java.util.Map;
@@ -34,6 +37,7 @@ public class GroupHandler implements RequestHandler {
     private final GroupApplyNotifier groupApplyNotifier;
     private final GroupSystemMessagePublisher groupSystemMessagePublisher;
     private final IConversationManager conversationManager;
+    private final SystemMessagePublishUseCase systemMessagePublishUseCase;
 
     public GroupHandler(IGroupManager groupManager) {
         this(groupManager, GroupApplyNotifier.NOOP);
@@ -51,11 +55,19 @@ public class GroupHandler implements RequestHandler {
     public GroupHandler(IGroupManager groupManager, GroupApplyNotifier groupApplyNotifier,
                         GroupSystemMessagePublisher groupSystemMessagePublisher,
                         IConversationManager conversationManager) {
+        this(groupManager, groupApplyNotifier, groupSystemMessagePublisher, conversationManager, null);
+    }
+
+    public GroupHandler(IGroupManager groupManager, GroupApplyNotifier groupApplyNotifier,
+                        GroupSystemMessagePublisher groupSystemMessagePublisher,
+                        IConversationManager conversationManager,
+                        SystemMessagePublishUseCase systemMessagePublishUseCase) {
         this.groupManager = groupManager;
         this.groupApplyNotifier = groupApplyNotifier != null ? groupApplyNotifier : GroupApplyNotifier.NOOP;
         this.groupSystemMessagePublisher = groupSystemMessagePublisher != null
                 ? groupSystemMessagePublisher : GroupSystemMessagePublisher.NOOP;
         this.conversationManager = conversationManager;
+        this.systemMessagePublishUseCase = systemMessagePublishUseCase;
     }
 
     @Override
@@ -144,8 +156,28 @@ public class GroupHandler implements RequestHandler {
         String groupId = req.getString("groupId");
         String operatorId = RequestPreconditions.requireUser(req);
         groupId = Preconditions.requireText(groupId, "groupId");
-        groupManager.disbandGroup(groupId, operatorId);
+        GroupDisbandResult result = groupManager.disbandGroup(groupId, operatorId);
+        for (String memberId : result.getAffectedMemberIds()) {
+            if (conversationManager != null) {
+                conversationManager.deleteConversation(memberId, ConversationIds.group(groupId));
+            }
+        }
+        publishGroupDisbandedMessage(result);
         return Map.of("status", "OK");
+    }
+
+    private void publishGroupDisbandedMessage(GroupDisbandResult result) {
+        if (systemMessagePublishUseCase == null || result.getAffectedMemberIds().isEmpty()) return;
+        SystemMessage message = new SystemMessage();
+        message.setChannelId("group");
+        message.setTitle("群聊已解散");
+        String groupName = result.getGroupName() != null && !result.getGroupName().isBlank()
+                ? result.getGroupName() : result.getGroupId();
+        message.setSummary(groupName + "已解散");
+        message.setContent(groupName + "已被群主解散");
+        message.setContentType("group_disbanded");
+        message.setSenderId(result.getOperatorId());
+        systemMessagePublishUseCase.publishToUsers(message, result.getAffectedMemberIds());
     }
 
     private Object handleInfoUpdate(ApiRequest req) {

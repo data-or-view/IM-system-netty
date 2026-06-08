@@ -35,7 +35,7 @@ public interface IGroupManager {
      * 解散群组。
      * 只有群主可解散。
      */
-    void disbandGroup(String groupId, String operatorId);
+    GroupDisbandResult disbandGroup(String groupId, String operatorId);
 
     /**
      * 修改群信息。
@@ -271,6 +271,11 @@ public interface IGroupManager {
      * 获取群信息。
      */
     GroupInformation getGroupInformation(String groupId);
+
+    default GroupStatus getGroupStatus(String groupId) {
+        GroupInformation info = getGroupInformation(groupId);
+        return info != null ? info.getStatus() : null;
+    }
 
     /**
      * 搜索群组（按群名关键词）。
