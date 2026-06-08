@@ -124,24 +124,30 @@ public class DbFriendManager implements IFriendManager, FriendApplyPolicy.Gatewa
     }
 
     @Override
-    public void deleteFriend(String ownerUserId, String friendUserId) {
-        PersistenceExceptions.runDatabase("delete friend", () -> retryExecutor.execute(CFG, () -> {
+    public boolean deleteFriend(String ownerUserId, String friendUserId) {
+        boolean removed = PersistenceExceptions.runDatabase("delete friend", () -> retryExecutor.execute(CFG, () -> {
             try (SqlSession session = MyBatisPlusFactory.openSession()) {
                 FriendMapper mapper = session.getMapper(FriendMapper.class);
                 LambdaQueryWrapper<FriendEntity> qw = new LambdaQueryWrapper<>();
                 qw.eq(FriendEntity::getOwnerUserId, ownerUserId).eq(FriendEntity::getFriendUserId, friendUserId);
-                mapper.delete(qw);
+                int ownerDeleted = mapper.delete(qw);
                 qw = new LambdaQueryWrapper<>();
                 qw.eq(FriendEntity::getOwnerUserId, friendUserId).eq(FriendEntity::getFriendUserId, ownerUserId);
-                mapper.delete(qw);
+                int friendDeleted = mapper.delete(qw);
                 session.commit();
+                if (ownerDeleted <= 0 && friendDeleted <= 0) {
+                    return false;
+                }
                 log.info("Friend deleted: owner={}, friend={}", ownerUserId, friendUserId);
+                return true;
             }
-            return null;
         }));
 
-        sync.recordChange(ownerUserId, "friend", friendUserId, "delete");
-        sync.recordChange(friendUserId, "friend", ownerUserId, "delete");
+        if (removed) {
+            sync.recordChange(ownerUserId, "friend", friendUserId, "delete");
+            sync.recordChange(friendUserId, "friend", ownerUserId, "delete");
+        }
+        return removed;
     }
 
     @Override

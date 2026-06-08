@@ -4,7 +4,10 @@ import com.im.api.ApiRequest;
 import com.im.api.ApplyHandleResult;
 import com.im.api.FriendApply;
 import com.im.api.FriendInformation;
+import com.im.api.Conversation;
+import com.im.api.IConversationManager;
 import com.im.api.IFriendManager;
+import com.im.api.Message;
 import com.im.api.Operation;
 import com.im.common.exception.UnauthorizedException;
 import org.junit.jupiter.api.Test;
@@ -51,11 +54,42 @@ class FriendHandlerTest {
         org.junit.jupiter.api.Assertions.assertTrue(manager.onlyPending);
     }
 
+    @Test
+    void removingFriendDeletesOwnSingleConversationWhenRelationChanged() {
+        RecordingFriendManager manager = new RecordingFriendManager();
+        manager.deleteResult = true;
+        RecordingConversationManager conversationManager = new RecordingConversationManager();
+        FriendHandler handler = new FriendHandler(manager, null, conversationManager);
+        ApiRequest request = new ApiRequest(Operation.FRIEND_REMOVE,
+                Map.of("friendUserId", "bob"), Map.of(), null, null);
+        request.setAttribute("_uid", "alice");
+
+        handler.handle(request);
+
+        org.junit.jupiter.api.Assertions.assertEquals("alice", conversationManager.deletedOwnerUserId);
+        org.junit.jupiter.api.Assertions.assertEquals("single_alice_bob", conversationManager.deletedConversationId);
+    }
+
+    @Test
+    void removingFriendDoesNotDeleteConversationWhenRelationDidNotChange() {
+        RecordingFriendManager manager = new RecordingFriendManager();
+        manager.deleteResult = false;
+        RecordingConversationManager conversationManager = new RecordingConversationManager();
+        FriendHandler handler = new FriendHandler(manager, null, conversationManager);
+        ApiRequest request = new ApiRequest(Operation.FRIEND_REMOVE,
+                Map.of("friendUserId", "bob"), Map.of(), null, null);
+        request.setAttribute("_uid", "alice");
+
+        handler.handle(request);
+
+        org.junit.jupiter.api.Assertions.assertEquals(null, conversationManager.deletedConversationId);
+    }
+
     private static class NoopFriendManager implements IFriendManager {
         @Override public void applyAddFriend(String fromUserId, String toUserId, String reqMsg) {}
         @Override public void respondFriendApply(String userId, String fromUserId, String handleMsg, boolean agreed) {}
         @Override public List<FriendApply> getFriendApplyList(String userId, boolean onlyPending) { return List.of(); }
-        @Override public void deleteFriend(String ownerUserId, String friendUserId) {}
+        @Override public boolean deleteFriend(String ownerUserId, String friendUserId) { return true; }
         @Override public List<FriendInformation> getFriendList(String userId) { return List.of(); }
         @Override public boolean isFriend(String userIdA, String userIdB) { return false; }
         @Override public void setFriendRemark(String ownerUserId, String friendUserId, String remark) {}
@@ -69,11 +103,36 @@ class FriendHandlerTest {
     private static class RecordingFriendManager extends NoopFriendManager {
         List<FriendApply> receivedApplies = List.of();
         boolean onlyPending;
+        boolean deleteResult = true;
 
         @Override
         public List<FriendApply> getFriendApplyList(String userId, boolean onlyPending) {
             this.onlyPending = onlyPending;
             return receivedApplies;
+        }
+
+        @Override
+        public boolean deleteFriend(String ownerUserId, String friendUserId) {
+            return deleteResult;
+        }
+    }
+
+    private static final class RecordingConversationManager implements IConversationManager {
+        String deletedOwnerUserId;
+        String deletedConversationId;
+
+        @Override public List<Conversation> getConversations(String ownerUserId) { return List.of(); }
+        @Override public Conversation getConversation(String ownerUserId, String conversationId) { return null; }
+        @Override public void updateOnMessage(String ownerUserId, String conversationId, Message msg, boolean isSelf) {}
+        @Override public void markRead(String ownerUserId, String conversationId, long readSeq) {}
+        @Override public void setPinned(String ownerUserId, String conversationId, boolean pinned) {}
+        @Override public void setRecvMsgOpt(String ownerUserId, String conversationId, int recvMsgOpt) {}
+        @Override public void setBurnDuration(String ownerUserId, String conversationId, int burnDuration) {}
+
+        @Override
+        public void deleteConversation(String ownerUserId, String conversationId) {
+            deletedOwnerUserId = ownerUserId;
+            deletedConversationId = conversationId;
         }
     }
 

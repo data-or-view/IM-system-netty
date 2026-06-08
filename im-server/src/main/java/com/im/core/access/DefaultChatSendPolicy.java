@@ -43,7 +43,7 @@ public class DefaultChatSendPolicy implements IChatSendPolicy {
             throw new ForbiddenException("blocked by target user");
         }
         if (requireFriendForSingleChat && friendManager != null && !friendManager.isFriend(fromUserId, toUserId)) {
-            throw new ForbiddenException("single chat requires friend relation");
+            throw new ForbiddenException("对方已删除你，无法发送消息");
         }
     }
 

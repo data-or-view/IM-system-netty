@@ -59,6 +59,7 @@ class DefaultChatSendPolicyTest {
                 () -> policy.requireCanSendSingle("alice", "bob"));
 
         assertEquals(ImErrorCode.FORBIDDEN, ex.getErrorCode());
+        assertEquals("对方已删除你，无法发送消息", ex.getDetail());
     }
 
     @Test
@@ -121,7 +122,7 @@ class DefaultChatSendPolicyTest {
         @Override public void applyAddFriend(String fromUserId, String toUserId, String reqMsg) {}
         @Override public void respondFriendApply(String userId, String fromUserId, String handleMsg, boolean agreed) {}
         @Override public List<FriendApply> getFriendApplyList(String userId, boolean onlyPending) { return List.of(); }
-        @Override public void deleteFriend(String ownerUserId, String friendUserId) {}
+        @Override public boolean deleteFriend(String ownerUserId, String friendUserId) { return true; }
         @Override public List<FriendInformation> getFriendList(String userId) { return List.of(); }
         @Override public void setFriendRemark(String ownerUserId, String friendUserId, String remark) {}
         @Override public void setFriendPinned(String ownerUserId, String friendUserId, boolean pinned) {}

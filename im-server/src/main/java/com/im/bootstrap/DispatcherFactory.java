@@ -63,7 +63,7 @@ final class DispatcherFactory {
                 dependencies.business().userManager(),
                 dependencies.business().friendManager(),
                 dependencies.business().groupManager(),
-                config.getBoolean("im.chat.single.require-friend", false));
+                config.getBoolean("im.chat.single.require-friend", true));
         SendMessageUseCase sendMessageUseCase = new SendMessageUseCase(
                 dependencies.storage().messageQueue(),
                 dependencies.storage().sequenceManager(),
@@ -99,7 +99,8 @@ final class DispatcherFactory {
                 Operation.USER_SEARCH, Operation.USER_UPDATE);
         dispatcher.registerHandlers(new FriendHandler(
                         dependencies.business().friendManager(),
-                        dependencies.runtime().friendApplyNotifier()),
+                        dependencies.runtime().friendApplyNotifier(),
+                        dependencies.business().conversationManager()),
                 Operation.FRIEND_APPLY, Operation.FRIEND_APPROVE, Operation.FRIEND_REMOVE, Operation.FRIEND_LIST,
                 Operation.FRIEND_BLACK, Operation.FRIEND_UNBLACK, Operation.FRIEND_BLACKLIST,
                 Operation.FRIEND_APPLY_RECEIVED, Operation.FRIEND_APPLY_SENT,

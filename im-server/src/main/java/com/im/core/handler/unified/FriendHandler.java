@@ -1,7 +1,9 @@
 package com.im.core.handler.unified;
 
 import com.im.api.ApiRequest;
+import com.im.api.ConversationIds;
 import com.im.api.FriendInformation;
+import com.im.api.IConversationManager;
 import com.im.api.IFriendManager;
 import com.im.api.RequestPreconditions;
 import com.im.api.RequestHandler;
@@ -23,14 +25,21 @@ public class FriendHandler implements RequestHandler {
 
     private final IFriendManager friendManager;
     private final FriendApplyNotifier friendApplyNotifier;
+    private final IConversationManager conversationManager;
 
     public FriendHandler(IFriendManager friendManager) {
         this(friendManager, FriendApplyNotifier.NOOP);
     }
 
     public FriendHandler(IFriendManager friendManager, FriendApplyNotifier friendApplyNotifier) {
+        this(friendManager, friendApplyNotifier, null);
+    }
+
+    public FriendHandler(IFriendManager friendManager, FriendApplyNotifier friendApplyNotifier,
+                         IConversationManager conversationManager) {
         this.friendManager = friendManager;
         this.friendApplyNotifier = friendApplyNotifier != null ? friendApplyNotifier : FriendApplyNotifier.NOOP;
+        this.conversationManager = conversationManager;
     }
 
     @Override
@@ -84,7 +93,10 @@ public class FriendHandler implements RequestHandler {
         String userId = RequestPreconditions.requireUser(req);
         String friendUserId = req.getString("friendUserId");
         friendUserId = Preconditions.requireText(friendUserId, "friendUserId");
-        friendManager.deleteFriend(userId, friendUserId);
+        boolean removed = friendManager.deleteFriend(userId, friendUserId);
+        if (removed && conversationManager != null) {
+            conversationManager.deleteConversation(userId, ConversationIds.single(userId, friendUserId));
+        }
         return Map.of("status", "OK");
     }
 

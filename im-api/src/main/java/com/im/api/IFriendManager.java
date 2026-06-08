@@ -51,8 +51,10 @@ public interface IFriendManager {
 
     /**
      * 删除好友。
+     *
+     * @return true=本次确实删除了好友关系, false=双方原本不是好友
      */
-    void deleteFriend(String ownerUserId, String friendUserId);
+    boolean deleteFriend(String ownerUserId, String friendUserId);
 
     /**
      * 获取用户的好友列表。
