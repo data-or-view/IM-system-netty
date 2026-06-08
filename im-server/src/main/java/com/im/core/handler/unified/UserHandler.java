@@ -2,9 +2,9 @@ package com.im.core.handler.unified;
 
 import com.im.api.ApiRequest;
 import com.im.api.IUserManager;
+import com.im.api.RequestPreconditions;
 import com.im.api.RequestHandler;
 import com.im.api.UserInformation;
-import com.im.common.exception.UnauthorizedException;
 import com.im.common.exception.NotFoundException;
 import com.im.common.validation.Preconditions;
 import com.im.core.usecase.RegisterResult;
@@ -58,8 +58,7 @@ public class UserHandler implements RequestHandler {
     }
 
     private Object handleMe(ApiRequest req) {
-        String userId = req.currentUserId();
-        if (userId == null) throw new UnauthorizedException("not authenticated");
+        String userId = RequestPreconditions.requireUser(req);
         UserInformation info = userManager.getUserInformation(userId);
         if (info == null) throw new NotFoundException("user not found");
         return info;
@@ -82,8 +81,7 @@ public class UserHandler implements RequestHandler {
     }
 
     private Object handleUpdate(ApiRequest req) {
-        String userId = req.currentUserId();
-        if (userId == null) throw new UnauthorizedException("not authenticated");
+        String userId = RequestPreconditions.requireUser(req);
         userManager.updateUserInformation(userId, req.getString("nickname"),
                 req.getString("faceUrl"), req.getString("ex"),
                 req.getInt("globalRecvMsgOpt", -1));

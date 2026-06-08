@@ -5,10 +5,10 @@ import com.im.api.ApiRequest;
 import com.im.api.IConversationAccessChecker;
 import com.im.api.IMessageStore;
 import com.im.api.ISequenceManager;
+import com.im.api.RequestPreconditions;
 import com.im.api.RequestHandler;
 import com.im.api.SearchMessagesParam;
 import com.im.api.SearchMessagesResult;
-import com.im.common.exception.UnauthorizedException;
 import com.im.common.exception.NotFoundException;
 import com.im.common.validation.Preconditions;
 import com.im.core.serialization.jackson.ObjectMapperProvider;
@@ -59,8 +59,7 @@ public class MessageHandler implements RequestHandler {
     }
 
     private Object handlePull(ApiRequest req) {
-        String userId = req.currentUserId();
-        if (userId == null) throw new UnauthorizedException("not authenticated");
+        String userId = RequestPreconditions.requireUser(req);
         String conversationId = req.getString("conversationId");
         conversationId = Preconditions.requireText(conversationId, "conversationId");
         requireReadable(userId, conversationId);
@@ -75,8 +74,7 @@ public class MessageHandler implements RequestHandler {
     }
 
     private Object handleSeq(ApiRequest req) {
-        String userId = req.currentUserId();
-        if (userId == null) throw new UnauthorizedException("not authenticated");
+        String userId = RequestPreconditions.requireUser(req);
         String conversationId = req.getString("conversationId");
         conversationId = Preconditions.requireText(conversationId, "conversationId");
         requireReadable(userId, conversationId);
@@ -94,8 +92,7 @@ public class MessageHandler implements RequestHandler {
      */
     @SuppressWarnings("unchecked")
     private Object handleSync(ApiRequest req) {
-        String userId = req.currentUserId();
-        if (userId == null) throw new UnauthorizedException("not authenticated");
+        String userId = RequestPreconditions.requireUser(req);
         Map<String, Object> seqsRaw = (Map<String, Object>) req.params().get("seqs");
         int limit = req.getInt("limit", 50);
 
@@ -125,8 +122,7 @@ public class MessageHandler implements RequestHandler {
 
     @SuppressWarnings("unchecked")
     private Object handleSearch(ApiRequest req) {
-        String userId = req.currentUserId();
-        if (userId == null) throw new UnauthorizedException("not authenticated");
+        String userId = RequestPreconditions.requireUser(req);
 
         String keyword = req.getString("keyword");
         List<String> contentTypeFilter = (List<String>) req.params().get("contentTypeFilter");

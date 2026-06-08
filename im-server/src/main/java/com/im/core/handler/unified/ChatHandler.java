@@ -2,13 +2,13 @@ package com.im.core.handler.unified;
 
 import com.im.api.ApiRequest;
 import com.im.api.ICallManager;
+import com.im.api.RequestPreconditions;
 import com.im.api.RequestHandler;
 import com.im.api.RoomInformation;
 import com.im.api.SignalingAction;
 import com.im.api.content.ContentType;
 import com.im.api.content.IMessageContent;
 import com.im.api.content.SignalingContent;
-import com.im.common.exception.UnauthorizedException;
 import com.im.common.exception.ValidationException;
 import com.im.common.exception.ForbiddenException;
 import com.im.core.call.CallStateManager;
@@ -43,10 +43,7 @@ public class ChatHandler implements RequestHandler {
 
     @Override
     public Object handle(ApiRequest req) {
-        String uid = req.currentUserId();
-        if (uid == null) {
-            throw new UnauthorizedException("not authenticated");
-        }
+        String uid = RequestPreconditions.requireUser(req);
         String toUserId = req.getString("toUserId");
         String groupId = req.getString("groupId");
 

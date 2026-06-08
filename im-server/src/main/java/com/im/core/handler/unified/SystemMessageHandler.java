@@ -3,6 +3,7 @@ package com.im.core.handler.unified;
 import com.im.api.ApiRequest;
 import com.im.api.ISystemMessageStore;
 import com.im.api.IUserManager;
+import com.im.api.RequestPreconditions;
 import com.im.api.RequestHandler;
 import com.im.api.SystemMessage;
 import com.im.api.SystemMessageNotifier;
@@ -10,7 +11,6 @@ import com.im.api.UserAdminLevel;
 import com.im.api.UserInformation;
 import com.im.common.exception.ForbiddenException;
 import com.im.common.exception.NotFoundException;
-import com.im.common.exception.UnauthorizedException;
 import com.im.common.exception.ValidationException;
 import com.im.common.validation.Preconditions;
 import com.im.core.system.SystemMessagePublishUseCase;
@@ -113,11 +113,7 @@ public class SystemMessageHandler implements RequestHandler {
     }
 
     private String requireUser(ApiRequest req) {
-        String userId = req.currentUserId();
-        if (userId == null || userId.isBlank()) {
-            throw new UnauthorizedException("not authenticated");
-        }
-        return userId;
+        return RequestPreconditions.requireUser(req);
     }
 
     private void requireAdmin(ApiRequest req) {

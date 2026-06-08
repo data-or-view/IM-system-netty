@@ -5,8 +5,8 @@ import com.im.api.ApiRequest;
 import com.im.api.IConnectionSession;
 import com.im.api.ISessionManager;
 import com.im.api.ProtocolFields;
+import com.im.api.RequestPreconditions;
 import com.im.api.RequestHandler;
-import com.im.common.exception.UnauthorizedException;
 import com.im.common.exception.ValidationException;
 import com.im.core.serialization.jackson.ObjectMapperProvider;
 import com.im.core.usecase.RevokeResult;
@@ -36,10 +36,7 @@ public class RevokeHandler implements RequestHandler {
 
     @Override
     public Object handle(ApiRequest req) {
-        String userId = req.currentUserId();
-        if (userId == null) {
-            throw new UnauthorizedException("not authenticated");
-        }
+        String userId = RequestPreconditions.requireUser(req);
 
         String conversationId = req.getString("conversationId");
         long seq = req.getLong("messageSeq", 0);

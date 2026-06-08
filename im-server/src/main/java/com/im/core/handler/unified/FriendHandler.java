@@ -3,8 +3,8 @@ package com.im.core.handler.unified;
 import com.im.api.ApiRequest;
 import com.im.api.FriendInformation;
 import com.im.api.IFriendManager;
+import com.im.api.RequestPreconditions;
 import com.im.api.RequestHandler;
-import com.im.common.exception.UnauthorizedException;
 import com.im.common.exception.ValidationException;
 import com.im.common.exception.ForbiddenException;
 import com.im.common.exception.NotFoundException;
@@ -52,10 +52,9 @@ public class FriendHandler implements RequestHandler {
     }
 
     private Map<String, String> handleApply(ApiRequest req) {
-        String fromUserId = req.currentUserId();
+        String fromUserId = RequestPreconditions.requireUser(req);
         String toUserId = req.getString("toUserId");
         String reqMsg = req.getString("reqMsg", "");
-        if (fromUserId == null) throw new UnauthorizedException("not authenticated");
         toUserId = Preconditions.requireText(toUserId, "toUserId");
         friendManager.applyAddFriend(fromUserId, toUserId, reqMsg);
         var apply = friendManager.getFriendApplyDetail(fromUserId, toUserId);
@@ -66,11 +65,10 @@ public class FriendHandler implements RequestHandler {
     }
 
     private Map<String, String> handleApprove(ApiRequest req) {
-        String userId = req.currentUserId();
+        String userId = RequestPreconditions.requireUser(req);
         String fromUserId = req.getString("fromUserId");
         boolean agreed = req.getBoolean("agreed", true);
         String handleMsg = req.getString("handleMsg", "");
-        if (userId == null) throw new UnauthorizedException("not authenticated");
         fromUserId = Preconditions.requireText(fromUserId, "fromUserId");
         friendManager.respondFriendApply(userId, fromUserId, handleMsg, agreed);
         var apply = friendManager.getFriendApplyDetail(fromUserId, userId);
@@ -81,65 +79,57 @@ public class FriendHandler implements RequestHandler {
     }
 
     private Map<String, String> handleRemove(ApiRequest req) {
-        String userId = req.currentUserId();
+        String userId = RequestPreconditions.requireUser(req);
         String friendUserId = req.getString("friendUserId");
-        if (userId == null) throw new UnauthorizedException("not authenticated");
         friendUserId = Preconditions.requireText(friendUserId, "friendUserId");
         friendManager.deleteFriend(userId, friendUserId);
         return Map.of("status", "OK");
     }
 
     private Object handleList(ApiRequest req) {
-        String userId = req.currentUserId();
-        if (userId == null) throw new UnauthorizedException("not authenticated");
+        String userId = RequestPreconditions.requireUser(req);
         List<FriendInformation> friends = friendManager.getFriendList(userId);
         return Map.of("userId", userId, "friends", friends, "count", friends.size());
     }
 
     private Map<String, String> handleAddBlack(ApiRequest req) {
-        String userId = req.currentUserId();
+        String userId = RequestPreconditions.requireUser(req);
         String blockedUserId = req.getString("blockedUserId");
-        if (userId == null) throw new UnauthorizedException("not authenticated");
         blockedUserId = Preconditions.requireText(blockedUserId, "blockedUserId");
         friendManager.addBlack(userId, blockedUserId);
         return Map.of("status", "OK");
     }
 
     private Map<String, String> handleRemoveBlack(ApiRequest req) {
-        String userId = req.currentUserId();
+        String userId = RequestPreconditions.requireUser(req);
         String blockedUserId = req.getString("blockedUserId");
-        if (userId == null) throw new UnauthorizedException("not authenticated");
         blockedUserId = Preconditions.requireText(blockedUserId, "blockedUserId");
         friendManager.removeBlack(userId, blockedUserId);
         return Map.of("status", "OK");
     }
 
     private Object handleBlackList(ApiRequest req) {
-        String userId = req.currentUserId();
-        if (userId == null) throw new UnauthorizedException("not authenticated");
+        String userId = RequestPreconditions.requireUser(req);
         return Map.of("userId", userId, "blacklist", friendManager.getBlackList(userId));
     }
 
     private Object handleSentApplyList(ApiRequest req) {
-        String userId = req.currentUserId();
-        if (userId == null) throw new UnauthorizedException("not authenticated");
+        String userId = RequestPreconditions.requireUser(req);
         var applies = friendManager.getSentFriendApplyList(userId);
         return Map.of("applies", applies, "count", applies.size());
     }
 
     private Object handleReceivedApplyList(ApiRequest req) {
-        String userId = req.currentUserId();
-        if (userId == null) throw new UnauthorizedException("not authenticated");
+        String userId = RequestPreconditions.requireUser(req);
         boolean onlyPending = req.getBoolean("onlyPending", true);
         var applies = friendManager.getFriendApplyList(userId, onlyPending);
         return Map.of("userId", userId, "applies", applies, "count", applies.size());
     }
 
     private Object handleApplyDetail(ApiRequest req) {
-        String userId = req.currentUserId();
+        String userId = RequestPreconditions.requireUser(req);
         String fromUserId = req.getString("fromUserId");
         String toUserId = req.getString("toUserId");
-        if (userId == null) throw new UnauthorizedException("not authenticated");
         if (fromUserId == null || toUserId == null) {
             throw new ValidationException("fromUserId and toUserId are required");
         }
@@ -153,8 +143,7 @@ public class FriendHandler implements RequestHandler {
     }
 
     private Object handleUnhandledApplyCount(ApiRequest req) {
-        String userId = req.currentUserId();
-        if (userId == null) throw new UnauthorizedException("not authenticated");
+        String userId = RequestPreconditions.requireUser(req);
         int count = friendManager.getUnhandledApplyCount(userId);
         return Map.of("count", count);
     }

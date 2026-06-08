@@ -4,8 +4,8 @@ import com.im.api.ApiRequest;
 import com.im.api.Conversation;
 import com.im.api.IConversationAccessChecker;
 import com.im.api.IConversationManager;
+import com.im.api.RequestPreconditions;
 import com.im.api.RequestHandler;
-import com.im.common.exception.UnauthorizedException;
 import com.im.common.exception.NotFoundException;
 import com.im.common.validation.Preconditions;
 
@@ -42,11 +42,10 @@ public class ConversationHandler implements RequestHandler {
     }
 
     private Object handleRead(ApiRequest req) {
-        String userId = req.currentUserId();
+        String userId = RequestPreconditions.requireUser(req);
         String conversationId = req.getString("conversationId");
         long readSeq = req.getLong("readSeq", 0);
 
-        if (userId == null) throw new UnauthorizedException("not authenticated");
         conversationId = Preconditions.requireText(conversationId, "conversationId");
 
         requireReadable(userId, conversationId);
@@ -61,16 +60,14 @@ public class ConversationHandler implements RequestHandler {
     }
 
     private Object handleList(ApiRequest req) {
-        String userId = req.currentUserId();
-        if (userId == null) throw new UnauthorizedException("not authenticated");
+        String userId = RequestPreconditions.requireUser(req);
         List<Conversation> conversations = conversationManager.getConversations(userId);
         return Map.of("userId", userId, "conversations", conversations, "count", conversations.size());
     }
 
     private Object handleSet(ApiRequest req) {
-        String userId = req.currentUserId();
+        String userId = RequestPreconditions.requireUser(req);
         String conversationId = req.getString("conversationId");
-        if (userId == null) throw new UnauthorizedException("not authenticated");
         conversationId = Preconditions.requireText(conversationId, "conversationId");
         requireReadable(userId, conversationId);
         if (req.params().containsKey("pinned")) {
