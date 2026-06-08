@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Bell, Check, Inbox, RefreshCw } from "lucide-react";
+import { Bell, Check, Inbox, RefreshCw, UsersRound } from "lucide-react";
 import type { SystemMessageInboxItem } from "im-sdk";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -101,16 +101,27 @@ function SystemMessageCard({
   onRead: () => void;
 }) {
   const unread = !message.readAt;
+  const isGroupDisbanded = message.contentType === "group_disbanded";
   return (
-    <article className="rounded-md border bg-card p-4 shadow-sm">
+    <article className={cn(
+      "rounded-md border bg-card p-4 shadow-sm",
+      isGroupDisbanded && "border-amber-200 bg-amber-50/60",
+    )}>
       <div className="mb-3 flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            {unread && <span className="h-2 w-2 shrink-0 rounded-full bg-primary" />}
-            <h3 className="truncate text-sm font-semibold">{message.title}</h3>
-          </div>
-          <div className="mt-1 text-xs text-muted-foreground">
-            {(message.channelName || message.channelId || "系统")} · {formatTime(message.createdAt)}
+        <div className="flex min-w-0 gap-3">
+          {isGroupDisbanded && (
+            <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-amber-100 text-amber-700">
+              <UsersRound className="h-4 w-4" />
+            </div>
+          )}
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              {unread && <span className="h-2 w-2 shrink-0 rounded-full bg-primary" />}
+              <h3 className="truncate text-sm font-semibold">{message.title}</h3>
+            </div>
+            <div className="mt-1 text-xs text-muted-foreground">
+              {(message.channelName || message.channelId || "系统")} · {formatTime(message.createdAt)}
+            </div>
           </div>
         </div>
         {unread && (

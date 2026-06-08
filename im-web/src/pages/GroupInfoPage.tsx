@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { im } from "@/sdk/im-sdk";
-import { GroupMemberRole, groupMemberRoleRank, type GroupMemberRoleValue } from "im-sdk";
+import { GroupMemberRole, getErrorText, groupMemberRoleRank, type GroupMemberRoleValue } from "im-sdk";
 
 function roleLabel(role: GroupMemberRoleValue): { text: string; className: string } | null {
   if (role === GroupMemberRole.OWNER) return { text: "群主", className: "text-red-500 bg-red-50 border-red-200" };
@@ -69,8 +69,8 @@ export default function GroupInfoPage() {
       await im.group.kick(groupId, userId);
       await fetchGroupMembers(groupId);
       toast("已踢出");
-    } catch {
-      toast("踢出失败");
+    } catch (err) {
+      toast(`踢出失败：${getErrorText(err)}`);
     } finally {
       setKicking((prev) => ({ ...prev, [userId]: false }));
     }
@@ -82,8 +82,8 @@ export default function GroupInfoPage() {
       await im.group.disband(groupId);
       toast("群已解散");
       navigate("/chat");
-    } catch {
-      toast("解散失败");
+    } catch (err) {
+      toast(`解散失败：${getErrorText(err)}`);
     }
   };
 
@@ -93,8 +93,8 @@ export default function GroupInfoPage() {
       await im.group.quit(groupId);
       toast("已退出群");
       navigate("/chat");
-    } catch {
-      toast("退出失败");
+    } catch (err) {
+      toast(`退出失败：${getErrorText(err)}`);
     }
   };
 

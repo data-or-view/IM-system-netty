@@ -59,7 +59,8 @@ export class ScenarioWsClient {
     ws.send(JSON.stringify(frame));
     const response = await promise;
     if (response.code !== 0) {
-      throw new Error(`WS ${op} failed: code=${response.code} msg=${response.msg ?? response.detail ?? "unknown"}`);
+      const detail = response.detail ?? response.msg ?? "unknown";
+      throw new Error(`WS ${op} failed: code=${response.code} detail=${detail}`);
     }
     return response as WsResponse<T>;
   }

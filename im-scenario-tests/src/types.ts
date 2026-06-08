@@ -50,3 +50,15 @@ export interface GroupCallJoinResult extends GroupCallSession {
   sfuEndpoint: string;
   roomId: string;
 }
+
+export interface SystemMessageInboxItem {
+  messageId: string;
+  channelId: string;
+  channelName?: string;
+  title: string;
+  summary?: string;
+  content?: string;
+  contentType?: string;
+  readAt?: number;
+  createdAt?: number;
+}

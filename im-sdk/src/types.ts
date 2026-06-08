@@ -773,6 +773,21 @@ export class IMError extends Error {
   }
 }
 
+export function getErrorText(err: unknown, fallback = "未知错误"): string {
+  if (err instanceof IMError) {
+    return err.detail || err.message || fallback;
+  }
+  if (err instanceof Error && err.message) {
+    return err.message;
+  }
+  if (typeof err === "object" && err !== null) {
+    const maybe = err as { detail?: unknown; message?: unknown };
+    if (typeof maybe.detail === "string" && maybe.detail.trim()) return maybe.detail;
+    if (typeof maybe.message === "string" && maybe.message.trim()) return maybe.message;
+  }
+  return fallback;
+}
+
 export class IMTimeoutError extends IMError {
   constructor(public override code: number = -1) {
     super(code, "Request timeout");

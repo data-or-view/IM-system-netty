@@ -16,7 +16,7 @@ import { toast } from "sonner";
 import { im } from "@/sdk/im-sdk";
 import { MessageContentRenderer } from "@/components/MessageContentRenderer";
 import SystemMessagePanel from "@/components/SystemMessagePanel";
-import { ConversationType, MessageContentType, toMessageContentType, type GroupCallSession, type OutgoingMessageContentTypeValue, type SendMessageAck } from "im-sdk";
+import { ConversationType, MessageContentType, getErrorText, toMessageContentType, type GroupCallSession, type OutgoingMessageContentTypeValue, type SendMessageAck } from "im-sdk";
 import { useCall } from "@/components/call/CallProvider";
 
 export default function ChatArea() {
@@ -118,14 +118,14 @@ export default function ChatArea() {
         .then((m) => {
           appendSentMessage(m, "text", { text: content });
         })
-        .catch(() => {
-          toast("发送失败");
+        .catch((err) => {
+          toast(`发送失败：${getErrorText(err)}`);
           setInput(content);
         });
     } else if (conv.userId) {
       // Single chat
-      sendMessage(conv.userId, content).catch(() => {
-        toast("发送失败");
+      sendMessage(conv.userId, content).catch((err) => {
+        toast(`发送失败：${getErrorText(err)}`);
         setInput(content);
       });
     }
@@ -191,7 +191,7 @@ export default function ChatArea() {
       }
     } catch (err) {
       console.error("send file failed:", err);
-      toast(`文件发送失败：${errorMessage(err)}`);
+      toast(`文件发送失败：${getErrorText(err)}`);
     } finally {
       setUploading(false);
       if (fileInputRef.current) {
@@ -498,12 +498,4 @@ function messageRenderKey(msg: { messageId?: string; seq?: number; senderUserId?
   if (msg.messageId) return msg.messageId;
   if (msg.seq && msg.seq > 0) return `seq:${msg.seq}`;
   return `tmp:${msg.senderUserId || "unknown"}:${msg.createTime || 0}:${msg.content || ""}`;
-}
-
-function errorMessage(err: unknown): string {
-  if (err instanceof Error && err.message) return err.message;
-  if (typeof err === "object" && err !== null && "message" in err) {
-    return String((err as { message?: unknown }).message || "未知错误");
-  }
-  return "未知错误";
 }

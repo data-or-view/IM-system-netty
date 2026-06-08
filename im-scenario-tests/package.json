@@ -11,7 +11,8 @@
     "scenario:group-chat": "npm run build && node dist/scenarios/group-chat.js",
     "scenario:group-call": "npm run build && node dist/scenarios/group-call.js",
     "scenario:group-join-system": "npm run build && node dist/scenarios/group-join-system-message.js",
-    "scenario:system-message": "npm run build && node dist/scenarios/system-message.js"
+    "scenario:system-message": "npm run build && node dist/scenarios/system-message.js",
+    "scenario:friend-group-side-effects": "npm run build && node dist/scenarios/friend-group-side-effects.js"
   },
   "dependencies": {
     "ws": "^8.20.1"
