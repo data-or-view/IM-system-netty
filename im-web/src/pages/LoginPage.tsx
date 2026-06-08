@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { Loader2, MessageCircle } from "lucide-react";
 
 interface LoginPageProps {
   onLogin: (userId: string, password?: string) => void;
@@ -31,23 +32,29 @@ export default function LoginPage({ onLogin, onRegister, connecting, statusMsg }
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100">
-      <div className="w-full max-w-sm rounded-xl border bg-card p-8 shadow-lg">
-        <div className="mb-6 text-center">
-          <h1 className="text-2xl font-bold">IM System</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {isLogin ? "输入用户 ID 登录" : "注册后由服务器生成用户 ID"}
+    <div className="flex min-h-screen items-center justify-center bg-slate-100 px-4">
+      <div className="w-full max-w-md overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl shadow-slate-950/10">
+        <div className="border-b border-slate-100 bg-slate-950 px-8 py-7 text-white">
+          <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-md bg-white/10 ring-1 ring-white/15">
+            <MessageCircle className="h-5 w-5" />
+          </div>
+          <h1 className="text-xl font-semibold">IM System</h1>
+          <p className="mt-2 text-sm leading-6 text-white/65">
+            {isLogin ? "输入用户 ID 和密码登录聊天工作台。" : "注册后由服务器生成用户 ID。"}
           </p>
+        </div>
+        <div className="p-8">
+        <div className="mb-6 text-center">
         </div>
 
         {/* 登录/注册切换 */}
-        <div className="mb-4 flex rounded-lg bg-muted p-1">
+        <div className="mb-5 grid grid-cols-2 rounded-md border border-slate-200 bg-slate-50 p-1">
           <button
             type="button"
             onClick={() => setMode("login")}
             className={cn(
-              "flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-all",
-              isLogin ? "bg-background text-foreground shadow-sm" : "text-muted-foreground"
+              "rounded-md px-3 py-2 text-sm font-medium transition-all",
+              isLogin ? "bg-white text-slate-950 shadow-sm" : "text-slate-500 hover:text-slate-900"
             )}
           >
             登录
@@ -56,8 +63,8 @@ export default function LoginPage({ onLogin, onRegister, connecting, statusMsg }
             type="button"
             onClick={() => setMode("register")}
             className={cn(
-              "flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-all",
-              !isLogin ? "bg-background text-foreground shadow-sm" : "text-muted-foreground"
+              "rounded-md px-3 py-2 text-sm font-medium transition-all",
+              !isLogin ? "bg-white text-slate-950 shadow-sm" : "text-slate-500 hover:text-slate-900"
             )}
           >
             注册
@@ -103,7 +110,7 @@ export default function LoginPage({ onLogin, onRegister, connecting, statusMsg }
 
           {/* 状态信息 */}
           {statusMsg && (
-            <p className="text-center text-xs text-muted-foreground">{statusMsg}</p>
+            <p className="rounded-md bg-slate-50 px-3 py-2 text-center text-xs text-slate-500">{statusMsg}</p>
           )}
 
           <Button
@@ -111,9 +118,11 @@ export default function LoginPage({ onLogin, onRegister, connecting, statusMsg }
             className="w-full"
             disabled={(isLogin ? !userId.trim() : !password.trim()) || connecting}
           >
+            {connecting && <Loader2 className="h-4 w-4 animate-spin" />}
             {connecting ? "处理中..." : isLogin ? "登录" : "注册"}
           </Button>
         </form>
+        </div>
       </div>
     </div>
   );

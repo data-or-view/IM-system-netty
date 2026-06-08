@@ -7,14 +7,18 @@ import { useStore } from "@/store/store";
 export default function ChatLayout() {
   const { logout } = useStore();
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-background">
-      <Sidebar />
-      <Outlet />
+    <div className="flex h-screen w-screen overflow-hidden bg-slate-100 text-slate-950">
+      <div className="flex h-full w-full flex-col overflow-hidden border border-slate-200 bg-background shadow-sm md:flex-row">
+        <Sidebar />
+        <main className="min-h-0 min-w-0 flex-1">
+          <Outlet />
+        </main>
+      </div>
       <Button
         variant="ghost"
         size="icon"
         onClick={logout}
-        className="absolute bottom-4 right-4 h-8 w-8 rounded-full opacity-50 hover:opacity-100"
+        className="absolute bottom-4 right-4 hidden h-9 w-9 rounded-full border bg-background/90 text-muted-foreground shadow-sm backdrop-blur hover:text-foreground md:inline-flex"
         title="退出登录"
       >
         <LogOut className="h-4 w-4" />

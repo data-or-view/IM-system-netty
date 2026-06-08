@@ -141,6 +141,16 @@ export const MessageReceiveOption = {
 } as const;
 export type MessageReceiveOptionValue = (typeof MessageReceiveOption)[keyof typeof MessageReceiveOption];
 
+export const PlatformID = {
+  IOS: 1,
+  ANDROID: 2,
+  WINDOWS: 3,
+  MACOS: 4,
+  WEB: 5,
+  LINUX: 7,
+} as const;
+export type PlatformIDValue = (typeof PlatformID)[keyof typeof PlatformID];
+
 export const GroupType = {
   PRIVATE: "PRIVATE",
   PUBLIC: "PUBLIC",

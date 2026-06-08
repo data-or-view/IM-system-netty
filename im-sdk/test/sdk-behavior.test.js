@@ -359,6 +359,24 @@ test("realtime login rejects immediately when websocket is not connected", async
   assert.equal(transport.requestManager.pendingCount, 0);
 });
 
+test("user.login sends web platform by default", async () => {
+  const { transport, sentFrames } = createCapturingTransport({
+    token: "access-1",
+    refreshToken: "refresh-1",
+  });
+  const api = new UserAPI(transport, { get: async () => ({}), post: async () => ({}) });
+
+  await api.login("u1", "pw");
+
+  assert.deepEqual(sentFrames[0], {
+    op: "login",
+    seq: 1,
+    userId: "u1",
+    platformId: 5,
+    password: "pw",
+  });
+});
+
 test("user.me fetches authenticated profile over HTTP", async () => {
   const calls = [];
   const api = new UserAPI(

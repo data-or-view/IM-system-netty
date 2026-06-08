@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { GROUP_APPLY_UPDATED_EVENT, useStore, type GroupApply } from "@/store/store";
 import { im } from "@/sdk/im-sdk";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Check, Loader2, Users, X } from "lucide-react";
+import { Check, Inbox, Loader2, Users, X } from "lucide-react";
 import { toast } from "sonner";
+import { DialogBody, EmptyState, ResultRow } from "./DialogParts";
 
 interface Props {
   open: boolean;
@@ -62,31 +63,37 @@ export default function GroupRequestDialog({ open, onOpenChange }: Props) {
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>群申请</DialogTitle>
+          <DialogDescription>审批用户加入群组的请求。</DialogDescription>
         </DialogHeader>
 
+        <DialogBody>
         {loading ? (
-          <div className="flex justify-center py-8">
-            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          <div className="flex items-center justify-center rounded-lg border border-slate-200 bg-slate-50 py-10">
+            <Loader2 className="h-5 w-5 animate-spin text-slate-500" />
           </div>
         ) : applies.length === 0 ? (
-          <p className="py-8 text-center text-sm text-muted-foreground">暂无加群申请</p>
+          <EmptyState
+            icon={<Inbox className="h-4 w-4" />}
+            title="暂无加群申请"
+            description="需要你处理的加群申请会显示在这里。"
+          />
         ) : (
           <div className="max-h-96 space-y-2 overflow-y-auto">
             {applies.map((apply) => {
               const key = applyKey(apply);
               return (
-                <div key={key} className="flex items-center justify-between rounded-lg border px-4 py-3">
+                <ResultRow key={key}>
                   <div className="flex min-w-0 items-center gap-3">
-                    <Avatar className="h-10 w-10">
-                      <AvatarFallback>
+                    <Avatar className="h-10 w-10 border border-white shadow-sm">
+                      <AvatarFallback className="bg-slate-900 text-white">
                         <Users className="h-4 w-4" />
                       </AvatarFallback>
                     </Avatar>
                     <div className="min-w-0">
-                      <div className="truncate text-sm font-medium">{apply.userId}</div>
-                      <div className="truncate text-xs text-muted-foreground">申请加入群：{apply.groupId}</div>
+                      <div className="truncate text-sm font-semibold text-slate-900">{apply.userId}</div>
+                      <div className="truncate text-xs text-slate-500">申请加入群：{apply.groupId}</div>
                       {apply.reqMsg && (
-                        <div className="mt-0.5 truncate text-xs text-muted-foreground">{apply.reqMsg}</div>
+                        <div className="mt-0.5 truncate text-xs text-slate-500">{apply.reqMsg}</div>
                       )}
                     </div>
                   </div>
@@ -95,7 +102,7 @@ export default function GroupRequestDialog({ open, onOpenChange }: Props) {
                     <Button
                       size="sm"
                       variant="outline"
-                      className="text-destructive"
+                      className="text-red-600 hover:border-red-200 hover:bg-red-50 hover:text-red-700"
                       onClick={() => void handleApprove(apply, false)}
                       disabled={!!processing[key]}
                     >
@@ -105,11 +112,12 @@ export default function GroupRequestDialog({ open, onOpenChange }: Props) {
                       {processing[key] ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
                     </Button>
                   </div>
-                </div>
+                </ResultRow>
               );
             })}
           </div>
         )}
+        </DialogBody>
       </DialogContent>
     </Dialog>
   );

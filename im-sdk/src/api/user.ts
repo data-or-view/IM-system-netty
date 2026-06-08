@@ -1,4 +1,4 @@
-import { IMError, OP, type FileUploadResult, type RegisterResult, type UserInfo, type WSResponse } from "../types.js";
+import { IMError, OP, PlatformID, type FileUploadResult, type PlatformIDValue, type RegisterResult, type UserInfo, type WSResponse } from "../types.js";
 import type { WsTransport } from "../transport/ws.js";
 import { type HttpAPI, requireHttp } from "./http-api.js";
 
@@ -42,9 +42,10 @@ export class UserAPI {
   }
 
   /** 登录 */
-  login(userId: string, password?: string): Promise<WSResponse> {
+  login(userId: string, password?: string, platformId: PlatformIDValue = PlatformID.WEB): Promise<WSResponse> {
     return this.wsTransport.request(OP.LOGIN, {
       userId,
+      platformId,
       ...(password ? { password } : {}),
     });
   }

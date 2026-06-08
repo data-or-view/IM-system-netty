@@ -6,16 +6,17 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Separator } from "@/components/ui/separator";
-import { ArrowLeft, MessageCircle, UserMinus, Ban, UserPlus, Loader2, Camera } from "lucide-react";
+import { Ban, Camera, Loader2, MessageCircle, Shield, UserMinus, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import { im } from "@/sdk/im-sdk";
 import type { UserInfo } from "im-sdk";
+import { AppPage, Surface } from "@/components/AppPage";
 
 export default function UserProfilePage() {
   const { userId } = useParams<{ userId: string }>();
@@ -59,7 +60,7 @@ export default function UserProfilePage() {
   if (loading) {
     return (
       <div className="flex flex-1 items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        <Loader2 className="h-6 w-6 animate-spin text-slate-500" />
       </div>
     );
   }
@@ -67,7 +68,7 @@ export default function UserProfilePage() {
   if (!profile || !userId) {
     return (
       <div className="flex flex-1 items-center justify-center">
-        <p className="text-sm text-muted-foreground">用户不存在</p>
+        <p className="text-sm text-slate-500">用户不存在</p>
       </div>
     );
   }
@@ -147,83 +148,90 @@ export default function UserProfilePage() {
   };
 
   return (
-    <div className="flex flex-1 flex-col">
-      {/* Header */}
-      <div className="flex items-center gap-3 border-b px-4 py-3">
-        <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
-          <ArrowLeft className="h-5 w-5" />
-        </Button>
-        <span className="text-sm font-medium">用户信息</span>
-      </div>
+    <AppPage title="用户信息" description={profile.nickname || userId} onBack={() => navigate(-1)}>
+      <div className="mx-auto flex h-full w-full max-w-3xl flex-col gap-4 px-5 py-5">
+        <Surface className="overflow-hidden">
+          <div className="bg-slate-900 px-5 py-5 text-white">
+            <div className="flex items-center gap-4">
+              <Avatar className="h-20 w-20 border border-white/20 shadow-xl">
+                {profile.faceUrl && <AvatarImage src={profile.faceUrl} alt={profile.nickname || userId} />}
+                <AvatarFallback className="bg-white/10 text-2xl font-semibold text-white">
+                  {(profile.nickname || userId).charAt(0).toUpperCase()}
+                </AvatarFallback>
+              </Avatar>
+              <div className="min-w-0">
+                <h2 className="truncate text-xl font-semibold">{profile.nickname || userId}</h2>
+                <p className="mt-1 truncate text-sm text-white/65">ID: {userId}</p>
+                {profile.appMangerLevel !== undefined && profile.appMangerLevel !== "NORMAL" && (
+                  <span className="mt-2 inline-flex items-center gap-1 rounded-full bg-amber-400/15 px-2.5 py-1 text-xs text-amber-100 ring-1 ring-amber-300/30">
+                    <Shield className="h-3 w-3" />
+                    平台管理员
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
 
-      <div className="flex flex-1 flex-col items-center justify-center px-6">
-        {/* User avatar and info */}
-        <Avatar className="mb-4 h-20 w-20">
-          {profile.faceUrl && <AvatarImage src={profile.faceUrl} alt={profile.nickname || userId} />}
-          <AvatarFallback className="text-xl">
-            {(profile.nickname || userId).charAt(0).toUpperCase()}
-          </AvatarFallback>
-        </Avatar>
-        <h2 className="text-xl font-semibold">{profile.nickname || userId}</h2>
-        <p className="text-sm text-muted-foreground">ID: {userId}</p>
-        {profile.appMangerLevel !== undefined && profile.appMangerLevel !== "NORMAL" && (
-          <span className="mt-1 rounded bg-yellow-100 px-2 py-0.5 text-xs text-yellow-700">
-            平台管理员
-          </span>
-        )}
+          <div className="grid gap-3 px-5 py-4 sm:grid-cols-2">
+            <InfoItem label="昵称" value={profile.nickname || "-"} />
+            <InfoItem label="用户 ID" value={userId} />
+          </div>
+        </Surface>
 
-        <Separator className="my-6" />
-
-        {/* Actions */}
-        <div className="flex w-full max-w-xs flex-col gap-2">
-          {isSelf && (
-            <Button variant="outline" className="w-full" onClick={() => setEditOpen(true)}>
-              编辑资料
-            </Button>
-          )}
-
-          {isFriend && (
-            <>
-              <Button className="w-full" onClick={handleSendMessage}>
-                <MessageCircle className="mr-2 h-4 w-4" />
-                发消息
+        <Surface className="p-4">
+          <div className="mb-3 text-sm font-semibold text-slate-900">操作</div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {isSelf && (
+              <Button variant="outline" className="justify-start" onClick={() => setEditOpen(true)}>
+                <Camera className="h-4 w-4" />
+                编辑资料
               </Button>
-              <Button variant="outline" className="w-full text-destructive" onClick={handleRemoveFriend}>
-                <UserMinus className="mr-2 h-4 w-4" />
-                删除好友
-              </Button>
-              <Button variant="outline" className="w-full text-destructive" onClick={handleBlack}>
-                <Ban className="mr-2 h-4 w-4" />
-                拉黑
-              </Button>
-            </>
-          )}
+            )}
 
-          {!isSelf && !isFriend && (
-            <Button className="w-full" onClick={handleApplyFriend}>
-              <UserPlus className="mr-2 h-4 w-4" />
-              加好友
-            </Button>
-          )}
-        </div>
+            {isFriend && (
+              <>
+                <Button className="justify-start" onClick={handleSendMessage}>
+                  <MessageCircle className="h-4 w-4" />
+                  发消息
+                </Button>
+                <Button variant="outline" className="justify-start text-red-600 hover:border-red-200 hover:bg-red-50" onClick={handleRemoveFriend}>
+                  <UserMinus className="h-4 w-4" />
+                  删除好友
+                </Button>
+                <Button variant="outline" className="justify-start text-red-600 hover:border-red-200 hover:bg-red-50" onClick={handleBlack}>
+                  <Ban className="h-4 w-4" />
+                  拉黑
+                </Button>
+              </>
+            )}
+
+            {!isSelf && !isFriend && (
+              <Button className="justify-start" onClick={handleApplyFriend}>
+                <UserPlus className="h-4 w-4" />
+                加好友
+              </Button>
+            )}
+          </div>
+        </Surface>
       </div>
 
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle>编辑资料</DialogTitle>
+            <DialogDescription>修改头像和昵称后会同步到你的个人资料。</DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4">
+          <div className="space-y-4 px-5 pb-5">
             <div className="flex justify-center">
               <label className="relative cursor-pointer">
-                <Avatar className="h-20 w-20 border">
+                <Avatar className="h-20 w-20 border border-white shadow-lg ring-1 ring-slate-200">
                   {avatarSrc && <AvatarImage src={avatarSrc} alt={nickname || userId} />}
-                  <AvatarFallback className="text-xl">
+                  <AvatarFallback className="bg-slate-100 text-xl font-semibold text-slate-700">
                     {(nickname || userId).charAt(0).toUpperCase()}
                   </AvatarFallback>
                 </Avatar>
-                <span className="absolute bottom-0 right-0 flex h-7 w-7 items-center justify-center rounded-full border bg-background shadow-sm">
+                <span className="absolute bottom-0 right-0 flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 shadow-sm">
                   <Camera className="h-4 w-4" />
                 </span>
                 <input
@@ -236,7 +244,7 @@ export default function UserProfilePage() {
             </div>
 
             <div className="space-y-2">
-              <label className="text-sm font-medium" htmlFor="profile-nickname">
+              <label className="text-sm font-medium text-slate-700" htmlFor="profile-nickname">
                 昵称
               </label>
               <Input
@@ -259,6 +267,15 @@ export default function UserProfilePage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </AppPage>
+  );
+}
+
+function InfoItem({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md bg-slate-50 px-3 py-2">
+      <div className="text-xs text-slate-500">{label}</div>
+      <div className="mt-1 truncate text-sm font-medium text-slate-900">{value}</div>
     </div>
   );
 }

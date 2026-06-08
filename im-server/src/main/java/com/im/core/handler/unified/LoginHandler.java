@@ -10,6 +10,7 @@ import com.im.api.IRouteTable;
 import com.im.api.ISessionManager;
 import com.im.api.Message;
 import com.im.api.MultiLoginStrategy;
+import com.im.api.PlatformID;
 import com.im.api.RequestHandler;
 import com.im.api.RouteBinding;
 import com.im.common.validation.Preconditions;
@@ -61,7 +62,7 @@ public class LoginHandler implements RequestHandler {
         String userId = req.getString("userId");
         userId = Preconditions.requireText(userId, "userId");
 
-        int platformId = req.getInt("platformId", 0);
+        int platformId = req.getInt("platformId", PlatformID.WEB);
         String password = req.getString("password", "");
 
         // ① 签发 token + 拉取离线消息（不注册路由）
@@ -103,8 +104,7 @@ public class LoginHandler implements RequestHandler {
             log.info("Delivered {} offline messages to user {}", result.offlineMessages().size(), userId);
         }
 
-        log.info("User logged in: userId={}, platform={}",
-                userId, com.im.api.PlatformID.name(platformId));
+        log.info("User logged in: userId={}, platform={}", userId, PlatformID.name(platformId));
 
         return Map.of("status", "OK",
                 "token", result.token() != null ? result.token() : "",

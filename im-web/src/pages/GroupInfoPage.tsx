@@ -4,13 +4,13 @@ import { useStore } from "@/store/store";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
 import {
-  ArrowLeft, Crown, UserMinus, Trash2, LogOut, Loader2,
+  Crown, Loader2, LogOut, Trash2, UserMinus, Users,
 } from "lucide-react";
 import { toast } from "sonner";
 import { im } from "@/sdk/im-sdk";
 import { GroupMemberRole, getErrorText, groupMemberRoleRank, type GroupMemberRoleValue } from "im-sdk";
+import { AppPage, Surface } from "@/components/AppPage";
 
 function roleLabel(role: GroupMemberRoleValue): { text: string; className: string } | null {
   if (role === GroupMemberRole.OWNER) return { text: "群主", className: "text-red-500 bg-red-50 border-red-200" };
@@ -101,7 +101,7 @@ export default function GroupInfoPage() {
   if (loading) {
     return (
       <div className="flex flex-1 items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        <Loader2 className="h-6 w-6 animate-spin text-slate-500" />
       </div>
     );
   }
@@ -109,46 +109,48 @@ export default function GroupInfoPage() {
   if (!groupInfo) {
     return (
       <div className="flex flex-1 items-center justify-center">
-        <p className="text-sm text-muted-foreground">群不存在</p>
+        <p className="text-sm text-slate-500">群不存在</p>
       </div>
     );
   }
 
   return (
-    <div className="flex flex-1 flex-col">
-      {/* Header */}
-      <div className="flex items-center gap-3 border-b px-4 py-3">
-        <Button variant="ghost" size="icon" onClick={() => navigate("/chat")}>
-          <ArrowLeft className="h-5 w-5" />
-        </Button>
-        <div>
-          <div className="text-sm font-medium">群信息</div>
-          <div className="text-xs text-muted-foreground">{groupInfo.groupName}</div>
-        </div>
-      </div>
+    <AppPage title="群信息" description={groupInfo.groupName} onBack={() => navigate("/chat")}>
+      <ScrollArea className="h-full">
+        <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-5 py-5">
+          <Surface className="overflow-hidden">
+            <div className="bg-slate-900 px-5 py-5 text-white">
+              <div className="flex items-center gap-4">
+                <Avatar className="h-16 w-16 border border-white/20 shadow-xl">
+                  <AvatarImage src={groupInfo.faceUrl} alt={groupInfo.groupName} />
+                  <AvatarFallback className="bg-white/10 text-xl font-semibold text-white">
+                    {groupInfo.groupName.charAt(0).toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="min-w-0">
+                  <h2 className="truncate text-lg font-semibold">{groupInfo.groupName}</h2>
+                  <p className="mt-1 truncate text-sm text-white/65">ID: {groupInfo.groupId}</p>
+                  <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-white/10 px-2.5 py-1 text-xs text-white/80">
+                    <Users className="h-3.5 w-3.5" />
+                    {groupInfo.memberCount || members.length} 人
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="grid gap-3 px-5 py-4 sm:grid-cols-2">
+              <InfoItem label="群主" value={groupInfo.ownerUserId || "-"} />
+              <InfoItem label="我的权限" value={roleText(currentUserRole)} />
+            </div>
+          </Surface>
 
-      <ScrollArea className="flex-1 p-4">
-        {/* Group basic info */}
-        <div className="flex flex-col items-center py-6">
-          <Avatar className="mb-3 h-16 w-16">
-            <AvatarImage src={groupInfo.faceUrl} alt={groupInfo.groupName} />
-            <AvatarFallback className="text-lg">
-              {groupInfo.groupName.charAt(0).toUpperCase()}
-            </AvatarFallback>
-          </Avatar>
-          <h2 className="text-lg font-semibold">{groupInfo.groupName}</h2>
-          <p className="text-xs text-muted-foreground">ID: {groupInfo.groupId}</p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            群主: {groupInfo.ownerUserId} · {groupInfo.memberCount || members.length} 人
-          </p>
-        </div>
-
-        <Separator />
-
-        {/* Member list */}
-        <div className="py-3">
-          <h3 className="mb-2 text-sm font-medium">成员列表（{members.length}）</h3>
-          <div className="space-y-1">
+          <Surface>
+            <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+              <div>
+                <div className="text-sm font-semibold text-slate-900">成员列表</div>
+                <div className="text-xs text-slate-500">{members.length} 位成员</div>
+              </div>
+            </div>
+            <div className="divide-y divide-slate-100">
             {members.map((member) => {
               const label = roleLabel(member.roleLevel);
               const canKick =
@@ -158,7 +160,7 @@ export default function GroupInfoPage() {
                   key={member.userId}
                   role="button"
                   tabIndex={0}
-                  className="flex w-full cursor-pointer items-center justify-between rounded-lg px-3 py-2 text-left transition-colors hover:bg-accent"
+                  className="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-slate-50"
                   onClick={() => navigate(`/chat/user/${member.userId}`)}
                   onKeyDown={(event) => {
                     if (event.key === "Enter" || event.key === " ") {
@@ -167,16 +169,16 @@ export default function GroupInfoPage() {
                     }
                   }}
                 >
-                  <div className="flex items-center gap-3">
-                    <Avatar className="h-9 w-9">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <Avatar className="h-10 w-10 border border-white shadow-sm">
                       <AvatarImage src={member.faceUrl} alt={member.nickname || member.userId} />
-                      <AvatarFallback className="text-xs">
+                      <AvatarFallback className="bg-slate-100 text-sm font-semibold text-slate-700">
                         {(member.nickname || member.userId).charAt(0).toUpperCase()}
                       </AvatarFallback>
                     </Avatar>
-                    <div>
+                    <div className="min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium">
+                        <span className="truncate text-sm font-semibold text-slate-900">
                           {member.nickname || member.userId}
                         </span>
                         {member.roleLevel === GroupMemberRole.OWNER && <Crown className="h-3.5 w-3.5 text-red-500" />}
@@ -186,7 +188,7 @@ export default function GroupInfoPage() {
                           </span>
                         )}
                       </div>
-                      <div className="text-xs text-muted-foreground">ID: {member.userId}</div>
+                      <div className="truncate text-xs text-slate-500">ID: {member.userId}</div>
                     </div>
                   </div>
 
@@ -194,7 +196,7 @@ export default function GroupInfoPage() {
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="text-destructive"
+                      className="shrink-0 text-red-600 hover:bg-red-50 hover:text-red-700"
                       onClick={(event) => {
                         event.stopPropagation();
                         void handleKick(member.userId);
@@ -211,35 +213,51 @@ export default function GroupInfoPage() {
                 </div>
               );
             })}
+            </div>
+          </Surface>
+
+          <Surface className="p-4">
+            <div className="mb-3 text-sm font-semibold text-slate-900">群操作</div>
+            <div className="space-y-2">
+              {isOwner && (
+                <Button
+                  variant="destructive"
+                  className="w-full justify-start"
+                  onClick={handleDisband}
+                >
+                  <Trash2 className="h-4 w-4" />
+                  解散群
+                </Button>
+              )}
+              {!isOwner && (
+                <Button
+                  variant="outline"
+                  className="w-full justify-start text-red-600 hover:border-red-200 hover:bg-red-50 hover:text-red-700"
+                  onClick={handleQuit}
+                >
+                  <LogOut className="h-4 w-4" />
+                  退出群
+                </Button>
+              )}
+            </div>
+          </Surface>
           </div>
-        </div>
-
-        <Separator />
-
-        {/* Group actions */}
-        <div className="space-y-2 py-4">
-          {isOwner && (
-            <Button
-              variant="destructive"
-              className="w-full"
-              onClick={handleDisband}
-            >
-              <Trash2 className="mr-2 h-4 w-4" />
-              解散群
-            </Button>
-          )}
-          {!isOwner && (
-            <Button
-              variant="outline"
-              className="w-full text-destructive"
-              onClick={handleQuit}
-            >
-              <LogOut className="mr-2 h-4 w-4" />
-              退出群
-            </Button>
-          )}
-        </div>
       </ScrollArea>
+    </AppPage>
+  );
+}
+
+function roleText(role: GroupMemberRoleValue): string {
+  if (role === GroupMemberRole.OWNER) return "群主";
+  if (role === GroupMemberRole.ADMIN) return "管理员";
+  return "成员";
+}
+
+function InfoItem({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md bg-slate-50 px-3 py-2">
+      <div className="text-xs text-slate-500">{label}</div>
+      <div className="mt-1 truncate text-sm font-medium text-slate-900">{value}</div>
     </div>
   );
 }

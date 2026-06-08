@@ -11,7 +11,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
-import { Send, Paperclip, MoreHorizontal, Undo2, Info, Phone, Video } from "lucide-react";
+import { MessageCircle, Send, Paperclip, MoreHorizontal, Undo2, Info, Phone, Video } from "lucide-react";
 import { toast } from "sonner";
 import { im } from "@/sdk/im-sdk";
 import { MessageContentRenderer } from "@/components/MessageContentRenderer";
@@ -267,12 +267,15 @@ export default function ChatArea() {
   // Empty state
   if (!state.activeConversationId) {
     return (
-      <div className="flex flex-1 items-center justify-center">
-        <div className="text-center">
-          <h2 className="text-lg font-semibold text-muted-foreground">
+      <div className="flex h-full flex-1 items-center justify-center bg-slate-50">
+        <div className="max-w-sm px-6 text-center">
+          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-md bg-white text-slate-500 shadow-sm ring-1 ring-slate-200">
+            <MessageCircle className="h-5 w-5" />
+          </div>
+          <h2 className="text-base font-semibold text-slate-700">
             选择一个会话开始聊天
           </h2>
-          <p className="mt-1 text-sm text-muted-foreground/60">
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
             从左侧选择好友或群组
           </p>
         </div>
@@ -285,32 +288,33 @@ export default function ChatArea() {
   }
 
   return (
-    <div className="flex flex-1 flex-col">
-      {/* Chat Header — clickable to navigate to group/user info */}
-      <div className="flex items-center gap-3 border-b px-4 py-3">
-      <button
-        onClick={handleHeaderClick}
-        className="flex flex-1 items-center gap-3 text-left transition-colors"
-      >
-        <Avatar className="h-9 w-9">
-          <AvatarImage src={conv?.faceUrl} />
-          <AvatarFallback>
-            {(conv?.showName || "?").charAt(0).toUpperCase()}
-          </AvatarFallback>
-        </Avatar>
-        <div className="flex-1">
-          <div className="text-sm font-medium">{conv?.showName}</div>
-          <div className="text-xs text-muted-foreground">
-            {conv?.conversationType === ConversationType.GROUP ? "群聊" : "单聊"}
+    <div className="flex h-full flex-1 flex-col bg-slate-50">
+      <div className="flex items-center gap-3 border-b border-slate-200 bg-white/95 px-5 py-3 shadow-sm">
+        <button
+          onClick={handleHeaderClick}
+          className="flex min-w-0 flex-1 items-center gap-3 rounded-md text-left transition-colors hover:text-slate-700"
+        >
+          <Avatar className="h-10 w-10 border border-white shadow-sm">
+            <AvatarImage src={conv?.faceUrl} />
+            <AvatarFallback className="bg-slate-100 text-slate-700">
+              {(conv?.showName || "?").charAt(0).toUpperCase()}
+            </AvatarFallback>
+          </Avatar>
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-sm font-semibold">{conv?.showName}</div>
+            <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+              {conv?.conversationType === ConversationType.GROUP ? "群聊" : "单聊"}
+            </div>
           </div>
-        </div>
-      </button>
+        </button>
         {conv?.conversationType !== ConversationType.GROUP && conv?.userId && (
           <div className="flex items-center gap-1">
             <Button
               type="button"
               variant="ghost"
               size="icon"
+              className="h-9 w-9 rounded-md"
               title="语音通话"
               onClick={() => handleStartCall("voice")}
             >
@@ -320,6 +324,7 @@ export default function ChatArea() {
               type="button"
               variant="ghost"
               size="icon"
+              className="h-9 w-9 rounded-md"
               title="视频通话"
               onClick={() => handleStartCall("video")}
             >
@@ -332,6 +337,7 @@ export default function ChatArea() {
             type="button"
             variant="ghost"
             size="icon"
+            className="h-9 w-9 rounded-md"
             title={activeGroupCall ? "加入群视频" : "发起群视频"}
             onClick={activeGroupCall ? handleJoinGroupCall : handleStartGroupCall}
           >
@@ -341,7 +347,7 @@ export default function ChatArea() {
         <button
           type="button"
           onClick={handleHeaderClick}
-          className="rounded-md p-2 text-muted-foreground transition-colors hover:bg-accent"
+          className="flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-slate-100 hover:text-foreground"
           title="查看资料"
         >
           <Info className="h-4 w-4" />
@@ -362,15 +368,17 @@ export default function ChatArea() {
       )}
 
       {/* Messages */}
-      <ScrollArea className="flex-1 p-4">
+      <ScrollArea className="flex-1 px-5 py-4">
         {messages.length === 0 && (
-          <div className="flex h-full items-center justify-center">
-            <p className="text-sm text-muted-foreground">暂无消息，发送第一条消息吧</p>
+          <div className="flex h-full min-h-[360px] items-center justify-center">
+            <div className="rounded-md border border-dashed bg-white/70 px-5 py-4 text-center text-sm text-muted-foreground">
+              暂无消息，发送第一条消息吧
+            </div>
           </div>
         )}
 
-        <div className="space-y-3">
-        {messages.map((msg) => {
+        <div className="mx-auto max-w-4xl space-y-3">
+          {messages.map((msg) => {
             const isMine = msg.senderUserId === state.userId;
             const isRevoked = msg.contentType === 101 || msg.content === "消息已撤回";
             if (isRevoked) {
@@ -387,10 +395,10 @@ export default function ChatArea() {
                 key={messageRenderKey(msg)}
                 className={`flex ${isMine ? "justify-end" : "justify-start"}`}
               >
-                <div className="group flex max-w-[70%] flex-col">
-                  <div className="flex items-end gap-1">
+                <div className="group flex max-w-[78%] flex-col">
+                  <div className="flex items-end gap-2">
                     {!isMine && (
-                      <Avatar className="mb-1 h-6 w-6 cursor-pointer"
+                      <Avatar className="mb-1 h-7 w-7 cursor-pointer border border-white shadow-sm"
                         onClick={() => navigate(`/chat/user/${msg.senderUserId}`)}>
                         <AvatarFallback className="text-[10px]">
                           {(msg.senderNickname || msg.senderUserId).charAt(0).toUpperCase()}
@@ -398,10 +406,10 @@ export default function ChatArea() {
                       </Avatar>
                     )}
                     <div
-                      className={`rounded-lg px-3 py-2 text-sm ${
+                      className={`rounded-md px-3 py-2 text-sm shadow-sm ${
                         isMine
-                          ? "bg-primary text-primary-foreground"
-                          : "bg-secondary text-secondary-foreground"
+                          ? "bg-slate-900 text-white"
+                          : "border border-slate-200 bg-white text-slate-900"
                       }`}
                     >
                       {!isMine && (
@@ -412,7 +420,7 @@ export default function ChatArea() {
                       <MessageContentRenderer message={msg} />
                       <div
                         className={`mt-1 text-[10px] ${
-                          isMine ? "text-primary-foreground/60" : "text-muted-foreground"
+                          isMine ? "text-white/60" : "text-muted-foreground"
                         }`}
                       >
                         {formatMsgTime(msg.createTime)}
@@ -424,7 +432,7 @@ export default function ChatArea() {
                     {isMine && (
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <button className="invisible rounded p-1 text-muted-foreground opacity-0 transition-all hover:bg-accent group-hover:visible group-hover:opacity-100">
+                          <button className="invisible rounded-md p-1 text-muted-foreground opacity-0 transition-all hover:bg-white group-hover:visible group-hover:opacity-100">
                             <MoreHorizontal className="h-3.5 w-3.5" />
                           </button>
                         </DropdownMenuTrigger>
@@ -449,8 +457,8 @@ export default function ChatArea() {
       </ScrollArea>
 
       {/* Input */}
-      <div className="border-t p-3">
-        <div className="flex items-center gap-2">
+      <div className="border-t border-slate-200 bg-white/95 px-5 py-3">
+        <div className="mx-auto flex max-w-4xl items-center gap-2">
           <input
             ref={fileInputRef}
             type="file"
@@ -461,7 +469,7 @@ export default function ChatArea() {
             }}
           />
           <button
-            className="rounded-md p-2 hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground hover:bg-slate-100 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
             disabled={!conv || uploading}
             onClick={() => fileInputRef.current?.click()}
             title={uploading ? "正在上传文件" : "发送文件"}
@@ -473,9 +481,9 @@ export default function ChatArea() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            className="flex-1"
+            className="h-10 flex-1 border-slate-200 bg-slate-50"
           />
-          <Button size="icon" onClick={handleSend} disabled={!input.trim()}>
+          <Button size="icon" className="h-10 w-10 rounded-md bg-slate-900 hover:bg-slate-800" onClick={handleSend} disabled={!input.trim()}>
             <Send className="h-4 w-4" />
           </Button>
         </div>

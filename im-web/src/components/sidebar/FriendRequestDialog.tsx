@@ -2,11 +2,12 @@ import { useState, useEffect, useCallback } from "react";
 import { useStore } from "@/store/store";
 import { FRIEND_APPLY_UPDATED_EVENT } from "@/store/store";
 import { im } from "@/sdk/im-sdk";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Check, X, Loader2 } from "lucide-react";
+import { Check, Inbox, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
+import { DialogBody, EmptyState, ResultRow } from "./DialogParts";
 
 interface Props {
   open: boolean;
@@ -65,41 +66,44 @@ export default function FriendRequestDialog({ open, onOpenChange }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>好友申请</DialogTitle>
+          <DialogDescription>处理其他用户发来的好友请求。</DialogDescription>
         </DialogHeader>
 
+        <DialogBody>
         {loading ? (
-          <div className="flex justify-center py-8">
-            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          <div className="flex items-center justify-center rounded-lg border border-slate-200 bg-slate-50 py-10">
+            <Loader2 className="h-5 w-5 animate-spin text-slate-500" />
           </div>
         ) : applies.length === 0 ? (
-          <p className="py-8 text-center text-sm text-muted-foreground">暂无好友申请</p>
+          <EmptyState
+            icon={<Inbox className="h-4 w-4" />}
+            title="暂无好友申请"
+            description="新的好友申请会实时出现在这里。"
+          />
         ) : (
           <div className="max-h-80 space-y-2 overflow-y-auto">
             {applies.map((a) => (
-              <div
-                key={a.fromUserId}
-                className="flex items-center justify-between rounded-lg border px-4 py-3"
-              >
-                <div className="flex items-center gap-3">
-                  <Avatar className="h-9 w-9">
-                    <AvatarFallback>{a.fromUserId.charAt(0).toUpperCase()}</AvatarFallback>
+              <ResultRow key={a.fromUserId}>
+                <div className="flex min-w-0 items-center gap-3">
+                  <Avatar className="h-10 w-10 border border-white shadow-sm">
+                    <AvatarFallback className="bg-slate-100 text-sm font-semibold text-slate-700">{a.fromUserId.charAt(0).toUpperCase()}</AvatarFallback>
                   </Avatar>
-                  <div>
-                    <div className="text-sm font-medium">{a.fromUserId}</div>
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold text-slate-900">{a.fromUserId}</div>
                     {a.reqMsg && (
-                      <div className="text-xs text-muted-foreground">{a.reqMsg}</div>
+                      <div className="truncate text-xs text-slate-500">{a.reqMsg}</div>
                     )}
                   </div>
                 </div>
 
-                <div className="flex gap-2">
+                <div className="flex shrink-0 gap-2">
                   <Button
                     size="sm"
                     variant="outline"
-                    className="text-destructive"
+                    className="text-red-600 hover:border-red-200 hover:bg-red-50 hover:text-red-700"
                     onClick={() => handleApprove(a.fromUserId, false)}
                     disabled={!!processing[a.fromUserId]}
                   >
@@ -121,10 +125,11 @@ export default function FriendRequestDialog({ open, onOpenChange }: Props) {
                     )}
                   </Button>
                 </div>
-              </div>
+              </ResultRow>
             ))}
           </div>
         )}
+        </DialogBody>
       </DialogContent>
     </Dialog>
   );
