@@ -5,6 +5,7 @@ import com.im.api.PartInfo;
 import com.im.api.RequestHandler;
 import com.im.common.exception.ValidationException;
 import com.im.common.exception.NotFoundException;
+import com.im.common.validation.Preconditions;
 import com.im.infrastructure.storage.usecase.MultipartUploadCompleteResult;
 import com.im.infrastructure.storage.usecase.MultipartUploadInitResult;
 import com.im.infrastructure.storage.usecase.MultipartUploadUseCase;
@@ -66,9 +67,7 @@ public class FileMultipartHandler implements RequestHandler {
     @SuppressWarnings("unchecked")
     private Map<String, Object> handleComplete(ApiRequest req) {
         String uploadId = req.getString("uploadId");
-        if (uploadId == null) {
-            throw new ValidationException("uploadId is required");
-        }
+        uploadId = Preconditions.requireText(uploadId, "uploadId");
         List<Map<String, Object>> partsMap = (List<Map<String, Object>>) req.params().get("parts");
         if (partsMap == null || partsMap.isEmpty()) {
             throw new ValidationException("parts list is required");
@@ -91,17 +90,16 @@ public class FileMultipartHandler implements RequestHandler {
         if (!(partNumberValue instanceof Number number) || number.intValue() < 1) {
             throw new ValidationException("partNumber is required");
         }
-        if (!(etagValue instanceof String etag) || etag.isBlank()) {
+        if (!(etagValue instanceof String etag)) {
             throw new ValidationException("etag is required");
         }
+        etag = Preconditions.requireText(etag, "etag");
         return new PartInfo(number.intValue(), etag);
     }
 
     private Map<String, String> handleAbort(ApiRequest req) {
         String uploadId = req.getString("uploadId");
-        if (uploadId == null) {
-            throw new ValidationException("uploadId is required");
-        }
+        uploadId = Preconditions.requireText(uploadId, "uploadId");
         multipartUploadUseCase.abortUpload(uploadId);
         log.info("Multipart aborted: uploadId={}", uploadId);
         return Map.of("status", "OK");

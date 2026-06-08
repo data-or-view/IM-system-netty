@@ -13,6 +13,7 @@ import com.im.common.exception.UnauthorizedException;
 import com.im.common.exception.ValidationException;
 import com.im.common.exception.NotFoundException;
 import com.im.common.id.IdGenerator;
+import com.im.common.validation.Preconditions;
 import com.im.core.group.GroupApplyNotifier;
 import com.im.core.group.GroupSystemMessagePublisher;
 
@@ -73,9 +74,7 @@ public class GroupHandler implements RequestHandler {
         String groupName = req.getString("groupName");
         String ownerId = req.currentUserId();
         if (ownerId == null) throw new UnauthorizedException("not authenticated");
-        if (groupName == null || groupName.isBlank()) {
-            throw new ValidationException("groupName is required");
-        }
+        groupName = Preconditions.requireText(groupName, "groupName");
         String faceUrl = req.getString("faceUrl", "");
         int groupType = req.getInt("groupType", 0);
         int needVerification = req.getInt("needVerification", 0);
@@ -90,7 +89,7 @@ public class GroupHandler implements RequestHandler {
         String groupId = req.getString("groupId");
         String userId = req.currentUserId();
         if (userId == null) throw new UnauthorizedException("not authenticated");
-        if (groupId == null) throw new ValidationException("groupId is required");
+        groupId = Preconditions.requireText(groupId, "groupId");
         String reqMsg = req.getString("reqMsg", "");
         GroupJoinResult result = groupManager.joinGroup(groupId, userId, reqMsg);
         if (result == GroupJoinResult.JOINED) {
@@ -109,7 +108,7 @@ public class GroupHandler implements RequestHandler {
         String groupId = req.getString("groupId");
         String userId = req.currentUserId();
         if (userId == null) throw new UnauthorizedException("not authenticated");
-        if (groupId == null) throw new ValidationException("groupId is required");
+        groupId = Preconditions.requireText(groupId, "groupId");
         groupManager.quitGroup(groupId, userId);
         return Map.of("status", "OK");
     }
@@ -130,14 +129,14 @@ public class GroupHandler implements RequestHandler {
         String groupId = req.getString("groupId");
         String operatorId = req.currentUserId();
         if (operatorId == null) throw new UnauthorizedException("not authenticated");
-        if (groupId == null) throw new ValidationException("groupId is required");
+        groupId = Preconditions.requireText(groupId, "groupId");
         groupManager.disbandGroup(groupId, operatorId);
         return Map.of("status", "OK");
     }
 
     private Object handleInfoUpdate(ApiRequest req) {
         String groupId = req.getString("groupId");
-        if (groupId == null) throw new ValidationException("groupId is required");
+        groupId = Preconditions.requireText(groupId, "groupId");
         groupManager.setGroupInformation(groupId,
                 req.getString("groupName"), req.getString("notification"),
                 req.getString("introduction"), req.getString("faceUrl"),
@@ -150,7 +149,7 @@ public class GroupHandler implements RequestHandler {
 
     private Object handleInfo(ApiRequest req) {
         String groupId = req.getString("groupId");
-        if (groupId == null) throw new ValidationException("groupId is required");
+        groupId = Preconditions.requireText(groupId, "groupId");
         GroupInformation info = groupManager.getGroupInformation(groupId);
         if (info == null) throw new NotFoundException("group not found");
         return info;
@@ -165,9 +164,7 @@ public class GroupHandler implements RequestHandler {
 
     private Object handleSearch(ApiRequest req) {
         String keyword = req.getString("keyword");
-        if (keyword == null || keyword.isBlank()) {
-            throw new ValidationException("keyword is required");
-        }
+        keyword = Preconditions.requireText(keyword, "keyword");
         int limit = req.getInt("limit", 20);
         List<GroupInformation> groups = groupManager.searchGroups(keyword.trim(), limit);
         return Map.of("groups", groups, "count", groups.size());
@@ -175,7 +172,7 @@ public class GroupHandler implements RequestHandler {
 
     private Object handleMembers(ApiRequest req) {
         String groupId = req.getString("groupId");
-        if (groupId == null) throw new ValidationException("groupId is required");
+        groupId = Preconditions.requireText(groupId, "groupId");
         List<GroupMemberInformation> members = groupManager.getMemberList(groupId);
         return Map.of("groupId", groupId, "members", members, "count", members.size());
     }
@@ -185,7 +182,7 @@ public class GroupHandler implements RequestHandler {
         String operatorId = req.currentUserId();
         boolean mute = req.getBoolean("mute", true);
         if (operatorId == null) throw new UnauthorizedException("not authenticated");
-        if (groupId == null) throw new ValidationException("groupId is required");
+        groupId = Preconditions.requireText(groupId, "groupId");
         groupManager.muteGroupAll(groupId, operatorId, mute);
         return Map.of("status", "OK", "mute", mute);
     }

@@ -7,6 +7,7 @@ import com.im.api.IUserManager;
 import com.im.common.exception.ValidationException;
 import com.im.common.exception.ForbiddenException;
 import com.im.common.exception.NotFoundException;
+import com.im.common.validation.Preconditions;
 
 /**
  * Default send authorization policy for single and group chat messages.
@@ -30,8 +31,8 @@ public class DefaultChatSendPolicy implements IChatSendPolicy {
 
     @Override
     public void requireCanSendSingle(String fromUserId, String toUserId) {
-        requirePresent(fromUserId, "fromUserId is required");
-        requirePresent(toUserId, "toUserId is required");
+        fromUserId = Preconditions.requireText(fromUserId, "fromUserId");
+        toUserId = Preconditions.requireText(toUserId, "toUserId");
         if (fromUserId.equals(toUserId)) {
             throw new ValidationException("cannot send single chat to self");
         }
@@ -48,8 +49,8 @@ public class DefaultChatSendPolicy implements IChatSendPolicy {
 
     @Override
     public void requireCanSendGroup(String fromUserId, String groupId) {
-        requirePresent(fromUserId, "fromUserId is required");
-        requirePresent(groupId, "groupId is required");
+        fromUserId = Preconditions.requireText(fromUserId, "fromUserId");
+        groupId = Preconditions.requireText(groupId, "groupId");
         if (groupManager != null && !groupManager.isMember(groupId, fromUserId)) {
             throw new ForbiddenException("not a group member");
         }
@@ -58,9 +59,4 @@ public class DefaultChatSendPolicy implements IChatSendPolicy {
         }
     }
 
-    private void requirePresent(String value, String message) {
-        if (value == null || value.isBlank()) {
-            throw new ValidationException(message);
-        }
-    }
 }

@@ -9,8 +9,8 @@ import com.im.api.RequestHandler;
 import com.im.api.SearchMessagesParam;
 import com.im.api.SearchMessagesResult;
 import com.im.common.exception.UnauthorizedException;
-import com.im.common.exception.ValidationException;
 import com.im.common.exception.NotFoundException;
+import com.im.common.validation.Preconditions;
 import com.im.core.serialization.jackson.ObjectMapperProvider;
 
 import java.util.ArrayList;
@@ -62,7 +62,7 @@ public class MessageHandler implements RequestHandler {
         String userId = req.currentUserId();
         if (userId == null) throw new UnauthorizedException("not authenticated");
         String conversationId = req.getString("conversationId");
-        if (conversationId == null) throw new ValidationException("conversationId is required");
+        conversationId = Preconditions.requireText(conversationId, "conversationId");
         requireReadable(userId, conversationId);
         long startSeq = req.getInt("startSeq", 0);
         long endSeq = req.getInt("endSeq", 0);
@@ -78,7 +78,7 @@ public class MessageHandler implements RequestHandler {
         String userId = req.currentUserId();
         if (userId == null) throw new UnauthorizedException("not authenticated");
         String conversationId = req.getString("conversationId");
-        if (conversationId == null) throw new ValidationException("conversationId is required");
+        conversationId = Preconditions.requireText(conversationId, "conversationId");
         requireReadable(userId, conversationId);
         long maxSeq = sequenceManager.getMaximumSequence(conversationId);
         return Map.of("conversationId", conversationId, "maxSeq", maxSeq);

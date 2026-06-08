@@ -7,7 +7,7 @@ import com.im.api.GroupJoinVerification;
 import com.im.api.GroupStatus;
 import com.im.common.exception.ForbiddenException;
 import com.im.common.exception.NotFoundException;
-import com.im.common.exception.ValidationException;
+import com.im.common.validation.Preconditions;
 
 import java.util.List;
 
@@ -29,12 +29,8 @@ public final class GroupApplyPolicy {
     }
 
     public GroupJoinResult validateJoin(String groupId, String userId) {
-        if (groupId == null || groupId.isBlank()) {
-            throw new ValidationException("groupId is required");
-        }
-        if (userId == null || userId.isBlank()) {
-            throw new ValidationException("userId is required");
-        }
+        groupId = Preconditions.requireText(groupId, "groupId");
+        userId = Preconditions.requireText(userId, "userId");
 
         GroupSnapshot group = gateway.getGroup(groupId);
         if (group == null) {

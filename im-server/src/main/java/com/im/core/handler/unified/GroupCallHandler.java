@@ -4,6 +4,7 @@ import com.im.api.ApiRequest;
 import com.im.api.RequestHandler;
 import com.im.common.exception.UnauthorizedException;
 import com.im.common.exception.ValidationException;
+import com.im.common.validation.Preconditions;
 import com.im.core.call.GroupCallJoinResult;
 import com.im.core.call.GroupCallManager;
 import com.im.core.call.GroupCallSession;
@@ -33,7 +34,7 @@ public class GroupCallHandler implements RequestHandler {
         String userId = req.currentUserId();
         if (userId == null) throw new UnauthorizedException("not authenticated");
         String groupId = req.getString("groupId");
-        if (groupId == null || groupId.isBlank()) throw new ValidationException("groupId is required");
+        groupId = Preconditions.requireText(groupId, "groupId");
 
         return switch (req.operation()) {
             case "group.call.start" -> {

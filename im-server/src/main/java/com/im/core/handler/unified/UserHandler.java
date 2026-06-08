@@ -5,8 +5,8 @@ import com.im.api.IUserManager;
 import com.im.api.RequestHandler;
 import com.im.api.UserInformation;
 import com.im.common.exception.UnauthorizedException;
-import com.im.common.exception.ValidationException;
 import com.im.common.exception.NotFoundException;
+import com.im.common.validation.Preconditions;
 import com.im.core.usecase.RegisterResult;
 import com.im.core.usecase.RegisterUseCase;
 import org.slf4j.Logger;
@@ -67,7 +67,7 @@ public class UserHandler implements RequestHandler {
 
     private Object handleInfo(ApiRequest req) {
         String userId = req.getString("userId");
-        if (userId == null) throw new ValidationException("userId is required");
+        userId = Preconditions.requireText(userId, "userId");
         UserInformation info = userManager.getUserInformation(userId);
         if (info == null) throw new NotFoundException("user not found");
         return info;
@@ -75,9 +75,7 @@ public class UserHandler implements RequestHandler {
 
     private Object handleSearch(ApiRequest req) {
         String keyword = req.getString("keyword");
-        if (keyword == null || keyword.isBlank()) {
-            throw new ValidationException("keyword is required");
-        }
+        keyword = Preconditions.requireText(keyword, "keyword");
         int limit = req.getInt("limit", 20);
         List<UserInformation> users = userManager.searchUsers(keyword.trim(), limit);
         return Map.of("users", users, "count", users.size());

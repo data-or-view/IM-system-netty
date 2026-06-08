@@ -12,6 +12,7 @@ import com.im.common.exception.ForbiddenException;
 import com.im.common.exception.NotFoundException;
 import com.im.common.exception.UnauthorizedException;
 import com.im.common.exception.ValidationException;
+import com.im.common.validation.Preconditions;
 import com.im.core.system.SystemMessagePublishUseCase;
 
 import java.util.ArrayList;
@@ -63,9 +64,7 @@ public class SystemMessageHandler implements RequestHandler {
     private Object handleMessageDetail(ApiRequest req) {
         String userId = requireUser(req);
         String messageId = req.getString("messageId");
-        if (messageId == null || messageId.isBlank()) {
-            throw new ValidationException("messageId is required");
-        }
+        messageId = Preconditions.requireText(messageId, "messageId");
         var message = store.getInboxMessage(userId, messageId);
         if (message == null) {
             throw new NotFoundException("system message not found");
@@ -76,9 +75,7 @@ public class SystemMessageHandler implements RequestHandler {
     private Object handleMessageRead(ApiRequest req) {
         String userId = requireUser(req);
         String messageId = req.getString("messageId");
-        if (messageId == null || messageId.isBlank()) {
-            throw new ValidationException("messageId is required");
-        }
+        messageId = Preconditions.requireText(messageId, "messageId");
         store.markRead(userId, messageId, System.currentTimeMillis());
         return Map.of("status", "OK");
     }

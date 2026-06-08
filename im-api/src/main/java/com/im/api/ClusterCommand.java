@@ -1,6 +1,7 @@
 package com.im.api;
 
-import java.util.Objects;
+import com.im.common.validation.Preconditions;
+
 import java.util.Map;
 
 /**
@@ -14,8 +15,8 @@ public record ClusterCommand(ClusterCommandType type,
                              Map<String, Object> payload) {
 
     public ClusterCommand {
-        Objects.requireNonNull(type, "type");
-        Objects.requireNonNull(userId, "userId");
+        Preconditions.requireNonNull(type, "type");
+        userId = Preconditions.requireText(userId, "userId");
         if (sessionId == null || sessionId.isBlank()) {
             sessionId = "default";
         }

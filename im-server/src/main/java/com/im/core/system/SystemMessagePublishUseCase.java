@@ -7,6 +7,7 @@ import com.im.api.SystemMessageNotifier;
 import com.im.api.SystemMessageSummary;
 import com.im.common.exception.ValidationException;
 import com.im.common.id.IdGenerator;
+import com.im.common.validation.Preconditions;
 
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -22,15 +23,9 @@ public class SystemMessagePublishUseCase {
     }
 
     public SystemMessageSummary publishToUsers(SystemMessage message, List<String> userIds) {
-        if (message.getChannelId() == null || message.getChannelId().isBlank()) {
-            throw new ValidationException("channelId is required");
-        }
-        if (message.getTitle() == null || message.getTitle().isBlank()) {
-            throw new ValidationException("title is required");
-        }
-        if (message.getContent() == null || message.getContent().isBlank()) {
-            throw new ValidationException("content is required");
-        }
+        message.setChannelId(Preconditions.requireText(message.getChannelId(), "channelId"));
+        message.setTitle(Preconditions.requireText(message.getTitle(), "title"));
+        message.setContent(Preconditions.requireText(message.getContent(), "content"));
         LinkedHashSet<String> targets = new LinkedHashSet<>(userIds != null ? userIds : List.of());
         targets.removeIf(userId -> userId == null || userId.isBlank());
         if (targets.isEmpty()) {

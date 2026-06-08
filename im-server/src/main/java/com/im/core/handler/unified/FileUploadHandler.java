@@ -3,6 +3,7 @@ package com.im.core.handler.unified;
 import com.im.api.ApiRequest;
 import com.im.api.RequestHandler;
 import com.im.common.exception.ValidationException;
+import com.im.common.validation.Preconditions;
 import com.im.infrastructure.storage.usecase.FileUploadResult;
 import com.im.infrastructure.storage.usecase.FileUploadUseCase;
 import org.slf4j.Logger;
@@ -36,12 +37,8 @@ public class FileUploadHandler implements RequestHandler {
             throw new ValidationException("file body is empty");
         }
         // fileName/mimeType 缺失会存脏数据到对象存储，必须校验
-        if (fileName == null || fileName.isBlank()) {
-            throw new ValidationException("fileName is required");
-        }
-        if (mimeType == null || mimeType.isBlank()) {
-            throw new ValidationException("mimeType is required");
-        }
+        fileName = Preconditions.requireText(fileName, "fileName");
+        mimeType = Preconditions.requireText(mimeType, "mimeType");
 
         FileUploadResult result = fileUploadUseCase.execute(fileName, mimeType, body);
 

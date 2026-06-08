@@ -6,8 +6,8 @@ import com.im.api.IConversationAccessChecker;
 import com.im.api.IConversationManager;
 import com.im.api.RequestHandler;
 import com.im.common.exception.UnauthorizedException;
-import com.im.common.exception.ValidationException;
 import com.im.common.exception.NotFoundException;
+import com.im.common.validation.Preconditions;
 
 import java.util.List;
 import java.util.Map;
@@ -47,7 +47,7 @@ public class ConversationHandler implements RequestHandler {
         long readSeq = req.getLong("readSeq", 0);
 
         if (userId == null) throw new UnauthorizedException("not authenticated");
-        if (conversationId == null) throw new ValidationException("conversationId is required");
+        conversationId = Preconditions.requireText(conversationId, "conversationId");
 
         requireReadable(userId, conversationId);
         long currentReadSeq = conversationManager.getReadSeq(userId, conversationId);
@@ -71,7 +71,7 @@ public class ConversationHandler implements RequestHandler {
         String userId = req.currentUserId();
         String conversationId = req.getString("conversationId");
         if (userId == null) throw new UnauthorizedException("not authenticated");
-        if (conversationId == null) throw new ValidationException("conversationId is required");
+        conversationId = Preconditions.requireText(conversationId, "conversationId");
         requireReadable(userId, conversationId);
         if (req.params().containsKey("pinned")) {
             conversationManager.setPinned(userId, conversationId, req.getBoolean("pinned", false));

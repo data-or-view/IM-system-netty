@@ -8,6 +8,7 @@ import com.im.common.exception.UnauthorizedException;
 import com.im.common.exception.ValidationException;
 import com.im.common.exception.ForbiddenException;
 import com.im.common.exception.NotFoundException;
+import com.im.common.validation.Preconditions;
 import com.im.core.friend.FriendApplyNotifier;
 
 import java.util.List;
@@ -55,7 +56,7 @@ public class FriendHandler implements RequestHandler {
         String toUserId = req.getString("toUserId");
         String reqMsg = req.getString("reqMsg", "");
         if (fromUserId == null) throw new UnauthorizedException("not authenticated");
-        if (toUserId == null) throw new ValidationException("toUserId is required");
+        toUserId = Preconditions.requireText(toUserId, "toUserId");
         friendManager.applyAddFriend(fromUserId, toUserId, reqMsg);
         var apply = friendManager.getFriendApplyDetail(fromUserId, toUserId);
         if (apply != null) {
@@ -70,7 +71,7 @@ public class FriendHandler implements RequestHandler {
         boolean agreed = req.getBoolean("agreed", true);
         String handleMsg = req.getString("handleMsg", "");
         if (userId == null) throw new UnauthorizedException("not authenticated");
-        if (fromUserId == null) throw new ValidationException("fromUserId is required");
+        fromUserId = Preconditions.requireText(fromUserId, "fromUserId");
         friendManager.respondFriendApply(userId, fromUserId, handleMsg, agreed);
         var apply = friendManager.getFriendApplyDetail(fromUserId, userId);
         if (apply != null) {
@@ -83,7 +84,7 @@ public class FriendHandler implements RequestHandler {
         String userId = req.currentUserId();
         String friendUserId = req.getString("friendUserId");
         if (userId == null) throw new UnauthorizedException("not authenticated");
-        if (friendUserId == null) throw new ValidationException("friendUserId is required");
+        friendUserId = Preconditions.requireText(friendUserId, "friendUserId");
         friendManager.deleteFriend(userId, friendUserId);
         return Map.of("status", "OK");
     }
@@ -99,7 +100,7 @@ public class FriendHandler implements RequestHandler {
         String userId = req.currentUserId();
         String blockedUserId = req.getString("blockedUserId");
         if (userId == null) throw new UnauthorizedException("not authenticated");
-        if (blockedUserId == null) throw new ValidationException("blockedUserId is required");
+        blockedUserId = Preconditions.requireText(blockedUserId, "blockedUserId");
         friendManager.addBlack(userId, blockedUserId);
         return Map.of("status", "OK");
     }
@@ -108,7 +109,7 @@ public class FriendHandler implements RequestHandler {
         String userId = req.currentUserId();
         String blockedUserId = req.getString("blockedUserId");
         if (userId == null) throw new UnauthorizedException("not authenticated");
-        if (blockedUserId == null) throw new ValidationException("blockedUserId is required");
+        blockedUserId = Preconditions.requireText(blockedUserId, "blockedUserId");
         friendManager.removeBlack(userId, blockedUserId);
         return Map.of("status", "OK");
     }

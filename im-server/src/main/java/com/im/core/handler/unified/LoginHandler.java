@@ -12,7 +12,7 @@ import com.im.api.Message;
 import com.im.api.MultiLoginStrategy;
 import com.im.api.RequestHandler;
 import com.im.api.RouteBinding;
-import com.im.common.exception.ValidationException;
+import com.im.common.validation.Preconditions;
 import com.im.core.serialization.jackson.ObjectMapperProvider;
 import com.im.core.usecase.LoginResult;
 import com.im.core.usecase.LoginUseCase;
@@ -59,9 +59,7 @@ public class LoginHandler implements RequestHandler {
     @Override
     public Object handle(ApiRequest req) {
         String userId = req.getString("userId");
-        if (userId == null || userId.isBlank()) {
-            throw new ValidationException("userId is required");
-        }
+        userId = Preconditions.requireText(userId, "userId");
 
         int platformId = req.getInt("platformId", 0);
         String password = req.getString("password", "");

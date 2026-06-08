@@ -6,8 +6,8 @@ import com.im.api.IConversationAccessChecker;
 import com.im.api.IConversationManager;
 import com.im.api.IGroupManager;
 import com.im.common.exception.UnauthorizedException;
-import com.im.common.exception.ValidationException;
 import com.im.common.exception.ForbiddenException;
+import com.im.common.validation.Preconditions;
 
 import java.util.List;
 
@@ -32,9 +32,7 @@ public class ConversationAccessChecker implements IConversationAccessChecker {
         if (userId == null || userId.isBlank()) {
             throw new UnauthorizedException("not authenticated");
         }
-        if (conversationId == null || conversationId.isBlank()) {
-            throw new ValidationException("conversationId is required");
-        }
+        conversationId = Preconditions.requireText(conversationId, "conversationId");
         if (!canRead(userId, conversationId)) {
             throw new ForbiddenException("conversation not readable");
         }
