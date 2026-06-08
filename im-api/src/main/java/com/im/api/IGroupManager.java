@@ -75,8 +75,10 @@ public interface IGroupManager {
 
     /**
      * 主动退群。
+     *
+     * @return true=本次确实移除了成员, false=用户原本不在群内或群不存在
      */
-    void quitGroup(String groupId, String userId);
+    boolean quitGroup(String groupId, String userId);
 
     /**
      * 转让群主。

@@ -6,6 +6,8 @@ import com.im.api.GroupApply;
 import com.im.api.GroupInformation;
 import com.im.api.GroupJoinResult;
 import com.im.api.GroupMemberInformation;
+import com.im.api.ConversationIds;
+import com.im.api.IConversationManager;
 import com.im.api.IGroupManager;
 import com.im.api.RequestPreconditions;
 import com.im.api.RequestHandler;
@@ -31,6 +33,7 @@ public class GroupHandler implements RequestHandler {
     private final IGroupManager groupManager;
     private final GroupApplyNotifier groupApplyNotifier;
     private final GroupSystemMessagePublisher groupSystemMessagePublisher;
+    private final IConversationManager conversationManager;
 
     public GroupHandler(IGroupManager groupManager) {
         this(groupManager, GroupApplyNotifier.NOOP);
@@ -42,10 +45,17 @@ public class GroupHandler implements RequestHandler {
 
     public GroupHandler(IGroupManager groupManager, GroupApplyNotifier groupApplyNotifier,
                         GroupSystemMessagePublisher groupSystemMessagePublisher) {
+        this(groupManager, groupApplyNotifier, groupSystemMessagePublisher, null);
+    }
+
+    public GroupHandler(IGroupManager groupManager, GroupApplyNotifier groupApplyNotifier,
+                        GroupSystemMessagePublisher groupSystemMessagePublisher,
+                        IConversationManager conversationManager) {
         this.groupManager = groupManager;
         this.groupApplyNotifier = groupApplyNotifier != null ? groupApplyNotifier : GroupApplyNotifier.NOOP;
         this.groupSystemMessagePublisher = groupSystemMessagePublisher != null
                 ? groupSystemMessagePublisher : GroupSystemMessagePublisher.NOOP;
+        this.conversationManager = conversationManager;
     }
 
     @Override
@@ -108,7 +118,14 @@ public class GroupHandler implements RequestHandler {
         String groupId = req.getString("groupId");
         String userId = RequestPreconditions.requireUser(req);
         groupId = Preconditions.requireText(groupId, "groupId");
-        groupManager.quitGroup(groupId, userId);
+        boolean removed = groupManager.quitGroup(groupId, userId);
+        if (removed) {
+            // 退群人的会话要立即从自己的列表消失；剩余成员通过群消息流感知成员变更。
+            if (conversationManager != null) {
+                conversationManager.deleteConversation(userId, ConversationIds.group(groupId));
+            }
+            groupSystemMessagePublisher.memberLeft(groupId, userId, userId);
+        }
         return Map.of("status", "OK");
     }
 

@@ -103,7 +103,7 @@ class ConversationAccessCheckerTest {
         @Override public void addMember(String groupId, String userId) {}
         @Override public void addMembers(String groupId, List<String> userIds) {}
         @Override public void kickMember(String groupId, String operatorId, String targetUserId) {}
-        @Override public void quitGroup(String groupId, String userId) {}
+        @Override public boolean quitGroup(String groupId, String userId) { return true; }
         @Override public void transferOwner(String groupId, String oldOwnerId, String newOwnerId) {}
         @Override public void setMemberRole(String groupId, String operatorId, String targetUserId, int roleLevel) {}
         @Override public void muteMember(String groupId, String targetUserId, long muteEndTime) {}

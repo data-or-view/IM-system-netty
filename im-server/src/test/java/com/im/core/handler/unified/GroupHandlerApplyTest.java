@@ -7,9 +7,12 @@ import com.im.api.GroupApplyHandleResult;
 import com.im.api.GroupInformation;
 import com.im.api.GroupJoinResult;
 import com.im.api.GroupMemberInformation;
+import com.im.api.IConversationManager;
 import com.im.api.IGroupManager;
 import com.im.api.IncrementalSyncResult;
 import com.im.api.Operation;
+import com.im.api.Conversation;
+import com.im.api.Message;
 import com.im.common.exception.ForbiddenException;
 import com.im.core.group.GroupSystemMessagePublisher;
 import org.junit.jupiter.api.Test;
@@ -125,6 +128,40 @@ class GroupHandlerApplyTest {
         assertEquals(manager.createdGroupId, response.get("groupId"));
     }
 
+    @Test
+    void quittingGroupPublishesLeftMessageAndRemovesOwnConversation() {
+        RecordingGroupManager manager = new RecordingGroupManager();
+        manager.quitResult = true;
+        RecordingGroupSystemMessagePublisher publisher = new RecordingGroupSystemMessagePublisher();
+        RecordingConversationManager conversationManager = new RecordingConversationManager();
+        GroupHandler handler = new GroupHandler(manager, null, publisher, conversationManager);
+        ApiRequest request = request(Operation.GROUP_QUIT, Map.of("groupId", "grp_1"), "alice");
+
+        handler.handle(request);
+
+        assertEquals(1, publisher.memberLeftCalls);
+        assertEquals("grp_1", publisher.groupId);
+        assertEquals("alice", publisher.userId);
+        assertEquals("alice", publisher.operatorId);
+        assertEquals("alice", conversationManager.deletedOwnerUserId);
+        assertEquals("group_grp_1", conversationManager.deletedConversationId);
+    }
+
+    @Test
+    void quittingGroupDoesNotPublishOrRemoveConversationWhenUserWasNotMember() {
+        RecordingGroupManager manager = new RecordingGroupManager();
+        manager.quitResult = false;
+        RecordingGroupSystemMessagePublisher publisher = new RecordingGroupSystemMessagePublisher();
+        RecordingConversationManager conversationManager = new RecordingConversationManager();
+        GroupHandler handler = new GroupHandler(manager, null, publisher, conversationManager);
+        ApiRequest request = request(Operation.GROUP_QUIT, Map.of("groupId", "grp_1"), "alice");
+
+        handler.handle(request);
+
+        assertEquals(0, publisher.memberLeftCalls);
+        assertEquals(null, conversationManager.deletedConversationId);
+    }
+
     private static ApiRequest request(Operation operation, Map<String, Object> params, String userId) {
         ApiRequest request = new ApiRequest(operation, params, Map.of(), null, null);
         request.setAttribute("_uid", userId);
@@ -144,6 +181,7 @@ class GroupHandlerApplyTest {
         boolean respondAgreed;
         String createdGroupId;
         GroupJoinResult joinResult = GroupJoinResult.APPLY_CREATED;
+        boolean quitResult = true;
 
         @Override public void createGroup(String groupId, String ownerId, String groupName, String faceUrl, List<String> members, int groupType, int needVerification) {
             createdGroupId = groupId;
@@ -153,7 +191,7 @@ class GroupHandlerApplyTest {
         @Override public void addMember(String groupId, String userId) {}
         @Override public void addMembers(String groupId, List<String> userIds) {}
         @Override public void kickMember(String groupId, String operatorId, String targetUserId) {}
-        @Override public void quitGroup(String groupId, String userId) {}
+        @Override public boolean quitGroup(String groupId, String userId) { return quitResult; }
         @Override public void transferOwner(String groupId, String oldOwnerId, String newOwnerId) {}
         @Override public void setMemberRole(String groupId, String operatorId, String targetUserId, int roleLevel) {}
         @Override public void muteMember(String groupId, String targetUserId, long muteEndTime) {}
@@ -192,6 +230,7 @@ class GroupHandlerApplyTest {
 
     private static class RecordingGroupSystemMessagePublisher implements GroupSystemMessagePublisher {
         int memberJoinedCalls;
+        int memberLeftCalls;
         String groupId;
         String userId;
         String operatorId;
@@ -202,6 +241,33 @@ class GroupHandlerApplyTest {
             this.groupId = groupId;
             this.userId = userId;
             this.operatorId = operatorId;
+        }
+
+        @Override
+        public void memberLeft(String groupId, String userId, String operatorId) {
+            memberLeftCalls++;
+            this.groupId = groupId;
+            this.userId = userId;
+            this.operatorId = operatorId;
+        }
+    }
+
+    private static final class RecordingConversationManager implements IConversationManager {
+        String deletedOwnerUserId;
+        String deletedConversationId;
+
+        @Override public List<Conversation> getConversations(String ownerUserId) { return List.of(); }
+        @Override public Conversation getConversation(String ownerUserId, String conversationId) { return null; }
+        @Override public void updateOnMessage(String ownerUserId, String conversationId, Message msg, boolean isSelf) {}
+        @Override public void markRead(String ownerUserId, String conversationId, long readSeq) {}
+        @Override public void setPinned(String ownerUserId, String conversationId, boolean pinned) {}
+        @Override public void setRecvMsgOpt(String ownerUserId, String conversationId, int recvMsgOpt) {}
+        @Override public void setBurnDuration(String ownerUserId, String conversationId, int burnDuration) {}
+
+        @Override
+        public void deleteConversation(String ownerUserId, String conversationId) {
+            deletedOwnerUserId = ownerUserId;
+            deletedConversationId = conversationId;
         }
     }
 }

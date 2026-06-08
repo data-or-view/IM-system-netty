@@ -90,6 +90,25 @@ class CachedGroupManagerTest {
         assertEquals(2, delegate.memberIdsCalls);
     }
 
+    @Test
+    void quitGroupOnlyInvalidatesCacheWhenMembershipChanged() {
+        RecordingGroupManager delegate = new RecordingGroupManager();
+        delegate.memberIds = Set.of("u1");
+        delegate.quitResult = false;
+        CachedGroupManager manager = new CachedGroupManager(delegate,
+                new SafeCache<>(new ConcurrentHashCache<>(), "group-profile-test"),
+                new SafeCache<>(new ConcurrentHashCache<>(), "group-member-list-test"),
+                new SafeCache<>(new ConcurrentHashCache<>(), "group-member-ids-test"));
+
+        assertEquals(Set.of("u1"), manager.getMemberIds("g1"));
+        delegate.memberIds = Set.of("u2");
+
+        manager.quitGroup("g1", "u1");
+
+        assertEquals(Set.of("u1"), manager.getMemberIds("g1"));
+        assertEquals(1, delegate.memberIdsCalls);
+    }
+
     private static GroupInformation group(String groupId, String name) {
         GroupInformation info = new GroupInformation();
         info.setGroupId(groupId);
@@ -111,6 +130,7 @@ class CachedGroupManagerTest {
         private int infoCalls;
         private int memberListCalls;
         private int memberIdsCalls;
+        private boolean quitResult = true;
 
         @Override public void createGroup(String groupId, String ownerId, String groupName, String faceUrl, List<String> members, int groupType, int needVerification) {}
         @Override public void disbandGroup(String groupId, String operatorId) {}
@@ -118,7 +138,7 @@ class CachedGroupManagerTest {
         @Override public void addMember(String groupId, String userId) {}
         @Override public void addMembers(String groupId, List<String> userIds) {}
         @Override public void kickMember(String groupId, String operatorId, String targetUserId) {}
-        @Override public void quitGroup(String groupId, String userId) {}
+        @Override public boolean quitGroup(String groupId, String userId) { return quitResult; }
         @Override public void transferOwner(String groupId, String oldOwnerId, String newOwnerId) {}
         @Override public void setMemberRole(String groupId, String operatorId, String targetUserId, int roleLevel) {}
         @Override public void muteMember(String groupId, String targetUserId, long muteEndTime) {}

@@ -7,6 +7,7 @@ public class DefaultGroupSystemMessagePublisher implements GroupSystemMessagePub
 
     public static final String SYSTEM_USER_ID = "im-system";
     public static final String MEMBER_JOINED = "group_member_joined";
+    public static final String MEMBER_LEFT = "group_member_left";
 
     private final SendMessageUseCase sendMessageUseCase;
 
@@ -23,5 +24,14 @@ public class DefaultGroupSystemMessagePublisher implements GroupSystemMessagePub
         // System messages must travel through the same message pipeline as normal
         // group chat so history, unread counts, and online push stay consistent.
         sendMessageUseCase.publishGroupSystem(SYSTEM_USER_ID, groupId, new SystemContent(MEMBER_JOINED, message));
+    }
+
+    @Override
+    public void memberLeft(String groupId, String userId, String operatorId) {
+        if (sendMessageUseCase == null || groupId == null || userId == null) return;
+        String message = userId.equals(operatorId)
+                ? userId + " left the group"
+                : operatorId + " removed " + userId + " from the group";
+        sendMessageUseCase.publishGroupSystem(SYSTEM_USER_ID, groupId, new SystemContent(MEMBER_LEFT, message));
     }
 }

@@ -94,6 +94,16 @@ public interface IConversationManager {
         // 默认不实现
     }
 
+    /**
+     * 从用户会话列表移除指定会话。
+     *
+     * <p>退群/解散等场景需要让客户端通过增量同步把会话从列表中拿掉，
+     * 不能只依赖发消息失败来表达“已经不在这个群”。</p>
+     */
+    default void deleteConversation(String ownerUserId, String conversationId) {
+        // 默认不实现
+    }
+
     // ========================================
     //  已读回执 + 未读计数
     // ========================================

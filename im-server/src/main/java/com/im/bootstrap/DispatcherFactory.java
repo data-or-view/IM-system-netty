@@ -107,7 +107,8 @@ final class DispatcherFactory {
         dispatcher.registerHandlers(new GroupHandler(
                         dependencies.business().groupManager(),
                         dependencies.runtime().groupApplyNotifier(),
-                        new DefaultGroupSystemMessagePublisher(sendMessageUseCase)),
+                        new DefaultGroupSystemMessagePublisher(sendMessageUseCase),
+                        dependencies.business().conversationManager()),
                 Operation.GROUP_CREATE, Operation.GROUP_JOIN, Operation.GROUP_QUIT, Operation.GROUP_KICK,
                 Operation.GROUP_DISBAND, Operation.GROUP_INFO_UPDATE, Operation.GROUP_INFO,
                 Operation.GROUP_LIST, Operation.GROUP_SEARCH, Operation.GROUP_MEMBERS, Operation.GROUP_MUTE_ALL,

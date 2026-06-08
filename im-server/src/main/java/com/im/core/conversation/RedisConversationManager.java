@@ -225,6 +225,16 @@ public class RedisConversationManager implements IConversationManager {
     }
 
     @Override
+    public void deleteConversation(String ownerUserId, String conversationId) {
+        PersistenceExceptions.runRedis("delete conversation", () -> {
+            async.del(dataKey(ownerUserId, conversationId)).get(REDIS_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+            async.zrem(listKey(ownerUserId), conversationId).get(REDIS_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+            incrVersion(ownerUserId);
+            return null;
+        });
+    }
+
+    @Override
     public long getReadSeq(String ownerUserId, String conversationId) {
         return PersistenceExceptions.runRedis("get conversation read sequence", () -> {
             String val = async.hget(dataKey(ownerUserId, conversationId), "readSeq")

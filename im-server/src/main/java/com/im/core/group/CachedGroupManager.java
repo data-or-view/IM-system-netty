@@ -88,9 +88,12 @@ public class CachedGroupManager implements IGroupManager {
     }
 
     @Override
-    public void quitGroup(String groupId, String userId) {
-        delegate.quitGroup(groupId, userId);
-        invalidateGroupCaches(groupId);
+    public boolean quitGroup(String groupId, String userId) {
+        boolean removed = delegate.quitGroup(groupId, userId);
+        if (removed) {
+            invalidateGroupCaches(groupId);
+        }
+        return removed;
     }
 
     @Override

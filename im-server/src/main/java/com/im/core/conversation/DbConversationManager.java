@@ -308,6 +308,24 @@ public class DbConversationManager implements IConversationManager {
         }
     }
 
+    @Override
+    public void deleteConversation(String ownerUserId, String conversationId) {
+        PersistenceExceptions.runDatabase("delete conversation", () -> retryExecutor.execute(CFG, () -> {
+            try (SqlSession session = MyBatisPlusFactory.openSession()) {
+                ConversationMapper mapper = session.getMapper(ConversationMapper.class);
+                mapper.delete(
+                        new LambdaQueryWrapper<ConversationEntity>()
+                                .eq(ConversationEntity::getOwnerUserId, ownerUserId)
+                                .eq(ConversationEntity::getConversationId, conversationId)
+                );
+                session.commit();
+            }
+            return null;
+        }));
+
+        sync.recordChange(ownerUserId, "conversation", conversationId, "delete");
+    }
+
     // ========== 增量同步 ==========
 
     @Override

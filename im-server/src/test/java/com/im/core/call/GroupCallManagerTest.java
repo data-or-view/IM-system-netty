@@ -141,7 +141,7 @@ class GroupCallManagerTest {
         @Override public void addMember(String groupId, String userId) { throw new UnsupportedOperationException(); }
         @Override public void addMembers(String groupId, List<String> userIds) { throw new UnsupportedOperationException(); }
         @Override public void kickMember(String groupId, String operatorId, String targetUserId) { throw new UnsupportedOperationException(); }
-        @Override public void quitGroup(String groupId, String userId) { throw new UnsupportedOperationException(); }
+        @Override public boolean quitGroup(String groupId, String userId) { throw new UnsupportedOperationException(); }
         @Override public void transferOwner(String groupId, String oldOwnerId, String newOwnerId) { throw new UnsupportedOperationException(); }
         @Override public void setMemberRole(String groupId, String operatorId, String targetUserId, int roleLevel) { throw new UnsupportedOperationException(); }
         @Override public void muteMember(String groupId, String targetUserId, long muteEndTime) { throw new UnsupportedOperationException(); }

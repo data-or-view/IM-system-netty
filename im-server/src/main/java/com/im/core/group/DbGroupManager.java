@@ -241,28 +241,38 @@ public class DbGroupManager implements IGroupManager, GroupApplyPolicy.Gateway {
     }
 
     @Override
-    public void quitGroup(String groupId, String userId) {
-        PersistenceExceptions.runDatabase("quit group", () -> retryExecutor.execute(CFG, () -> {
+    public boolean quitGroup(String groupId, String userId) {
+        boolean removed = PersistenceExceptions.runDatabase("quit group", () -> retryExecutor.execute(CFG, () -> {
         try (SqlSession session = MyBatisPlusFactory.openSession()) {
             GroupMapper groupMapper = session.getMapper(GroupMapper.class);
             GroupMemberMapper memberMapper = session.getMapper(GroupMemberMapper.class);
+            GroupEntity group = groupMapper.selectById(groupId);
+            if (group == null) return false;
+            if (!canQuitGroup(group.getOwnerUserId(), userId)) {
+                throw new ForbiddenException("group owner must transfer ownership or disband group before leaving");
+            }
             LambdaQueryWrapper<GroupMemberEntity> qw = new LambdaQueryWrapper<>();
             qw.eq(GroupMemberEntity::getGroupId, groupId)
                     .eq(GroupMemberEntity::getUserId, userId);
-            memberMapper.delete(qw);
-            GroupEntity entity = groupMapper.selectById(groupId);
-            if (entity != null) {
-                entity.setMemberCount(Math.max(0, entity.getMemberCount() - 1));
-                groupMapper.updateById(entity);
+            int deleted = memberMapper.delete(qw);
+            if (deleted <= 0) {
+                session.commit();
+                return false;
             }
+            group.setMemberCount(memberCountAfterRemove(group.getMemberCount()));
+            group.setUpdatedAt(System.currentTimeMillis());
+            groupMapper.updateById(group);
             session.commit();
             log.info("Quit: groupId={}, userId={}", groupId, userId);
+            return true;
         }
-                    return null;
         }));
 
-        sync.recordChange(userId, "group", groupId, "delete");
-        sync.recordChange(groupId, "member", userId, "delete");
+        if (removed) {
+            sync.recordChange(userId, "group", groupId, "delete");
+            sync.recordChange(groupId, "member", userId, "delete");
+        }
+        return removed;
     }
 
     @Override
@@ -746,5 +756,13 @@ public class DbGroupManager implements IGroupManager, GroupApplyPolicy.Gateway {
 
     static int searchableGroupStatus() {
         return GROUP_STATUS_NORMAL;
+    }
+
+    static boolean canQuitGroup(String ownerUserId, String userId) {
+        return ownerUserId == null || !ownerUserId.equals(userId);
+    }
+
+    static int memberCountAfterRemove(int currentMemberCount) {
+        return Math.max(0, currentMemberCount - 1);
     }
 }
