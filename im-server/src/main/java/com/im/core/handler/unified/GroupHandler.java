@@ -91,11 +91,13 @@ public class GroupHandler implements RequestHandler {
         String reqMsg = req.getString("reqMsg", "");
         GroupJoinResult result = groupManager.joinGroup(groupId, userId, reqMsg);
         if (result == GroupJoinResult.JOINED) {
+            // 直接入群也要写系统消息，离线成员靠普通消息同步感知成员变更。
             groupSystemMessagePublisher.memberJoined(groupId, userId, userId);
         }
         if (result == GroupJoinResult.APPLY_CREATED) {
             GroupApply apply = findGroupApply(groupId, userId, true);
             if (apply != null) {
+                // 通知管理员时使用已入库申请，避免多端审批页拿不到同一条申请的持久化状态。
                 groupApplyNotifier.notifyApplyCreated(groupManager.getManagerIds(groupId), apply);
             }
         }
@@ -202,14 +204,17 @@ public class GroupHandler implements RequestHandler {
         if (groupId == null || userId == null) {
             throw new ValidationException("groupId and userId are required");
         }
+        // 审批入口必须在响应前再次校验管理员身份，不能只依赖前端展示的“管理员可见”入口。
         requireGroupAdmin(groupId, operatorId);
         GroupApplyHandleResult result = groupManager.respondJoinRequest(groupId, userId, operatorId, handleMsg, agreed);
         if (result == GroupApplyHandleResult.HANDLED) {
             GroupApply apply = findGroupApply(groupId, userId, false);
             if (apply != null) {
+                // 被处理人在线时即时推送；不在线时仍可通过申请列表读取最终状态。
                 groupApplyNotifier.notifyApplyHandled(userId, apply);
             }
             if (agreed) {
+                // 同意入群后也走群消息流，保证群成员通过同一条历史链路看到成员变动。
                 groupSystemMessagePublisher.memberJoined(groupId, userId, operatorId);
             }
         }

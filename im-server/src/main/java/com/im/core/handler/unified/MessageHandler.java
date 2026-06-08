@@ -96,6 +96,7 @@ public class MessageHandler implements RequestHandler {
         Map<String, Object> seqsRaw = (Map<String, Object>) req.params().get("seqs");
         int limit = req.getInt("limit", 50);
 
+        // 客户端没有上报会话水位时不主动展开所有会话，避免一次上线同步退化成全量扫描。
         if (seqsRaw == null || seqsRaw.isEmpty()) {
             return Map.of("syncs", List.of());
         }
@@ -103,11 +104,11 @@ public class MessageHandler implements RequestHandler {
         List<Map<String, Object>> syncs = new ArrayList<>(seqsRaw.size());
         for (Map.Entry<String, Object> entry : seqsRaw.entrySet()) {
             String convId = entry.getKey();
+            // seqs 完全来自客户端，逐个会话做可读校验，防止用户伪造 conversationId 批量探测消息。
             requireReadable(userId, convId);
             long lastSeq = entry.getValue() instanceof Number
                     ? ((Number) entry.getValue()).longValue() : 0;
 
-            // 拉取 lastSeq 之后的新消息
             var messages = messageStore.pullBySequence(convId, lastSeq + 1, 0, limit);
             long maxSeq = sequenceManager.getMaximumSequence(convId);
             syncs.add(Map.of(
@@ -171,6 +172,8 @@ public class MessageHandler implements RequestHandler {
     }
 
     private List<String> readableSearchConversationIds(String userId, List<String> requestedConversationIds) {
+        // 搜索接口可能跨多个会话返回内容，必须先把客户端请求的范围裁剪到用户可读集合，
+        // 否则一次搜索就可能越权扫到不存在于会话列表中的消息。
         if (accessChecker == null) {
             return requestedConversationIds;
         }
@@ -188,13 +191,13 @@ public class MessageHandler implements RequestHandler {
                 .toList();
     }
 
-    // 抽取公共方法而非三次重复 lambda，统一处理序列化异常
     @SuppressWarnings("rawtypes")
     private List<Map> toMapList(List<?> items) {
         return items.stream().map(item -> {
             try {
                 return MAPPER.convertValue(item, Map.class);
             } catch (Exception e) {
+                // 历史消息中可能混有旧版本内容对象，单条序列化失败不应中断整页拉取。
                 return Map.of("error", "serialization failed");
             }
         }).collect(Collectors.toList());

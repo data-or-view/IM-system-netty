@@ -56,8 +56,8 @@ public class GroupCallHandler implements RequestHandler {
     private void publishGroupSignal(ApiRequest req, String userId, String groupId,
                                     SignalingAction action, GroupCallSession session) {
         if (sendMessageUseCase == null || session == null) return;
-        // Group calls are discovered through the normal group message stream so clients
-        // that reconnect or sync history see the same state transition as online clients.
+        // 群通话状态走普通群消息流，是为了让重连和离线同步的客户端看到同一套状态变化，
+        // 不需要再为通话维护一条只服务在线用户的旁路通知链路。
         SignalingContent content = new SignalingContent(
                 action, session.callType(), session.roomId(), null, null, null, 0);
         sendMessageUseCase.execute(req.params(), userId, null, groupId, content);

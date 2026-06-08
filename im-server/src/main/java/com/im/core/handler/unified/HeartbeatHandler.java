@@ -60,6 +60,8 @@ public class HeartbeatHandler implements RequestHandler {
                 if (session.isAuthenticated()) {
                     heartbeatUseCase.execute(session.getUserId(), session.getPlatformId(), session.getSessionId());
                 } else {
+                    // 心跳可能比显式登录更早恢复到达，允许携带 token 的心跳补齐 session 和路由，
+                    // 这样客户端重连后不必额外发一次登录才能重新被跨节点投递命中。
                     bindSessionFromToken(req, connectionId);
                 }
             }
@@ -69,7 +71,8 @@ public class HeartbeatHandler implements RequestHandler {
         result.put("status", "OK");
         result.put("timestamp", System.currentTimeMillis());
 
-        // 双 token 续期：客户端在心跳中附带 refreshToken
+        // 续期放在心跳里做，是为了长连接客户端不必额外开一个刷新请求；
+        // 刷新失败只影响本次续期，不能让心跳本身失败导致连接被误判不活跃。
         String refreshToken = req.getString("refreshToken");
         if (refreshToken != null && !refreshToken.isBlank() && authenticator != null) {
             try {
@@ -90,6 +93,8 @@ public class HeartbeatHandler implements RequestHandler {
     }
 
     private void bindSessionFromToken(ApiRequest req, String connectionId) {
+        // 路由恢复需要认证、会话、路由表和节点 ID 同时可用；任一组件缺失时保持心跳轻量返回，
+        // 避免单机测试或未启用集群组件的环境因为路由恢复逻辑影响基础心跳。
         if (authenticator == null || routeTable == null || localNodeId == null) {
             return;
         }
@@ -110,6 +115,8 @@ public class HeartbeatHandler implements RequestHandler {
                 log.warn("Heartbeat token binding rejected: userId={}, platform={}", userId, platformId);
                 return;
             }
+            // bindUser 可能应用多端登录策略并重建 session 信息，路由必须使用绑定后的平台和 sessionId，
+            // 否则旧 session 下线时可能误删新路由。
             routeTable.online(userId, localNodeId, bound.getPlatformId(), bound.getSessionId());
             routeTable.setOnline(userId, bound.getPlatformId());
             log.info("Heartbeat restored online route: userId={}, platform={}, session={}",

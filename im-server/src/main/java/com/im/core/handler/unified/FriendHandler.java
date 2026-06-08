@@ -59,6 +59,7 @@ public class FriendHandler implements RequestHandler {
         friendManager.applyAddFriend(fromUserId, toUserId, reqMsg);
         var apply = friendManager.getFriendApplyDetail(fromUserId, toUserId);
         if (apply != null) {
+            // 通知使用持久化后的申请记录，保证多端收到的 applyId、状态和时间与列表接口一致。
             friendApplyNotifier.notifyApplyCreated(toUserId, apply);
         }
         return Map.of("status", "OK");
@@ -73,6 +74,7 @@ public class FriendHandler implements RequestHandler {
         friendManager.respondFriendApply(userId, fromUserId, handleMsg, agreed);
         var apply = friendManager.getFriendApplyDetail(fromUserId, userId);
         if (apply != null) {
+            // 审批结果先落库再推送，避免对方收到通知后立刻刷新详情却读到旧状态。
             friendApplyNotifier.notifyApplyHandled(fromUserId, apply);
         }
         return Map.of("status", "OK");
@@ -133,7 +135,7 @@ public class FriendHandler implements RequestHandler {
         if (fromUserId == null || toUserId == null) {
             throw new ValidationException("fromUserId and toUserId are required");
         }
-        // 只有申请双方可以查看详情
+        // 申请详情包含双方处理状态和附言，只有申请双方能查看，不能仅凭登录态开放查询。
         if (!userId.equals(fromUserId) && !userId.equals(toUserId)) {
             throw new ForbiddenException("not authorized to view this apply");
         }
