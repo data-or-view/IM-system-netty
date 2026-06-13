@@ -58,6 +58,7 @@ public final class SchemaInitializer {
             "im_messages",
             "im_message_read_states",
             "im_message_visibility",
+            "im_idempotency_records",
             "im_objects",
             "im_sequences",
             "im_seq_users",

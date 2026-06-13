@@ -284,7 +284,25 @@ CREATE TABLE IF NOT EXISTS im_message_visibility (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='消息用户可见性表';
 
 -- ============================================================
--- 12. 会话序号表（序号发生器）
+-- 12. 幂等性记录表
+--
+-- 保存跨节点共享的请求幂等状态。INPROGRESS 用于并发抢占，COMPLETED 用于重复请求返回缓存结果。
+-- ============================================================
+CREATE TABLE IF NOT EXISTS im_idempotency_records (
+    idempotency_key                 VARCHAR(255) NOT NULL PRIMARY KEY COMMENT '幂等键',
+    status                          VARCHAR(32)  NOT NULL COMMENT '状态: INPROGRESS/COMPLETED',
+    expiry_timestamp                BIGINT       NOT NULL COMMENT '记录过期时间(秒)',
+    in_progress_expiry_timestamp    BIGINT       NOT NULL DEFAULT 0 COMMENT '执行中过期时间(毫秒)',
+    response_data                   MEDIUMTEXT   COMMENT '完成后的响应数据',
+    payload_hash                    VARCHAR(255) NOT NULL DEFAULT '' COMMENT '载荷哈希',
+    created_at                      BIGINT       NOT NULL DEFAULT 0 COMMENT '创建时间(毫秒)',
+    updated_at                      BIGINT       NOT NULL DEFAULT 0 COMMENT '更新时间(毫秒)',
+    INDEX idx_idempotency_status_expiry (status, expiry_timestamp),
+    INDEX idx_idempotency_updated (updated_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='幂等性记录表';
+
+-- ============================================================
+-- 13. 会话序号表（序号发生器）
 -- 对应 OpenIM: model.SeqConversation
 --
 -- 每条消息需要一个会话内递增 seq，用于排序/去重/分页。
@@ -299,7 +317,7 @@ CREATE TABLE IF NOT EXISTS im_sequences (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='会话序号表';
 
 -- ============================================================
--- 13. 用户序号表（用户视角的游标）
+-- 14. 用户序号表（用户视角的游标）
 -- 对应 OpenIM: model.SeqUser
 --
 -- 每个用户对每个会话有自己的游标位置。
@@ -318,7 +336,7 @@ CREATE TABLE IF NOT EXISTS im_seq_users (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户序号表';
 
 -- ============================================================
--- 14. 文件对象表（上传文件元数据）
+-- 15. 文件对象表（上传文件元数据）
 -- 对应 OpenIM: model.Object
 -- ============================================================
 CREATE TABLE IF NOT EXISTS im_objects (
