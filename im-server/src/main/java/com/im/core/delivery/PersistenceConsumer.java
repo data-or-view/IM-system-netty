@@ -1,7 +1,11 @@
 package com.im.core.delivery;
 
 import com.im.api.*;
+import com.im.common.retry.RetryExecutor;
 import com.im.common.lifecycle.Lifecycle;
+import com.im.core.reliability.ReliableMessageHandler;
+import com.im.core.reliability.SendMessageFailureStore;
+import com.im.core.reliability.SendMessageIdempotency;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -27,6 +31,9 @@ public class PersistenceConsumer implements Lifecycle {
     private final IGroupMessageStore groupMessageStore;
     private final IConversationManager conversationManager;
     private final IGroupManager groupManager;
+    private final RetryExecutor retryExecutor;
+    private final SendMessageIdempotency idempotency;
+    private final SendMessageFailureStore failureStore;
 
     private volatile IMessageQueue.MessageHandler handler;
 
@@ -53,11 +60,32 @@ public class PersistenceConsumer implements Lifecycle {
         this.groupMessageStore = groupMessageStore;
         this.conversationManager = conversationManager;
         this.groupManager = groupManager;
+        this.retryExecutor = null;
+        this.idempotency = null;
+        this.failureStore = null;
+    }
+
+    public PersistenceConsumer(IMessageQueue messageQueue,
+                               ISingleMessageStore singleMessageStore,
+                               IGroupMessageStore groupMessageStore,
+                               IConversationManager conversationManager,
+                               IGroupManager groupManager,
+                               RetryExecutor retryExecutor,
+                               SendMessageIdempotency idempotency,
+                               SendMessageFailureStore failureStore) {
+        this.messageQueue = messageQueue;
+        this.singleMessageStore = singleMessageStore;
+        this.groupMessageStore = groupMessageStore;
+        this.conversationManager = conversationManager;
+        this.groupManager = groupManager;
+        this.retryExecutor = retryExecutor;
+        this.idempotency = idempotency;
+        this.failureStore = failureStore;
     }
 
     @Override
     public void start() {
-        this.handler = msg -> {
+        IMessageQueue.MessageHandler delegate = msg -> {
             String messageId = msg.getMessageId();
             String fromUserId = msg.getFromUserId();
 
@@ -106,6 +134,10 @@ public class PersistenceConsumer implements Lifecycle {
             log.debug("Persisted msg {} (conv updated)", messageId);
         };
 
+        this.handler = retryExecutor != null
+                ? new ReliableMessageHandler(MessageQueueTopics.PERSIST, delegate,
+                retryExecutor, idempotency, failureStore)
+                : delegate;
         messageQueue.subscribe(MessageQueueTopics.PERSIST, handler);
         log.info("PersistenceConsumer subscribed to topic '{}'", MessageQueueTopics.PERSIST);
     }
@@ -125,6 +157,7 @@ public class PersistenceConsumer implements Lifecycle {
                 log.debug("Msg already saved (dup), seqId={}, mid={}", msg.getMessageSeq(), messageId);
             } else {
                 log.warn("Persistence save failed: seqId={}, err={}", msg.getMessageSeq(), e.getMessage());
+                throw e;
             }
         }
     }

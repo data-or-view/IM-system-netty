@@ -302,7 +302,34 @@ CREATE TABLE IF NOT EXISTS im_idempotency_records (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='幂等性记录表';
 
 -- ============================================================
--- 13. 会话序号表（序号发生器）
+-- 13. 消息发送失败表
+--
+-- PERSIST/DELIVER 发送端重试耗尽后落库，后续补偿任务按 topic 重投。
+-- ============================================================
+CREATE TABLE IF NOT EXISTS im_message_send_failures (
+    id                  BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '物理主键',
+    topic               VARCHAR(64)  NOT NULL COMMENT '失败 topic: persist/deliver',
+    message_id          VARCHAR(128) NOT NULL COMMENT '消息ID',
+    client_msg_id       VARCHAR(128) NOT NULL COMMENT '客户端消息ID',
+    conversation_id     VARCHAR(128) NOT NULL COMMENT '会话ID',
+    from_user_id        VARCHAR(64)  NOT NULL DEFAULT '' COMMENT '发送者ID',
+    to_user_id          VARCHAR(64)  NOT NULL DEFAULT '' COMMENT '单聊接收者ID',
+    group_id            VARCHAR(64)  NOT NULL DEFAULT '' COMMENT '群ID',
+    payload_json        MEDIUMTEXT   NOT NULL COMMENT '消息载荷 JSON',
+    status              VARCHAR(32)  NOT NULL DEFAULT 'PENDING' COMMENT '状态: PENDING/RETRYING/SUCCEEDED/FAILED',
+    attempt_count       INT          NOT NULL DEFAULT 0 COMMENT '补偿重试次数',
+    next_retry_at       BIGINT       NOT NULL DEFAULT 0 COMMENT '下一次补偿时间(毫秒)',
+    last_error          TEXT         COMMENT '最后失败原因',
+    created_at          BIGINT       NOT NULL DEFAULT 0 COMMENT '创建时间(毫秒)',
+    updated_at          BIGINT       NOT NULL DEFAULT 0 COMMENT '更新时间(毫秒)',
+    UNIQUE KEY uk_topic_message (topic, message_id),
+    INDEX idx_failure_status_retry (status, next_retry_at),
+    INDEX idx_failure_conversation (conversation_id, message_id),
+    INDEX idx_failure_client_msg (client_msg_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='消息发送失败表';
+
+-- ============================================================
+-- 14. 会话序号表（序号发生器）
 -- 对应 OpenIM: model.SeqConversation
 --
 -- 每条消息需要一个会话内递增 seq，用于排序/去重/分页。

@@ -110,8 +110,7 @@ public class RedisMessageQueue implements IMessageQueue {
     @Override
     public void publishAsync(String topic, Message msg) {
         if (!running.get()) {
-            log.warn("Queue not running, dropping message topic={}", topic);
-            return;
+            throw new RedisPersistenceException("redis message queue not running");
         }
 
         String json;
@@ -119,7 +118,7 @@ public class RedisMessageQueue implements IMessageQueue {
             json = serialize(msg);
         } catch (Exception e) {
             log.error("Failed to serialize message for topic '{}': {}", topic, e.getMessage(), e);
-            return;
+            throw new RedisPersistenceException("serialize message for redis stream failed", e);
         }
 
         String streamKey = streamKey(topic);
@@ -279,11 +278,7 @@ public class RedisMessageQueue implements IMessageQueue {
                 List<MessageHandler> handlers = subscribers.get(topic);
                 if (handlers != null) {
                     for (MessageHandler handler : handlers) {
-                        try {
-                            handler.onMessage(cmd);
-                        } catch (Exception e) {
-                            log.error("Handler error on topic '{}': {}", topic, e.getMessage(), e);
-                        }
+                        handler.onMessage(cmd);
                     }
                 }
 
@@ -291,10 +286,6 @@ public class RedisMessageQueue implements IMessageQueue {
             } catch (Exception e) {
                 log.error("Failed to process message on topic '{}', id={}: {}",
                         topic, msg.getId(), e.getMessage(), e);
-                try {
-                    sync.xack(streamKey, groupName, msg.getId());
-                } catch (Exception ignored) {
-                }
             }
         }
 

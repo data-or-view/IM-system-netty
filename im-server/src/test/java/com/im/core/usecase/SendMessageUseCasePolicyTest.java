@@ -16,7 +16,6 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class SendMessageUseCasePolicyTest {
@@ -30,7 +29,7 @@ class SendMessageUseCasePolicyTest {
                 queue, new FixedSequenceManager(), new WebhookService(null), policy);
 
         ImException ex = assertThrows(ImException.class,
-                () -> useCase.execute(Map.of(), "alice", "bob", null, new TextContent("hi")));
+                () -> useCase.execute(params("client-a1"), "alice", "bob", null, new TextContent("hi")));
 
         assertEquals(ImErrorCode.FORBIDDEN, ex.getErrorCode());
         assertEquals(List.of("single|alice|bob"), policy.calls);
@@ -46,7 +45,7 @@ class SendMessageUseCasePolicyTest {
                 queue, new FixedSequenceManager(), new WebhookService(null), policy);
 
         ImException ex = assertThrows(ImException.class,
-                () -> useCase.execute(Map.of(), "alice", null, "group-1", new TextContent("hi")));
+                () -> useCase.execute(params("client-a2"), "alice", null, "group-1", new TextContent("hi")));
 
         assertEquals(ImErrorCode.FORBIDDEN, ex.getErrorCode());
         assertEquals(List.of("group|alice|group-1"), policy.calls);
@@ -61,13 +60,18 @@ class SendMessageUseCasePolicyTest {
                 queue, new FixedSequenceManager(), new WebhookService(null), policy);
 
         SendMessageResult result = useCase.execute(
-                Map.of(), "alice", "bob", null, new TextContent("hi"));
+                params("client-a3"), "alice", "bob", null, new TextContent("hi"));
 
+        assertEquals("client-a3", result.messageId());
         assertEquals("single_alice_bob", result.conversationId());
         assertEquals(2, queue.published.size());
         assertEquals(MessageQueueTopics.PERSIST, queue.published.get(0).topic);
         assertEquals(MessageQueueTopics.DELIVER, queue.published.get(1).topic);
-        assertTrue(queue.published.get(0).message().getMessageId().matches("msg_[0-9a-z]+_[0-9a-z]{8}"));
+        assertEquals("client-a3", queue.published.get(0).message().getMessageId());
+    }
+
+    private static Map<String, Object> params(String clientMsgId) {
+        return Map.of("clientMsgId", clientMsgId);
     }
 
     private static final class RecordingPolicy implements IChatSendPolicy {

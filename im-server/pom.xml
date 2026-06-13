@@ -38,6 +38,10 @@
             <groupId>com.im</groupId>
             <artifactId>im-infrastructure-config</artifactId>
         </dependency>
+        <dependency>
+            <groupId>com.im</groupId>
+            <artifactId>im-infrastructure-idempotency</artifactId>
+        </dependency>
 
         <!-- Jackson -->
         <dependency>
@@ -63,6 +67,10 @@
         <dependency>
             <groupId>io.lettuce</groupId>
             <artifactId>lettuce-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.rocketmq</groupId>
+            <artifactId>rocketmq-client</artifactId>
         </dependency>
 
         <!-- Database -->

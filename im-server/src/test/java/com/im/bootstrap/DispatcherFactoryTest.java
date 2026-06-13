@@ -33,6 +33,8 @@ import com.im.core.file.FileObjectMetadataStore;
 import com.im.core.file.UploadSession;
 import com.im.core.file.UploadSessionStore;
 import com.im.core.redis.RedisConfiguration;
+import com.im.core.reliability.SendMessageFailureStore;
+import com.im.core.reliability.SendMessageIdempotency;
 import com.im.core.session.SessionManager;
 import org.junit.jupiter.api.Test;
 
@@ -95,6 +97,8 @@ class DispatcherFactoryTest {
                         fake(ISingleMessageStore.class),
                         fake(IGroupMessageStore.class),
                         fake(IMessageQueue.class),
+                        SendMessageIdempotency.none(),
+                        SendMessageFailureStore.none(),
                         fake(IFileStorageService.class),
                         directFileTransferUseCase(),
                         fake(ISystemMessageStore.class)),

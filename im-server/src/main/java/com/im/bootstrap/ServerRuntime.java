@@ -21,6 +21,7 @@ record ServerRuntime(INodeDiscovery nodeDiscovery,
                      IMessageQueue messageQueue,
                      Lifecycle persistenceConsumer,
                      Lifecycle deliveryConsumer,
+                     Lifecycle messageFailureCompensator,
                      Lifecycle transportServer,
                      CallStateManager callStateManager,
                      Runnable connectionShutdown,
@@ -41,6 +42,7 @@ record ServerRuntime(INodeDiscovery nodeDiscovery,
         messageQueue.start();
         persistenceConsumer.start();
         deliveryConsumer.start();
+        messageFailureCompensator.start();
         transportServer.start();
         requestAdmission.open();
     }
@@ -52,6 +54,7 @@ record ServerRuntime(INodeDiscovery nodeDiscovery,
         // Close network entry points first; the remaining shutdown order keeps routing
         // and persistence dependencies alive while in-flight work is being drained.
         transportServer.stop();
+        messageFailureCompensator.stop();
         deliveryConsumer.stop();
         persistenceConsumer.stop();
         messageQueue.stop();

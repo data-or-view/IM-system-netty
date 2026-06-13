@@ -81,7 +81,8 @@ public class ChatHandler implements RequestHandler {
             throw new ForbiddenException("message sending blocked");
         }
 
-        return Map.of("status", "RECEIVED",
+        return Map.of("status", result.status(),
+                "messageId", result.messageId(),
                 "conversationId", result.conversationId(),
                 "seq", result.seq());
     }

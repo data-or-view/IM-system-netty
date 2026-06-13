@@ -28,6 +28,26 @@ public final class RetryStrategies {
             .build();
 
     /**
+     * MQ 发布：3 次重试，100ms → 200ms → 400ms（上限 1s），±20% 抖动。
+     */
+    public static final RetryConfig MQ_PUBLISH = RetryConfig.builder()
+            .maxAttempts(3)
+            .backoff(100, 1000, 2.0)
+            .jitter(0.2)
+            .retryOn(Exception.class)
+            .build();
+
+    /**
+     * MQ 消费处理：3 次重试，100ms → 200ms → 400ms（上限 2s），±20% 抖动。
+     */
+    public static final RetryConfig MQ_CONSUME = RetryConfig.builder()
+            .maxAttempts(3)
+            .backoff(100, 2000, 2.0)
+            .jitter(0.2)
+            .retryOn(Exception.class)
+            .build();
+
+    /**
      * 外部 API 调用：2 次重试，200ms 固定延迟。
      */
     public static final RetryConfig QUICK = RetryConfig.builder()

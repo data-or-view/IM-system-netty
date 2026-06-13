@@ -58,8 +58,14 @@ import com.im.core.group.GroupMemberIdsSnapshot;
 import com.im.core.group.GroupMemberListSnapshot;
 import com.im.core.handler.ConnectionEventHandler;
 import com.im.core.mq.RedisMessageQueue;
+import com.im.core.mq.RocketMqMessageQueue;
 import com.im.core.redis.RedisConfiguration;
 import com.im.core.redis.RedisRouteTable;
+import com.im.core.reliability.DbSendMessageFailureStore;
+import com.im.core.reliability.MessageFailureCompensator;
+import com.im.core.reliability.SendMessageFailureStore;
+import com.im.core.reliability.SendMessageIdempotency;
+import com.im.core.reliability.WzgSendMessageIdempotency;
 import com.im.core.retry.FailsafeRetryExecutor;
 import com.im.core.seq.RedisSequenceManager;
 import com.im.core.session.RedisSessionManager;
@@ -73,11 +79,14 @@ import com.im.core.user.CachedUserManager;
 import com.im.core.user.DbUserManager;
 import com.im.core.serialization.jackson.JacksonSerializer;
 import com.im.infrastructure.storage.file.MinioFileStorageService;
+import com.wzg.idempotency.persistence.MyBatisPlusPersistenceStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.net.InetAddress;
+import java.time.Duration;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 
@@ -119,7 +128,7 @@ final class ServerComponentsFactory {
         BusinessDependencies business = createBusiness(config, redisConfig, cluster.routeTable());
         StorageDependencies storage = createStorage(config, redisConfig, nodeId, business.retryExecutor());
         CallDependencies call = createCall(config, storage.messageQueue(), business.groupManager(), redisConfig);
-        ConsumerDependencies consumers = createConsumers(nodeId, runtime, cluster, storage, business);
+        ConsumerDependencies consumers = createConsumers(config, nodeId, runtime, cluster, storage, business);
         ConnectionEventHandler connectionEventHandler = new ConnectionEventHandler(
                 runtime.sessionManager(), runtime.pendingAcknowledgementManager(), cluster.routeTable(), nodeId);
         RequestAdmission requestAdmission = new DefaultRequestAdmission();
@@ -139,6 +148,7 @@ final class ServerComponentsFactory {
                 storage.messageQueue(),
                 consumers.persistenceConsumer(),
                 consumers.deliveryConsumer(),
+                consumers.messageFailureCompensator(),
                 transportServer,
                 call.callStateManager(),
                 connectionEventHandler::shutdown,
@@ -228,7 +238,11 @@ final class ServerComponentsFactory {
         IMessageStore messageStore = new DbMessageStore(retryExecutor);
         ISingleMessageStore singleMessageStore = new SingleMessageStoreAdapter(messageStore);
         IGroupMessageStore groupMessageStore = new GroupMessageStoreAdapter(messageStore);
-        IMessageQueue messageQueue = new RedisMessageQueue(redisConfig, nodeId);
+        IMessageQueue messageQueue = createMessageQueue(config, redisConfig, nodeId);
+        SendMessageIdempotency sendMessageIdempotency = new WzgSendMessageIdempotency(
+                new MyBatisPlusPersistenceStore(MyBatisPlusFactory.getSqlSessionFactory()),
+                Duration.ofSeconds(config.getLong("im.idempotency.send-expire-seconds", 24 * 60 * 60L)));
+        SendMessageFailureStore sendMessageFailureStore = new DbSendMessageFailureStore();
         IFileStorageService fileStorage = new MinioFileStorageService(
                 config.getString("im.minio.endpoint").orElse("http://127.0.0.1:9000"),
                 config.getString("im.minio.access-key").orElse("minioadmin"),
@@ -242,7 +256,17 @@ final class ServerComponentsFactory {
                 config.getInt("im.minio.presign-expire-seconds", 900));
         return new StorageDependencies(
                 sequenceManager, messageStore, singleMessageStore, groupMessageStore, messageQueue,
+                sendMessageIdempotency, sendMessageFailureStore,
                 fileStorage, directFileTransferUseCase, new DbSystemMessageStore());
+    }
+
+    static IMessageQueue createMessageQueue(Config config, RedisConfiguration redisConfig, String nodeId) {
+        String type = config.getString("im.mq.type", "redis").trim().toLowerCase(Locale.ROOT);
+        return switch (type) {
+            case "redis", "redis-streams" -> new RedisMessageQueue(redisConfig, nodeId);
+            case "rocketmq" -> new RocketMqMessageQueue(config, nodeId);
+            default -> throw new IllegalArgumentException("Unsupported im.mq.type: " + type);
+        };
     }
 
     private static CallDependencies createCall(Config config, IMessageQueue messageQueue,
@@ -267,17 +291,27 @@ final class ServerComponentsFactory {
         return new CallDependencies(callManager, callStateManager, groupCallManager);
     }
 
-    private static ConsumerDependencies createConsumers(String nodeId,
+    private static ConsumerDependencies createConsumers(Config config,
+                                                        String nodeId,
                                                         RuntimeDependencies runtime,
                                                         ClusterDependencies cluster,
                                                         StorageDependencies storage,
                                                         BusinessDependencies business) {
         PersistenceConsumer persistenceConsumer = new PersistenceConsumer(
                 storage.messageQueue(), storage.singleMessageStore(), storage.groupMessageStore(),
-                business.conversationManager(), business.groupManager());
+                business.conversationManager(), business.groupManager(),
+                business.retryExecutor(), storage.sendMessageIdempotency(), storage.sendMessageFailureStore());
         DeliveryConsumer deliveryConsumer = new DeliveryConsumer(
                 storage.messageQueue(), runtime.sessionManager(), cluster.routeTable(),
-                cluster.clusterMessageBus(), nodeId, business.groupManager());
+                cluster.clusterMessageBus(), nodeId, business.groupManager(),
+                business.retryExecutor(), storage.sendMessageIdempotency(), storage.sendMessageFailureStore());
+        MessageFailureCompensator messageFailureCompensator = new MessageFailureCompensator(
+                storage.messageQueue(),
+                storage.sendMessageFailureStore(),
+                config.getInt("im.mq.failure-compensation.batch-size", 100),
+                config.getInt("im.mq.failure-compensation.max-attempts", 10),
+                config.getLong("im.mq.failure-compensation.idle-interval-ms", 2000),
+                config.getLong("im.mq.failure-compensation.base-delay-ms", 1000));
 
         ClusterDeliveryHandler clusterDeliveryHandler = new ClusterDeliveryHandler(runtime.sessionManager());
         cluster.clusterMessageBus().subscribe("SINGLE_CHAT", clusterDeliveryHandler);
@@ -286,7 +320,7 @@ final class ServerComponentsFactory {
         cluster.clusterMessageBus().subscribe("CLUSTER_COMMAND", runtime.friendApplyNotifier()::handleClusterPush);
         cluster.clusterMessageBus().subscribe("CLUSTER_COMMAND", runtime.groupApplyNotifier()::handleClusterPush);
         cluster.clusterMessageBus().subscribe("CLUSTER_COMMAND", runtime.systemMessageNotifier()::handleClusterPush);
-        return new ConsumerDependencies(persistenceConsumer, deliveryConsumer);
+        return new ConsumerDependencies(persistenceConsumer, deliveryConsumer, messageFailureCompensator);
     }
 
     private static void applyMultiLoginStrategy(Config config, SessionManager sessionManager) {
@@ -488,6 +522,8 @@ final class ServerComponentsFactory {
                                ISingleMessageStore singleMessageStore,
                                IGroupMessageStore groupMessageStore,
                                IMessageQueue messageQueue,
+                               SendMessageIdempotency sendMessageIdempotency,
+                               SendMessageFailureStore sendMessageFailureStore,
                                IFileStorageService fileStorage,
                                DirectFileTransferUseCase directFileTransferUseCase,
                                ISystemMessageStore systemMessageStore) {
@@ -499,6 +535,7 @@ final class ServerComponentsFactory {
     }
 
     private record ConsumerDependencies(PersistenceConsumer persistenceConsumer,
-                                        DeliveryConsumer deliveryConsumer) {
+                                        DeliveryConsumer deliveryConsumer,
+                                        MessageFailureCompensator messageFailureCompensator) {
     }
 }

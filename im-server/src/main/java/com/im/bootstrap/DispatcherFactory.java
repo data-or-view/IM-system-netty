@@ -69,7 +69,10 @@ final class DispatcherFactory {
                 dependencies.storage().messageQueue(),
                 dependencies.storage().sequenceManager(),
                 webhookService,
-                chatSendPolicy);
+                chatSendPolicy,
+                dependencies.business().retryExecutor(),
+                dependencies.storage().sendMessageIdempotency(),
+                dependencies.storage().sendMessageFailureStore());
         SystemMessagePublishUseCase systemMessagePublishUseCase = new SystemMessagePublishUseCase(
                 dependencies.storage().systemMessageStore(),
                 dependencies.runtime().systemMessageNotifier());

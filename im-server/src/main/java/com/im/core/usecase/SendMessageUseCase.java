@@ -8,20 +8,36 @@ import com.im.api.ConversationIds;
 import com.im.api.Message;
 import com.im.api.MessageQueueTopics;
 import com.im.api.content.IMessageContent;
+import com.im.common.enums.ImErrorCode;
 import com.im.common.exception.ForbiddenException;
+import com.im.common.exception.InfrastructureException;
+import com.im.common.exception.ValidationException;
 import com.im.common.id.IdGenerator;
+import com.im.common.retry.RetryExecutor;
+import com.im.common.retry.RetryStrategies;
 import com.im.core.handler.ContentSerializer;
 import com.im.core.handler.WebhookService;
+import com.im.core.reliability.SendMessageFailureStore;
+import com.im.core.reliability.SendMessageIdempotency;
+import com.im.core.retry.FailsafeRetryExecutor;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 public class SendMessageUseCase {
+
+    private static final Pattern CLIENT_MSG_ID_PATTERN = Pattern.compile("[A-Za-z0-9._:-]{8,64}");
+    private static final String STATUS_RECEIVED = "RECEIVED";
+    private static final String STATUS_RECEIVED_PENDING_DELIVERY = "RECEIVED_PENDING_DELIVERY";
 
     private final IMessageQueue messageQueue;
     private final ISequenceManager sequenceManager;
     private final WebhookService webhookService;
     private final IChatSendPolicy sendPolicy;
+    private final RetryExecutor retryExecutor;
+    private final SendMessageIdempotency sendMessageIdempotency;
+    private final SendMessageFailureStore failureStore;
 
     public SendMessageUseCase(IMessageQueue messageQueue,
                               ISequenceManager sequenceManager, IGroupManager groupManager,
@@ -33,10 +49,25 @@ public class SendMessageUseCase {
                               ISequenceManager sequenceManager,
                               WebhookService webhookService,
                               IChatSendPolicy sendPolicy) {
+        this(messageQueue, sequenceManager, webhookService, sendPolicy,
+                new FailsafeRetryExecutor(), SendMessageIdempotency.none(), SendMessageFailureStore.none());
+    }
+
+    public SendMessageUseCase(IMessageQueue messageQueue,
+                              ISequenceManager sequenceManager,
+                              WebhookService webhookService,
+                              IChatSendPolicy sendPolicy,
+                              RetryExecutor retryExecutor,
+                              SendMessageIdempotency sendMessageIdempotency,
+                              SendMessageFailureStore failureStore) {
         this.messageQueue = messageQueue;
         this.sequenceManager = sequenceManager;
         this.webhookService = webhookService;
         this.sendPolicy = sendPolicy;
+        this.retryExecutor = retryExecutor != null ? retryExecutor : new FailsafeRetryExecutor();
+        this.sendMessageIdempotency = sendMessageIdempotency != null
+                ? sendMessageIdempotency : SendMessageIdempotency.none();
+        this.failureStore = failureStore != null ? failureStore : SendMessageFailureStore.none();
     }
     // ── 新接口：统一 handler 使用 ──
 
@@ -65,64 +96,71 @@ public class SendMessageUseCase {
     private SendMessageResult handleSingleChat(Map<String, Object> params, String fromUserId,
                                                 String toUserId, IMessageContent content) {
         if (toUserId == null) return null;
-        if (sendPolicy != null) {
-            sendPolicy.requireCanSendSingle(fromUserId, toUserId);
-        }
-
-        if (!webhookService.beforeSendSingle(params, fromUserId, toUserId, content)) return null;
 
         String conversationId = ConversationIds.single(fromUserId, toUserId);
-        long seq = 0;
-        if (conversationId != null && sequenceManager != null) {
-            seq = sequenceManager.nextSequence(conversationId);
-        }
+        String clientMsgId = requireClientMsgId(params);
+        String idempotencyKey = idempotencyKey(fromUserId, conversationId, clientMsgId);
 
-        // 构建 Message 用于持久化
-        Message msg = buildMessage(params, fromUserId, toUserId, null, content, conversationId, seq);
-        if (messageQueue != null) {
-            messageQueue.publishAsync(MessageQueueTopics.PERSIST, msg);
-            messageQueue.publishAsync(MessageQueueTopics.DELIVER, msg);
-        }
+        return sendMessageIdempotency.execute(idempotencyKey, () -> {
+            if (sendPolicy != null) {
+                sendPolicy.requireCanSendSingle(fromUserId, toUserId);
+            }
+            if (!webhookService.beforeSendSingle(params, fromUserId, toUserId, content)) {
+                throw new ForbiddenException("message sending blocked");
+            }
 
-        webhookService.afterSendSingle(params, fromUserId, toUserId, content);
-
-        return new SendMessageResult(conversationId, seq, "SINGLE_CHAT_ACK");
+            SendMessageResult result = publishMessage(params, fromUserId, toUserId, null,
+                    content, conversationId, clientMsgId);
+            webhookService.afterSendSingle(params, fromUserId, toUserId, content);
+            return result;
+        }, SendMessageResult.class);
     }
 
     private SendMessageResult handleGroupChat(Map<String, Object> params, String fromUserId,
                                                String groupId, IMessageContent content) {
-        if (sendPolicy != null) {
-            sendPolicy.requireCanSendGroup(fromUserId, groupId);
-        }
+        String conversationId = ConversationIds.group(groupId);
+        String clientMsgId = requireClientMsgId(params);
+        String idempotencyKey = idempotencyKey(fromUserId, conversationId, clientMsgId);
 
-        if (!webhookService.beforeSendGroup(params, fromUserId, groupId, content)) return null;
+        return sendMessageIdempotency.execute(idempotencyKey, () -> {
+            if (sendPolicy != null) {
+                sendPolicy.requireCanSendGroup(fromUserId, groupId);
+            }
+            if (!webhookService.beforeSendGroup(params, fromUserId, groupId, content)) {
+                throw new ForbiddenException("message sending blocked");
+            }
 
-        SendMessageResult result = publishGroupMessage(params, fromUserId, groupId, content);
-
-        webhookService.afterSendGroup(params, fromUserId, groupId, content);
-
-        return result;
+            SendMessageResult result = publishMessage(params, fromUserId, null, groupId,
+                    content, conversationId, clientMsgId);
+            webhookService.afterSendGroup(params, fromUserId, groupId, content);
+            return result;
+        }, SendMessageResult.class);
     }
 
     public SendMessageResult publishGroupSystem(String fromUserId, String groupId, IMessageContent content) {
-        return publishGroupMessage(Map.of(), fromUserId, groupId, content);
+        String conversationId = ConversationIds.group(groupId);
+        String clientMsgId = IdGenerator.messageId();
+        return publishMessage(Map.of("clientMsgId", clientMsgId), fromUserId, null, groupId,
+                content, conversationId, clientMsgId);
     }
 
-    private SendMessageResult publishGroupMessage(Map<String, Object> params, String fromUserId,
-                                                  String groupId, IMessageContent content) {
-        String conversationId = ConversationIds.group(groupId);
+    private SendMessageResult publishMessage(Map<String, Object> params, String fromUserId,
+                                             String toUserId, String groupId, IMessageContent content,
+                                             String conversationId, String clientMsgId) {
         long seq = 0;
         if (sequenceManager != null) {
             seq = sequenceManager.nextSequence(conversationId);
         }
 
-        Message msg = buildMessage(params, fromUserId, null, groupId, content, conversationId, seq);
-        if (messageQueue != null) {
-            messageQueue.publishAsync(MessageQueueTopics.PERSIST, msg);
-            messageQueue.publishAsync(MessageQueueTopics.DELIVER, msg);
-        }
+        Message msg = buildMessage(params, fromUserId, toUserId, groupId, content,
+                conversationId, seq, clientMsgId);
+        publishRequired(MessageQueueTopics.PERSIST, msg);
 
-        return new SendMessageResult(conversationId, seq, "GROUP_CHAT_ACK");
+        String status = publishRecoverable(MessageQueueTopics.DELIVER, msg)
+                ? STATUS_RECEIVED
+                : STATUS_RECEIVED_PENDING_DELIVERY;
+
+        return new SendMessageResult(msg.getMessageId(), conversationId, seq, status);
     }
 
     /**
@@ -130,9 +168,9 @@ public class SendMessageUseCase {
      */
     private Message buildMessage(Map<String, Object> params, String fromUserId,
                                   String toUserId, String groupId, IMessageContent content,
-                                  String conversationId, long seq) {
+                                  String conversationId, long seq, String clientMsgId) {
         Message msg = new Message();
-        msg.setMessageId(IdGenerator.messageId());
+        msg.setMessageId(clientMsgId);
         msg.setFromUserId(fromUserId);
         msg.setToUserId(toUserId);
         msg.setGroupId(groupId);
@@ -151,6 +189,56 @@ public class SendMessageUseCase {
         }
 
         return msg;
+    }
+
+    private void publishRequired(String topic, Message msg) {
+        try {
+            publishWithRetry(topic, msg);
+        } catch (RuntimeException e) {
+            failureStore.recordFailure(topic, msg, e);
+            throw new InfrastructureException(ImErrorCode.MQ_UNAVAILABLE,
+                    "message persist publish failed after retry", e);
+        }
+    }
+
+    private boolean publishRecoverable(String topic, Message msg) {
+        try {
+            publishWithRetry(topic, msg);
+            return true;
+        } catch (RuntimeException e) {
+            try {
+                failureStore.recordFailure(topic, msg, e);
+                return false;
+            } catch (RuntimeException failureRecordError) {
+                throw new InfrastructureException(ImErrorCode.MQ_UNAVAILABLE,
+                        "message deliver publish failed and dead-letter record failed", failureRecordError);
+            }
+        }
+    }
+
+    private void publishWithRetry(String topic, Message msg) {
+        if (messageQueue == null) {
+            return;
+        }
+        retryExecutor.execute(RetryStrategies.MQ_PUBLISH, () -> {
+            messageQueue.publishAsync(topic, msg);
+            return null;
+        });
+    }
+
+    private static String requireClientMsgId(Map<String, Object> params) {
+        Object value = params != null && params.containsKey("clientMsgId")
+                ? params.get("clientMsgId")
+                : params != null ? params.get("client_msg_id") : null;
+        String clientMsgId = value instanceof String s ? s.trim() : "";
+        if (!CLIENT_MSG_ID_PATTERN.matcher(clientMsgId).matches()) {
+            throw new ValidationException("clientMsgId is required and must be 8-64 chars: letters, digits, '.', '_', ':' or '-'");
+        }
+        return clientMsgId;
+    }
+
+    private static String idempotencyKey(String fromUserId, String conversationId, String clientMsgId) {
+        return "send:" + fromUserId + ":" + conversationId + ":" + clientMsgId;
     }
 
     private static final class LegacyGroupSendPolicy implements IChatSendPolicy {

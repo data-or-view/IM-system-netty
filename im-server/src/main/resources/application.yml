@@ -54,6 +54,31 @@ im:
     cluster:
       nodes: ""                  # 集群节点 (逗号分隔, 如 "127.0.0.1:6379,127.0.0.1:6380")
 
+  # ── 业务消息队列 ──
+  mq:
+    type: redis                  # redis / rocketmq
+    failure-compensation:
+      batch-size: 100            # 每轮最多重放失败表记录数
+      max-attempts: 10           # 单条失败记录最大补偿次数
+      idle-interval-ms: 2000     # 没有到期记录时的扫描间隔
+      base-delay-ms: 1000        # 失败后指数退避基础延迟
+
+  # ── RocketMQ（im.mq.type=rocketmq 时使用） ──
+  rocketmq:
+    name-server: "127.0.0.1:9876"
+    producer:
+      group: "im-producer"
+    consumer:
+      group-prefix: "im-consumer"
+    topic-prefix: ""             # 可设为 "im."，则 persist -> im.persist
+    send:
+      timeout-ms: 3000
+    retry-times: 2
+
+  # ── 幂等性 ──
+  idempotency:
+    send-expire-seconds: 86400   # 发送消息 clientMsgId 幂等记录保留 24 小时
+
   # ── Webhook ──
   webhook:
     url: ""                      # Webhook 回调 URL

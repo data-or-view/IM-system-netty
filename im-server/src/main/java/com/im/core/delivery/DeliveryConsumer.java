@@ -2,13 +2,19 @@ package com.im.core.delivery;
 
 import com.im.api.*;
 import com.im.common.lifecycle.Lifecycle;
+import com.im.common.retry.RetryExecutor;
 import com.im.common.util.IMExecutors;
+import com.im.core.reliability.ReliableMessageHandler;
+import com.im.core.reliability.SendMessageFailureStore;
+import com.im.core.reliability.SendMessageIdempotency;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
 import java.util.stream.Collectors;
 
 /**
@@ -35,6 +41,9 @@ public class DeliveryConsumer implements Lifecycle {
     private final IClusterMessageBus clusterMessageBus;
     private final String localNodeId;
     private final IGroupManager groupManager;
+    private final RetryExecutor retryExecutor;
+    private final SendMessageIdempotency idempotency;
+    private final SendMessageFailureStore failureStore;
 
     /** 并行推送执行器（虚拟线程，每个路由一条） */
     private final ExecutorService pusher;
@@ -63,12 +72,37 @@ public class DeliveryConsumer implements Lifecycle {
         this.clusterMessageBus = clusterMessageBus;
         this.localNodeId = localNodeId;
         this.groupManager = groupManager;
+        this.retryExecutor = null;
+        this.idempotency = null;
+        this.failureStore = null;
+        this.pusher = IMExecutors.newVirtualThreadExecutor("im-pusher");
+    }
+
+    public DeliveryConsumer(
+            IMessageQueue messageQueue,
+            ISessionManager sessionManager,
+            IRouteTable routeTable,
+            IClusterMessageBus clusterMessageBus,
+            String localNodeId,
+            IGroupManager groupManager,
+            RetryExecutor retryExecutor,
+            SendMessageIdempotency idempotency,
+            SendMessageFailureStore failureStore) {
+        this.messageQueue = messageQueue;
+        this.sessionManager = sessionManager;
+        this.routeTable = routeTable;
+        this.clusterMessageBus = clusterMessageBus;
+        this.localNodeId = localNodeId;
+        this.groupManager = groupManager;
+        this.retryExecutor = retryExecutor;
+        this.idempotency = idempotency;
+        this.failureStore = failureStore;
         this.pusher = IMExecutors.newVirtualThreadExecutor("im-pusher");
     }
 
     @Override
     public void start() {
-        this.handler = msg -> {
+        IMessageQueue.MessageHandler delegate = msg -> {
             String groupId = msg.getGroupId();
 
             if (groupId != null) {
@@ -85,6 +119,10 @@ public class DeliveryConsumer implements Lifecycle {
             }
         };
 
+        this.handler = retryExecutor != null
+                ? new ReliableMessageHandler(MessageQueueTopics.DELIVER, delegate,
+                retryExecutor, idempotency, failureStore)
+                : delegate;
         messageQueue.subscribe(MessageQueueTopics.DELIVER, handler);
         log.info("DeliveryConsumer subscribed to topic '{}'", MessageQueueTopics.DELIVER);
     }
@@ -131,15 +169,13 @@ public class DeliveryConsumer implements Lifecycle {
         // 给每个成员复制一份消息并设置 toUserId
         for (String memberId : memberIds) {
             Message copy = msg.copyForUser(memberId);
-            pusher.execute(() -> {
-                List<RouteBinding> bindings = (routeTable != null)
-                        ? routeTable.lookupAllBindings(memberId)
-                        : List.of();
-                if (bindings.isEmpty()) {
-                    log.info("Group member {} offline, skip push for msg {}", memberId, msg.getSequenceId());
-                }
-                pushToBindings(copy, memberId, bindings);
-            });
+            List<RouteBinding> bindings = (routeTable != null)
+                    ? routeTable.lookupAllBindings(memberId)
+                    : List.of();
+            if (bindings.isEmpty()) {
+                log.info("Group member {} offline, skip push for msg {}", memberId, msg.getSequenceId());
+            }
+            pushToBindings(copy, memberId, bindings);
         }
 
         log.info("Group {}: delivering msg {} to {} members", groupId, msg.getSequenceId(), memberIds.size());
@@ -151,6 +187,7 @@ public class DeliveryConsumer implements Lifecycle {
      */
     private void pushToBindings(Message msg, String toUserId, List<RouteBinding> bindings) {
         Set<String> forwardedRemoteNodes = new java.util.HashSet<>();
+        List<Future<?>> futures = new ArrayList<>();
         long now = System.currentTimeMillis();
         for (RouteBinding binding : bindings) {
             if (binding.isExpired(now)) {
@@ -160,9 +197,23 @@ public class DeliveryConsumer implements Lifecycle {
             }
             RouteNode route = binding.toRouteNode(localNodeId);
             if (route.isLocal()) {
-                pusher.execute(() -> pushToLocalBinding(msg, toUserId, binding));
+                futures.add(pusher.submit(() -> pushToLocalBinding(msg, toUserId, binding)));
             } else if (forwardedRemoteNodes.add(route.getNodeId())) {
-                pusher.execute(() -> forwardToRemoteNode(msg, toUserId, route.getNodeId()));
+                futures.add(pusher.submit(() -> forwardToRemoteNode(msg, toUserId, route.getNodeId())));
+            }
+        }
+        waitForPushes(futures);
+    }
+
+    private void waitForPushes(List<Future<?>> futures) {
+        for (Future<?> future : futures) {
+            try {
+                future.get();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("delivery interrupted", e);
+            } catch (Exception e) {
+                throw new IllegalStateException("delivery push failed", e);
             }
         }
     }
