@@ -1,16 +1,27 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { Suspense, lazy, useState, useCallback, useEffect, useRef } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { Toaster } from "sonner";
 import { StoreProvider, useStore } from "@/store/store";
 import { im } from "@/sdk/im-sdk";
 import LoginPage from "@/pages/LoginPage";
-import ChatLayout from "@/pages/ChatLayout";
-import ChatArea from "@/components/ChatArea";
-import CreateGroupPage from "@/pages/CreateGroupPage";
-import GroupInfoPage from "@/pages/GroupInfoPage";
-import UserProfilePage from "@/pages/UserProfilePage";
 import { CallProvider } from "@/components/call/CallProvider";
-import { CallDialog } from "@/components/call/CallDialog";
+
+const ChatLayout = lazy(() => import("@/pages/ChatLayout"));
+const ChatArea = lazy(() => import("@/components/ChatArea"));
+const CreateGroupPage = lazy(() => import("@/pages/CreateGroupPage"));
+const GroupInfoPage = lazy(() => import("@/pages/GroupInfoPage"));
+const UserProfilePage = lazy(() => import("@/pages/UserProfilePage"));
+const CallDialog = lazy(() => import("@/components/call/CallDialog").then((mod) => ({ default: mod.CallDialog })));
+
+function PageFallback() {
+  return (
+    <div className="flex h-full min-h-[320px] items-center justify-center bg-slate-50">
+      <div className="rounded-md border bg-white px-4 py-3 text-sm text-muted-foreground shadow-sm">
+        加载中...
+      </div>
+    </div>
+  );
+}
 
 function AuthGate() {
   const { state, login: storeLogin, register: storeRegister, logout } = useStore();
@@ -124,16 +135,18 @@ function AuthGate() {
 
   return (
     <CallProvider>
-    <Routes>
-      <Route path="/chat" element={<ChatLayout />}>
-        <Route index element={<ChatArea />} />
-        <Route path="create-group" element={<CreateGroupPage />} />
-        <Route path="group/:groupId" element={<GroupInfoPage />} />
-        <Route path="user/:userId" element={<UserProfilePage />} />
-      </Route>
-      <Route path="*" element={<Navigate to="/chat" replace />} />
-    </Routes>
-      <CallDialog />
+      <Suspense fallback={<PageFallback />}>
+        <Routes>
+          <Route path="/chat" element={<ChatLayout />}>
+            <Route index element={<ChatArea />} />
+            <Route path="create-group" element={<CreateGroupPage />} />
+            <Route path="group/:groupId" element={<GroupInfoPage />} />
+            <Route path="user/:userId" element={<UserProfilePage />} />
+          </Route>
+          <Route path="*" element={<Navigate to="/chat" replace />} />
+        </Routes>
+        <CallDialog />
+      </Suspense>
     </CallProvider>
   );
 }
