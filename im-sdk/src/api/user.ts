@@ -62,10 +62,10 @@ export class UserAPI {
 
   /** 搜索用户 */
   search(keyword: string, limit = 20): Promise<UserInfo[]> {
-    return requireHttp(this.httpTransport).get<{ users?: UserInfo[] } | UserInfo[]>("/api/user/search", {
+    return requireHttp(this.httpTransport).get<{ users: UserInfo[] }>("/api/user/search", {
       keyword,
       limit,
-    }).then((data) => Array.isArray(data) ? data : data.users ?? []);
+    }).then((data) => data.users);
   }
 
   /** 更新用户信息 */

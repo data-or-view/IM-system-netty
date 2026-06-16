@@ -52,10 +52,10 @@ public class JsonResponse {
     public static void error(ChannelHandlerContext ctx, HttpResponseStatus status, String message,
                              String requestId, String requestOrigin) {
         try {
-            String json = MAPPER.writeValueAsString(new ErrorBody(status.code(), status.code(), message));
+            String json = MAPPER.writeValueAsString(ApiBody.error(status.code(), message, null, requestId));
             writeRaw(ctx, status, json, requestId, requestOrigin);
         } catch (Exception e) {
-            writeRaw(ctx, status, "{\"code\":" + status.code() + ",\"imCode\":" + status.code() + ",\"message\":\"" + message + "\"}", requestId, requestOrigin);
+            writeRaw(ctx, status, "{\"code\":" + status.code() + ",\"msg\":\"" + message + "\"}", requestId, requestOrigin);
         }
     }
 
@@ -76,10 +76,10 @@ public class JsonResponse {
         HttpResponseStatus httpStatus = toHttpStatus(imCode);
         String msg = detail != null ? detail : imCode.getMessage();
         try {
-            String json = MAPPER.writeValueAsString(new ErrorBody(httpStatus.code(), imCode.getCode(), msg));
+            String json = MAPPER.writeValueAsString(ApiBody.error(imCode.getCode(), imCode.getMessage(), detail, requestId));
             writeRaw(ctx, httpStatus, json, requestId, requestOrigin);
         } catch (Exception e) {
-            writeRaw(ctx, httpStatus, "{\"code\":" + httpStatus.code() + ",\"imCode\":" + imCode.getCode() + ",\"message\":\"" + msg + "\"}", requestId, requestOrigin);
+            writeRaw(ctx, httpStatus, "{\"code\":" + imCode.getCode() + ",\"msg\":\"" + msg + "\"}", requestId, requestOrigin);
         }
     }
 
@@ -123,11 +123,11 @@ public class JsonResponse {
     private static void write(ChannelHandlerContext ctx, HttpResponseStatus status, Object data,
                               String requestId, String requestOrigin) {
         try {
-            String json = MAPPER.writeValueAsString(data);
+            String json = MAPPER.writeValueAsString(ApiBody.ok(data, requestId));
             writeRaw(ctx, status, json, requestId, requestOrigin);
         } catch (Exception e) {
             writeRaw(ctx, HttpResponseStatus.INTERNAL_SERVER_ERROR,
-                    "{\"code\":500,\"message\":\"serialization error\"}");
+                    "{\"code\":500,\"msg\":\"serialization error\"}");
         }
     }
 
@@ -162,5 +162,13 @@ public class JsonResponse {
         return MAPPER;
     }
 
-    private record ErrorBody(int code, int imCode, String message) {}
+    private record ApiBody(int code, String msg, Object data, String detail, String requestId) {
+        static ApiBody ok(Object data, String requestId) {
+            return new ApiBody(0, "ok", data, null, requestId);
+        }
+
+        static ApiBody error(int code, String msg, String detail, String requestId) {
+            return new ApiBody(code, msg, null, detail, requestId);
+        }
+    }
 }

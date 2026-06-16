@@ -306,7 +306,7 @@ test("HttpTransport attaches generated X-Request-Id to every request", async () 
     requestIdFactory: () => "req_http_1",
     fetchImpl: async (input, init) => {
       calls.push({ input, init });
-      return new Response(JSON.stringify({ code: 0, data: { ok: true } }), {
+      return new Response(JSON.stringify({ code: 0, msg: "ok", data: { ok: true } }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
@@ -332,6 +332,21 @@ test("WsTransport attaches generated _requestId to request frames", async () => 
   pending.catch(() => {});
 
   assert.equal(sentFrames[0]._requestId, "req_ws_1");
+});
+
+test("HttpTransport rejects non-envelope HTTP responses at the protocol boundary", async () => {
+  const http = new HttpTransport({
+    baseUrl: "http://im.test",
+    fetchImpl: async () => new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }),
+  });
+
+  await assert.rejects(
+    () => http.get("/api/conversation/list"),
+    (err) => err instanceof IMProtocolError && err.message === "Invalid HTTP envelope",
+  );
 });
 
 
@@ -759,7 +774,7 @@ test("http transport calls default fetch with the global object binding", async 
       throw new TypeError("Illegal invocation");
     }
     calls.push({ url: String(url), init });
-    return Promise.resolve(new Response(JSON.stringify({ ok: true }), {
+    return Promise.resolve(new Response(JSON.stringify({ code: 0, msg: "ok", data: { ok: true } }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     }));
@@ -789,6 +804,7 @@ test("file.upload signs, uploads to object storage, then completes through HTTP 
       if (String(url).endsWith("/api/file/upload/sign")) {
         return new Response(JSON.stringify({
           code: 0,
+          msg: "ok",
           data: {
             fileId: "f1",
             uploadUrl: "https://oss.test/upload-a",
@@ -798,6 +814,7 @@ test("file.upload signs, uploads to object storage, then completes through HTTP 
       }
       return new Response(JSON.stringify({
         code: 0,
+        msg: "ok",
         data: {
           fileUrl: "http://files/a.txt",
           fileId: "f1",
@@ -839,6 +856,7 @@ test("file.multipartUpload signs part and uploads bytes to object storage", asyn
       }
       return new Response(JSON.stringify({
         code: 0,
+        msg: "ok",
         data: { uploadUrl: "https://oss.test/part-2", headers: {} },
       }), { status: 200, headers: { "Content-Type": "application/json" } });
     },

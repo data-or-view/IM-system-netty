@@ -1,4 +1,4 @@
-import { IMHttpError, IMServerError, type FileUploadResult } from "../types.js";
+import { IMHttpError, IMProtocolError, IMServerError, type FileUploadResult } from "../types.js";
 
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
@@ -13,9 +13,8 @@ interface HttpEnvelope<T> {
   code: number;
   data?: T;
   msg?: string;
-  message?: string;
   detail?: string;
-  imCode?: number;
+  requestId?: string;
 }
 
 export class HttpTransport {
@@ -113,29 +112,25 @@ export class HttpTransport {
       throw new IMHttpError(resp.status || -1, "Invalid HTTP response", err instanceof Error ? err.message : String(err));
     }
 
-    if (this.isEnvelope(payload)) {
-      if (!resp.ok || payload.code !== 0) {
-        throw this.envelopeError(resp, payload);
-      }
-      return payload.data as T;
+    if (!this.isEnvelope(payload)) {
+      throw new IMProtocolError("Invalid HTTP envelope", "Expected { code, msg, data } response");
     }
 
-    if (!resp.ok) {
-      const error = payload as Partial<HttpEnvelope<T>> | null;
-      throw new IMHttpError(error?.imCode || error?.code || resp.status || -1, error?.msg || error?.message || "HTTP request failed", error?.detail);
+    if (!resp.ok || payload.code !== 0) {
+      throw this.envelopeError(resp, payload);
     }
-    return payload as T;
+    return payload.data as T;
   }
 
   private isEnvelope<T>(payload: unknown): payload is HttpEnvelope<T> {
     if (!payload || typeof payload !== "object") return false;
     const candidate = payload as Partial<HttpEnvelope<T>>;
-    return typeof candidate.code === "number" && ("data" in candidate || "msg" in candidate || "message" in candidate || "imCode" in candidate);
+    return typeof candidate.code === "number" && typeof candidate.msg === "string";
   }
 
   private envelopeError<T>(resp: Response, payload: HttpEnvelope<T>): IMHttpError | IMServerError {
-    const code = payload.imCode || payload.code || resp.status || -1;
-    const message = payload.msg || payload.message || "HTTP request failed";
+    const code = payload.code || resp.status || -1;
+    const message = payload.msg || "HTTP request failed";
     if (!resp.ok) {
       return new IMHttpError(code, message, payload.detail);
     }

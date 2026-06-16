@@ -1,10 +1,13 @@
 package com.im.bootstrap.http;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.im.core.dispatcher.ApiDispatcher;
 import com.im.bootstrap.RequestAdmission;
 import com.im.bootstrap.RequestScope;
 import com.im.common.enums.ImErrorCode;
 import com.im.common.exception.InfrastructureException;
+import com.im.core.serialization.jackson.ObjectMapperProvider;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.handler.codec.http.DefaultFullHttpRequest;
@@ -18,6 +21,7 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.AbstractExecutorService;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.RejectedExecutionException;
@@ -28,6 +32,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 class HttpRequestAdapterTest {
+
+    private static final ObjectMapper MAPPER = ObjectMapperProvider.get();
+    private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {};
 
     @Test
     void requestIdHeaderIsExposedAsRequestAttribute() {
@@ -50,6 +57,11 @@ class HttpRequestAdapterTest {
         FullHttpResponse response = channel.readOutbound();
         assertNotNull(response);
         assertEquals(HttpResponseStatus.OK, response.status());
+        Map<String, Object> body = readBody(response);
+        assertEquals(0, body.get("code"));
+        assertEquals("ok", body.get("msg"));
+        assertEquals("req-http-1", body.get("requestId"));
+        assertEquals(Map.of("ok", true), body.get("data"));
     }
 
     @Test
@@ -71,6 +83,10 @@ class HttpRequestAdapterTest {
         FullHttpResponse response = channel.readOutbound();
         assertNotNull(response);
         assertEquals(HttpResponseStatus.OK, response.status());
+        Map<String, Object> body = readBody(response);
+        assertEquals(0, body.get("code"));
+        assertEquals("ok", body.get("msg"));
+        assertEquals(Map.of(), body.get("data"));
         assertEquals("http://127.0.0.1:39073", response.headers().get(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN));
         String allowHeaders = response.headers().get(HttpHeaderNames.ACCESS_CONTROL_ALLOW_HEADERS);
         assertNotNull(allowHeaders);
@@ -117,6 +133,10 @@ class HttpRequestAdapterTest {
         FullHttpResponse response = channel.readOutbound();
         assertNotNull(response);
         assertEquals(HttpResponseStatus.BAD_REQUEST, response.status());
+        Map<String, Object> body = readBody(response);
+        assertEquals(ImErrorCode.BAD_REQUEST.getCode(), body.get("code"));
+        assertEquals(ImErrorCode.BAD_REQUEST.getMessage(), body.get("msg"));
+        assertEquals("invalid json body", body.get("detail"));
     }
 
     @Test
@@ -135,6 +155,9 @@ class HttpRequestAdapterTest {
         FullHttpResponse response = channel.readOutbound();
         assertNotNull(response);
         assertEquals(HttpResponseStatus.SERVICE_UNAVAILABLE, response.status());
+        Map<String, Object> body = readBody(response);
+        assertEquals(ImErrorCode.MQ_UNAVAILABLE.getCode(), body.get("code"));
+        assertEquals(ImErrorCode.MQ_UNAVAILABLE.getMessage(), body.get("msg"));
     }
 
     @Test
@@ -153,6 +176,17 @@ class HttpRequestAdapterTest {
         FullHttpResponse response = channel.readOutbound();
         assertNotNull(response);
         assertEquals(HttpResponseStatus.SERVICE_UNAVAILABLE, response.status());
+        Map<String, Object> body = readBody(response);
+        assertEquals(ImErrorCode.MQ_UNAVAILABLE.getCode(), body.get("code"));
+        assertEquals(ImErrorCode.MQ_UNAVAILABLE.getMessage(), body.get("msg"));
+    }
+
+    private static Map<String, Object> readBody(FullHttpResponse response) {
+        try {
+            return MAPPER.readValue(response.content().toString(StandardCharsets.UTF_8), MAP_TYPE);
+        } catch (Exception e) {
+            throw new AssertionError(e);
+        }
     }
 
     private static class DirectExecutorService extends AbstractExecutorService {

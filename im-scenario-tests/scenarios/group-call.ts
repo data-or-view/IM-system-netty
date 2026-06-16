@@ -1,4 +1,5 @@
 import { assertOk } from "../src/assertions.js";
+import { nextClientMsgId } from "../src/client-msg-id.js";
 import { readNumberArg, readStringArg } from "../src/cli.js";
 import { loadScenarioConfig } from "../src/config.js";
 import { ScenarioReporter } from "../src/reporter.js";
@@ -46,6 +47,7 @@ try {
   const started = await owner.http.post<GroupCallSession>("/api/group/call/start", {
     groupId: group.groupId,
     callType,
+    clientMsgId: nextClientMsgId("scenario-call"),
   });
   assertOk(started.active, "group.call.start did not return active session");
   assertOk(started.roomId, "group.call.start did not return roomId");
@@ -80,7 +82,10 @@ try {
   const left = await users[1].http.post<GroupCallSession>("/api/group/call/leave", { groupId: group.groupId });
   assertOk(left.participantCount === users.length - 1, `expected participantCount=${users.length - 1} after leave, got ${left.participantCount}`);
 
-  const ended = await owner.http.post<GroupCallSession>("/api/group/call/end", { groupId: group.groupId });
+  const ended = await owner.http.post<GroupCallSession>("/api/group/call/end", {
+    groupId: group.groupId,
+    clientMsgId: nextClientMsgId("scenario-call"),
+  });
   assertOk(ended.active === false && ended.ended === true, "group.call.end did not end active session");
 
   const finalActive = await users[1].http.get<GroupCallSession>("/api/group/call/active", { groupId: group.groupId });

@@ -9,8 +9,8 @@ export class ConversationAPI {
 
   /** 获取会话列表 */
   list(): Promise<Conversation[]> {
-    return requireHttp(this.transport).get<{ conversations?: Conversation[] }>("/api/conversation/list")
-      .then((data) => (data.conversations ?? []).map(normalizeConversation));
+    return requireHttp(this.transport).get<{ conversations: Conversation[] }>("/api/conversation/list")
+      .then((data) => data.conversations.map(normalizeConversation));
   }
 
   /** 更新会话设置（置顶、免打扰等） */

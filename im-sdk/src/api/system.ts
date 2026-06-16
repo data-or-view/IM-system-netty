@@ -28,13 +28,13 @@ export class SystemAPI {
   constructor(private transport?: HttpAPI) {}
 
   channels(): Promise<SystemChannel[]> {
-    return requireHttp(this.transport).get<{ channels?: SystemChannel[] }>("/api/system/channels")
-      .then((data) => data.channels ?? []);
+    return requireHttp(this.transport).get<{ channels: SystemChannel[] }>("/api/system/channels")
+      .then((data) => data.channels);
   }
 
   messages(params: ListSystemMessagesParams = {}): Promise<SystemMessageInboxItem[]> {
-    return requireHttp(this.transport).get<{ messages?: SystemMessageInboxItem[] }>("/api/system/messages", { ...params })
-      .then((data) => data.messages ?? []);
+    return requireHttp(this.transport).get<{ messages: SystemMessageInboxItem[] }>("/api/system/messages", { ...params })
+      .then((data) => data.messages);
   }
 
   detail(messageId: string): Promise<SystemMessageInboxItem> {
@@ -46,8 +46,7 @@ export class SystemAPI {
   }
 
   markAllRead(channelId?: string): Promise<{ updated: number }> {
-    return requireHttp(this.transport).post<{ updated?: number }>("/api/system/messages/read-all", { channelId })
-      .then((data) => ({ updated: data.updated ?? 0 }));
+    return requireHttp(this.transport).post<{ updated: number }>("/api/system/messages/read-all", { channelId });
   }
 
   unreadCount(channelId?: string): Promise<SystemUnreadCount> {
@@ -55,7 +54,7 @@ export class SystemAPI {
   }
 
   publish(params: PublishSystemMessageParams): Promise<SystemMessageSummary> {
-    return requireHttp(this.transport).post<{ message?: SystemMessageSummary }>("/api/admin/system/messages/publish", { ...params })
-      .then((data) => data.message as SystemMessageSummary);
+    return requireHttp(this.transport).post<{ message: SystemMessageSummary }>("/api/admin/system/messages/publish", { ...params })
+      .then((data) => data.message);
   }
 }

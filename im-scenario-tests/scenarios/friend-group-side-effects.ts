@@ -1,4 +1,5 @@
 import { assertOk, sleep } from "../src/assertions.js";
+import { nextClientMsgId } from "../src/client-msg-id.js";
 import { loadScenarioConfig } from "../src/config.js";
 import { ScenarioReporter } from "../src/reporter.js";
 import { ScenarioUser } from "../src/scenario-user.js";
@@ -38,6 +39,7 @@ try {
   reporter.step("checking friend message works before removal");
   const singleAck = await owner.ws.request<SendMessageAck>("chat.send", {
     toUserId: member.userId,
+    clientMsgId: nextClientMsgId("scenario-single"),
     _ct: "text",
     content: { text: "hello before delete" },
   });
@@ -47,6 +49,7 @@ try {
   await owner.http.post("/api/friend/remove", { friendUserId: member.userId });
   const rejectedByFriendRemoval = await captureWsError(() => member.ws.request("chat.send", {
     toUserId: owner.userId,
+    clientMsgId: nextClientMsgId("scenario-single"),
     _ct: "text",
     content: { text: "hello after delete" },
   }));
@@ -64,6 +67,7 @@ try {
   assertOk(group.groupId, "group.create did not return groupId");
   const groupAck = await member.ws.request<SendMessageAck>("chat.send.group", {
     groupId: group.groupId,
+    clientMsgId: nextClientMsgId("scenario-group"),
     _ct: "text",
     content: { text: "hello before disband" },
   });
@@ -73,6 +77,7 @@ try {
   await owner.http.post("/api/group/disband", { groupId: group.groupId });
   const rejectedByDisband = await captureWsError(() => member.ws.request("chat.send.group", {
     groupId: group.groupId,
+    clientMsgId: nextClientMsgId("scenario-group"),
     _ct: "text",
     content: { text: "hello after disband" },
   }));

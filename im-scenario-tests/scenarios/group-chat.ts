@@ -1,4 +1,5 @@
 import { assertOk } from "../src/assertions.js";
+import { nextClientMsgId } from "../src/client-msg-id.js";
 import { readNumberArg, readStringArg } from "../src/cli.js";
 import { loadScenarioConfig } from "../src/config.js";
 import { ScenarioReporter } from "../src/reporter.js";
@@ -47,6 +48,7 @@ try {
   for (let i = 0; i < messageCount; i++) {
     const ack = await owner.ws.request<SendMessageAck>("chat.send.group", {
       groupId: group.groupId,
+      clientMsgId: nextClientMsgId("scenario-group"),
       _ct: "text",
       content: { text: `scenario message ${i + 1}/${messageCount}` },
     });

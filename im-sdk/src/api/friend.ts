@@ -9,16 +9,16 @@ export class FriendAPI {
 
   /** 获取好友列表 */
   list(): Promise<FriendInfo[]> {
-    return requireHttp(this.transport).get<{ friends?: FriendInfo[] }>("/api/friend/list")
-      .then((data) => data.friends ?? []);
+    return requireHttp(this.transport).get<{ friends: FriendInfo[] }>("/api/friend/list")
+      .then((data) => data.friends);
   }
 
   /** 搜索用户（添加好友前搜索） */
   search(keyword: string, limit = 20): Promise<FriendInfo[]> {
-    return requireHttp(this.transport).get<{ users?: FriendInfo[] } | FriendInfo[]>("/api/user/search", {
+    return requireHttp(this.transport).get<{ users: FriendInfo[] }>("/api/user/search", {
       keyword,
       limit,
-    }).then((data) => Array.isArray(data) ? data : data.users ?? []);
+    }).then((data) => data.users);
   }
 
   /** 申请加好友 */
@@ -54,26 +54,26 @@ export class FriendAPI {
 
   /** 黑名单列表 */
   blacklist(): Promise<FriendInfo[]> {
-    return requireHttp(this.transport).get<{ blacklist?: FriendInfo[] }>("/api/friend/blacklist")
-      .then((data) => data.blacklist ?? []);
+    return requireHttp(this.transport).get<{ blacklist: FriendInfo[] }>("/api/friend/blacklist")
+      .then((data) => data.blacklist);
   }
 
   /** 已发送的好友申请列表 */
   sentApplyList(): Promise<FriendApply[]> {
-    return requireHttp(this.transport).get<{ applies?: FriendApply[] }>("/api/friend/apply/sent")
-      .then((data) => data.applies ?? []);
+    return requireHttp(this.transport).get<{ applies: FriendApply[] }>("/api/friend/apply/sent")
+      .then((data) => data.applies);
   }
 
   /** 收到的好友申请列表 */
   receivedApplyList(onlyPending = true): Promise<FriendApply[]> {
-    return requireHttp(this.transport).get<{ applies?: FriendApply[] }>("/api/friend/apply/received", {
+    return requireHttp(this.transport).get<{ applies: FriendApply[] }>("/api/friend/apply/received", {
       onlyPending,
-    }).then((data) => data.applies ?? []);
+    }).then((data) => data.applies);
   }
 
   /** 未处理的好友申请数量 */
   unhandledApplyCount(): Promise<number> {
-    return requireHttp(this.transport).get<{ count?: number } | number>("/api/friend/apply/unhandled/count")
-      .then((data) => typeof data === "number" ? data : data.count ?? 0);
+    return requireHttp(this.transport).get<{ count: number }>("/api/friend/apply/unhandled/count")
+      .then((data) => data.count);
   }
 }

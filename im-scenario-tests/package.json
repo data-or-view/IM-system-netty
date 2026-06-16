@@ -2,17 +2,19 @@
   "name": "im-scenario-tests",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "pnpm@10.18.2",
   "type": "module",
   "description": "Development-only multi-user scenario tests for the IM system.",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "npm run build && node --test dist/test/*.test.js",
-    "scenario:smoke": "npm run build && node dist/scenarios/smoke.js",
-    "scenario:group-chat": "npm run build && node dist/scenarios/group-chat.js",
-    "scenario:group-call": "npm run build && node dist/scenarios/group-call.js",
-    "scenario:group-join-system": "npm run build && node dist/scenarios/group-join-system-message.js",
-    "scenario:system-message": "npm run build && node dist/scenarios/system-message.js",
-    "scenario:friend-group-side-effects": "npm run build && node dist/scenarios/friend-group-side-effects.js"
+    "test": "pnpm run build && node --test dist/test/*.test.js",
+    "scenario:smoke": "pnpm run build && node dist/scenarios/smoke.js",
+    "scenario:group-chat": "pnpm run build && node dist/scenarios/group-chat.js",
+    "scenario:group-chat-perf": "pnpm run build && node dist/scenarios/group-chat-perf.js",
+    "scenario:group-call": "pnpm run build && node dist/scenarios/group-call.js",
+    "scenario:group-join-system": "pnpm run build && node dist/scenarios/group-join-system-message.js",
+    "scenario:system-message": "pnpm run build && node dist/scenarios/system-message.js",
+    "scenario:friend-group-side-effects": "pnpm run build && node dist/scenarios/friend-group-side-effects.js"
   },
   "dependencies": {
     "ws": "^8.20.1"

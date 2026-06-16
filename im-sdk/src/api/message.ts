@@ -70,31 +70,31 @@ export class MessageAPI {
 
   /** 拉取历史消息 */
   pull(conversationId: string, startSeq: number, endSeq?: number): Promise<Message[]> {
-    return requireHttp(this.httpTransport).post<{ messages?: Message[] } | Message[]>("/api/msg/pull", {
+    return requireHttp(this.httpTransport).post<{ messages: Message[] }>("/api/msg/pull", {
       conversationId,
       startSeq,
       ...(endSeq !== undefined ? { endSeq } : {}),
-    }).then((data) => Array.isArray(data) ? data : data.messages ?? []);
+    }).then((data) => data.messages);
   }
 
   /** 获取最新 seq */
   seq(conversationId: string): Promise<number> {
-    return requireHttp(this.httpTransport).get<{ maxSeq?: number } | number>("/api/msg/seq", { conversationId })
-      .then((data) => typeof data === "number" ? data : data.maxSeq ?? 0);
+    return requireHttp(this.httpTransport).get<{ maxSeq: number }>("/api/msg/seq", { conversationId })
+      .then((data) => data.maxSeq);
   }
 
   /** 增量同步 */
   sync(conversationId: string, lastSeq: number): Promise<Array<{ conversationId: string; messages: Message[]; maxSeq: number }>> {
-    return requireHttp(this.httpTransport).post<{ syncs?: Array<{ conversationId: string; messages: Message[]; maxSeq: number }> }>("/api/msg/sync", {
+    return requireHttp(this.httpTransport).post<{ syncs: Array<{ conversationId: string; messages: Message[]; maxSeq: number }> }>("/api/msg/sync", {
       seqs: { [conversationId]: lastSeq },
-    }).then((data) => data.syncs ?? []);
+    }).then((data) => data.syncs);
   }
 
   /** 搜索消息 */
   search(param: SearchMessagesParam): Promise<SearchMessagesResult> {
     const pageSize = param.pageSize ?? 20;
     const page = param.page ?? 1;
-    return requireHttp(this.httpTransport).post<{ messages?: Message[]; totalCount?: number; total?: number; hasMore?: boolean }>("/api/msg/search", {
+    return requireHttp(this.httpTransport).post<{ messages: Message[]; totalCount: number; hasMore: boolean }>("/api/msg/search", {
       conversationIds: [param.conversationId],
       keyword: param.keyword,
       ...(param.contentTypeFilter ? { contentTypeFilter: param.contentTypeFilter } : {}),
@@ -103,9 +103,9 @@ export class MessageAPI {
       limit: pageSize,
       offset: Math.max(page - 1, 0) * pageSize,
     }).then((data) => ({
-      messages: data.messages ?? [],
-      total: data.total ?? data.totalCount ?? 0,
-      hasMore: data.hasMore ?? false,
+      messages: data.messages,
+      total: data.totalCount,
+      hasMore: data.hasMore,
     }));
   }
 

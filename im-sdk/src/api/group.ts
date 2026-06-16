@@ -85,22 +85,22 @@ export class GroupAPI {
 
   /** 获取我加入的群组列表 */
   list(): Promise<GroupInfo[]> {
-    return requireHttp(this.transport).get<{ groups?: GroupInfo[] } | GroupInfo[]>("/api/group/list")
-      .then((data) => Array.isArray(data) ? data : data.groups ?? []);
+    return requireHttp(this.transport).get<{ groups: GroupInfo[] }>("/api/group/list")
+      .then((data) => data.groups);
   }
 
   /** 搜索群组 */
   search(keyword: string, limit = 20): Promise<GroupInfo[]> {
-    return requireHttp(this.transport).get<{ groups?: GroupInfo[] }>("/api/group/search", {
+    return requireHttp(this.transport).get<{ groups: GroupInfo[] }>("/api/group/search", {
       keyword,
       limit,
-    }).then((data) => data.groups ?? []);
+    }).then((data) => data.groups);
   }
 
   /** 获取群成员列表 */
   members(groupId: string): Promise<GroupMember[]> {
-    return requireHttp(this.transport).get<{ members?: GroupMember[] }>("/api/group/members", { groupId })
-      .then((data) => data.members ?? []);
+    return requireHttp(this.transport).get<{ members: GroupMember[] }>("/api/group/members", { groupId })
+      .then((data) => data.members);
   }
 
   /** 全员禁言 */
@@ -113,15 +113,15 @@ export class GroupAPI {
 
   /** 获取我可审批的加群申请 */
   applyList(onlyPending = true): Promise<GroupApply[]> {
-    return requireHttp(this.transport).get<{ applies?: GroupApply[] }>("/api/group/apply/list", {
+    return requireHttp(this.transport).get<{ applies: GroupApply[] }>("/api/group/apply/list", {
       onlyPending,
-    }).then((data) => data.applies ?? []);
+    }).then((data) => data.applies);
   }
 
   /** 获取我可审批的未处理加群申请数量 */
   unhandledApplyCount(): Promise<number> {
-    return requireHttp(this.transport).get<{ count?: number } | number>("/api/group/apply/unhandled/count")
-      .then((data) => typeof data === "number" ? data : data.count ?? 0);
+    return requireHttp(this.transport).get<{ count: number }>("/api/group/apply/unhandled/count")
+      .then((data) => data.count);
   }
 
   /** 审批加群申请 */
