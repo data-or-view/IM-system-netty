@@ -6,6 +6,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Inbox, Users } from "lucide-react";
 import { toast } from "sonner";
 import { DialogBody, EmptyState, ResultRow, SearchBar } from "./DialogParts";
+import { SEARCH_LOADING_DELAY_MS } from "@/config/ui-timing";
 
 interface Props {
   open: boolean;
@@ -21,7 +22,7 @@ export default function GroupSearchDialog({ open, onOpenChange }: Props) {
     if (!keyword.trim()) return;
     setSearching(true);
     searchGroup(keyword.trim());
-    setTimeout(() => setSearching(false), 500);
+    setTimeout(() => setSearching(false), SEARCH_LOADING_DELAY_MS);
   }, [keyword, searchGroup]);
 
   const handleJoin = useCallback(

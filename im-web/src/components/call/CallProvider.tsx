@@ -39,6 +39,7 @@ import {
 import { toast } from "sonner";
 import { im } from "@/sdk/im-sdk";
 import { useStore } from "@/store/store";
+import { DEV_LIVEKIT_URL } from "@/config/runtime";
 
 export type CallType = "voice" | "video";
 export type CallPhase = "idle" | "outgoing" | "incoming" | "connecting" | "connected";
@@ -107,7 +108,6 @@ type CallContextValue = {
   toggleCamera: () => Promise<void>;
 };
 
-const DEFAULT_LIVEKIT_URL = "ws://localhost:7880";
 const AUDIO_CAPTURE_OPTIONS = {
   echoCancellation: true,
   noiseSuppression: true,
@@ -165,7 +165,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const localAudioRef = useRef<LocalAudioTrack | null>(null);
   const localVideoRef = useRef<LocalVideoTrack | null>(null);
   const incomingTokenRef = useRef<string | null>(null);
-  const liveKitUrlRef = useRef<string>(import.meta.env.VITE_LIVEKIT_URL ?? DEFAULT_LIVEKIT_URL);
+  const liveKitUrlRef = useRef<string>(import.meta.env.VITE_LIVEKIT_URL ?? DEV_LIVEKIT_URL);
   const weakNetworkNotifiedRef = useRef(false);
 
   useEffect(() => {

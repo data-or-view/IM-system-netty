@@ -16,11 +16,12 @@ import { toast } from "sonner";
 import { im } from "@/sdk/im-sdk";
 import { MessageContentRenderer } from "@/components/MessageContentRenderer";
 import SystemMessagePanel from "@/components/SystemMessagePanel";
-import { ConversationType, MessageContentType, createClientMsgId, getErrorText, toMessageContentType, type GroupCallSession, type OutgoingMessageContentTypeValue, type SendMessageAck } from "im-sdk";
+import { ConversationType, MessageContentType, createClientMsgId, getErrorText, type GroupCallSession, type OutgoingMessageContentTypeValue, type SendMessageAck } from "im-sdk";
 import { useCall } from "@/components/call/CallProvider";
+import { messageRenderKey, toOptimisticMessage, toOutgoingMessageContent } from "@/lib/messages";
 
 export default function ChatArea() {
-  const { state, sendMessage, fetchConversations, dispatch } = useStore();
+  const { state, fetchConversations, dispatch } = useStore();
   const [input, setInput] = useState("");
   const [uploading, setUploading] = useState(false);
   const [activeGroupCall, setActiveGroupCall] = useState<GroupCallSession | null>(null);
@@ -106,36 +107,61 @@ export default function ChatArea() {
     };
   }, [conv?.conversationType, conv?.groupId, messages]);
 
+  const appendSentMessage = useCallback((
+    ack: SendMessageAck,
+    contentType: OutgoingMessageContentTypeValue,
+    content: unknown,
+  ) => {
+    const msg = toOptimisticMessage(ack, state.userId || "", contentType, content);
+    dispatch({
+      type: "APPEND_MESSAGE",
+      conversationId: ack.conversationId,
+      msg,
+    });
+    dispatch({
+      type: "UPDATE_CONVERSATION_LATEST",
+      conversationId: ack.conversationId,
+      latestMsg: toOutgoingMessageContent(content),
+      latestMsgSendTime: msg.createTime,
+    });
+    void fetchConversations();
+  }, [dispatch, fetchConversations, state.userId]);
+
+  const sendCurrentTextMessage = useCallback(async (content: string) => {
+    if (!conv) return;
+    await im.waitConnected();
+    const messageContent = { text: content };
+    const clientMsgId = createClientMsgId();
+    const ack = conv.conversationType === ConversationType.GROUP && conv.groupId
+      ? await im.message.sendGroup({
+          groupId: conv.groupId,
+          contentType: "text",
+          content: messageContent,
+          clientMsgId,
+        })
+      : conv.userId
+        ? await im.message.send({
+            toUserId: conv.userId,
+            contentType: "text",
+            content: messageContent,
+            clientMsgId,
+          })
+        : null;
+
+    if (ack) {
+      appendSentMessage(ack, "text", messageContent);
+    }
+  }, [appendSentMessage, conv]);
+
   const handleSend = () => {
     if (!input.trim() || !conv || isSystemConversation) return;
     const content = input.trim();
     setInput("");
 
-    if (conv.conversationType === ConversationType.GROUP && conv.groupId) {
-      // Group chat
-      const groupId = conv.groupId;
-      const clientMsgId = createClientMsgId();
-      im.waitConnected()
-        .then(() => im.message.sendGroup({
-          groupId,
-          contentType: "text",
-          content: { text: content },
-          clientMsgId,
-        }))
-        .then((m) => {
-          appendSentMessage(m, "text", { text: content });
-        })
-        .catch((err) => {
-          toast(`发送失败：${getErrorText(err)}`);
-          setInput(content);
-        });
-    } else if (conv.userId) {
-      // Single chat
-      sendMessage(conv.userId, content).catch((err) => {
-        toast(`发送失败：${getErrorText(err)}`);
-        setInput(content);
-      });
-    }
+    void sendCurrentTextMessage(content).catch((err) => {
+      toast(`发送失败：${getErrorText(err)}`);
+      setInput(content);
+    });
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -144,35 +170,6 @@ export default function ChatArea() {
       handleSend();
     }
   };
-
-  const appendSentMessage = useCallback((
-    ack: SendMessageAck,
-    contentType: OutgoingMessageContentTypeValue,
-    content: unknown,
-  ) => {
-    const createTime = Date.now();
-    dispatch({
-      type: "APPEND_MESSAGE",
-      conversationId: ack.conversationId,
-        msg: {
-        messageId: ack.messageId,
-        seq: ack.seq ?? 0,
-        senderUserId: state.userId || "",
-        conversationId: ack.conversationId,
-        contentType: toMessageContentType(contentType),
-        content: toOutgoingMessageContent(content),
-        createTime,
-        status: 1,
-      },
-    });
-    dispatch({
-      type: "UPDATE_CONVERSATION_LATEST",
-      conversationId: ack.conversationId,
-      latestMsg: toOutgoingMessageContent(content),
-      latestMsgSendTime: createTime,
-    });
-    void fetchConversations();
-  }, [dispatch, fetchConversations, state.userId]);
 
   const sendFileMessage = useCallback(async (file: File) => {
     if (!conv) return;
@@ -514,14 +511,4 @@ function formatMsgTime(ts: number): string {
   if (!Number.isFinite(ts)) return "--:--";
   const d = new Date(ts);
   return `${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`;
-}
-
-function toOutgoingMessageContent(raw: unknown): string {
-  return typeof raw === "string" ? raw : JSON.stringify(raw);
-}
-
-function messageRenderKey(msg: { messageId?: string; seq?: number; senderUserId?: string; createTime?: number; content?: string }): string {
-  if (msg.messageId) return msg.messageId;
-  if (msg.seq && msg.seq > 0) return `seq:${msg.seq}`;
-  return `tmp:${msg.senderUserId || "unknown"}:${msg.createTime || 0}:${msg.content || ""}`;
 }

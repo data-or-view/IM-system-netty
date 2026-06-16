@@ -1,6 +1,8 @@
 import { test, expect, type Page } from "@playwright/test";
 
-const BASE_URL = "http://localhost:8083";
+const BASE_URL = "http://localhost:39073";
+const WS_URL = "ws://127.0.0.1:8083/ws";
+const WS_REQUEST_TIMEOUT_MS = 5_000;
 const TEST_USER = "playwright_e2e_" + Date.now();
 const PEER_USER = "playwright_peer_" + Date.now();
 
@@ -17,14 +19,14 @@ async function register(page: Page, userId: string) {
 
 function wsRequest(msg: Record<string, unknown>): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket("ws://127.0.0.1:8081/ws");
+    const ws = new WebSocket(WS_URL);
     ws.onopen = () => ws.send(JSON.stringify(msg));
     ws.onmessage = (event) => {
       try { resolve(JSON.parse(event.data)); } catch { /* ignore */ }
       ws.close();
     };
     ws.onerror = () => reject(new Error("WS error"));
-    setTimeout(() => { ws.close(); reject(new Error("WS timeout")); }, 5000);
+    setTimeout(() => { ws.close(); reject(new Error("WS timeout")); }, WS_REQUEST_TIMEOUT_MS);
   });
 }
 

@@ -9,17 +9,20 @@
  */
 
 import { createIM } from "im-sdk";
-
-const DEFAULT_WS_URL = "ws://127.0.0.1:8083/ws";
-const DEFAULT_HTTP_URL = "http://127.0.0.1:8084";
+import { SDK_CONNECT_TIMEOUT_MS, DEV_HTTP_URL, DEV_WS_URL } from "@/config/runtime";
+import {
+  AUTH_REFRESH_TOKEN_KEY,
+  AUTH_TOKEN_KEY,
+  SYNC_CURSORS_KEY,
+} from "@/config/storage-keys";
 
 export const im = createIM({
-  wsUrl: import.meta.env.VITE_WS_URL ?? DEFAULT_WS_URL,
-  httpUrl: import.meta.env.VITE_HTTP_URL ?? DEFAULT_HTTP_URL,
-  connectTimeout: 5000,
+  wsUrl: import.meta.env.VITE_WS_URL ?? DEV_WS_URL,
+  httpUrl: import.meta.env.VITE_HTTP_URL ?? DEV_HTTP_URL,
+  connectTimeout: SDK_CONNECT_TIMEOUT_MS,
   syncOnReconnect: true,
   syncConversations: () => {
-    const raw = sessionStorage.getItem("im_sync_cursors");
+    const raw = sessionStorage.getItem(SYNC_CURSORS_KEY);
     if (!raw) return [];
     try {
       const parsed = JSON.parse(raw) as unknown;
@@ -35,18 +38,18 @@ export const im = createIM({
       return [];
     }
   },
-  getToken: () => localStorage.getItem("im_token"),
-  getRefreshToken: () => localStorage.getItem("im_refreshToken"),
+  getToken: () => localStorage.getItem(AUTH_TOKEN_KEY),
+  getRefreshToken: () => localStorage.getItem(AUTH_REFRESH_TOKEN_KEY),
   onTokenChanged: (tokens) => {
     if (tokens.token) {
-      localStorage.setItem("im_token", tokens.token);
+      localStorage.setItem(AUTH_TOKEN_KEY, tokens.token);
     } else {
-      localStorage.removeItem("im_token");
+      localStorage.removeItem(AUTH_TOKEN_KEY);
     }
     if (tokens.refreshToken) {
-      localStorage.setItem("im_refreshToken", tokens.refreshToken);
+      localStorage.setItem(AUTH_REFRESH_TOKEN_KEY, tokens.refreshToken);
     } else {
-      localStorage.removeItem("im_refreshToken");
+      localStorage.removeItem(AUTH_REFRESH_TOKEN_KEY);
     }
   },
 });

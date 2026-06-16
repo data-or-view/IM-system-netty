@@ -6,6 +6,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Inbox, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import { DialogBody, EmptyState, ResultRow, SearchBar } from "./DialogParts";
+import { SEARCH_LOADING_DELAY_MS } from "@/config/ui-timing";
 
 interface Props {
   open: boolean;
@@ -21,8 +22,7 @@ export default function UserSearchDialog({ open, onOpenChange }: Props) {
     if (!keyword.trim()) return;
     setSearching(true);
     searchUser(keyword.trim());
-    // 搜索完成后设置 searching 为 false
-    setTimeout(() => setSearching(false), 500);
+    setTimeout(() => setSearching(false), SEARCH_LOADING_DELAY_MS);
   }, [keyword, searchUser]);
 
   const handleApply = useCallback(

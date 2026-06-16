@@ -14,8 +14,11 @@ import React, {
   type ReactNode,
 } from "react";
 import { im } from "@/sdk/im-sdk";
-import { ApplyHandleResult, ConversationType, createClientMsgId, toMessageContentType } from "im-sdk";
-import type { Message as SDKMessage, OutgoingMessageContentTypeValue, SendMessageAck, SystemMessageInboxItem, SystemMessageSummary, TokenPair, UserInfo as SDKUserInfo, FriendInfo as SDKFriendInfo, FriendApply as SDKFriendApply, GroupInfo as SDKGroupInfo, GroupMember as SDKGroupMember, GroupApply as SDKGroupApply, Conversation as SDKConversation } from "im-sdk";
+import { ApplyHandleResult, ConversationType, createClientMsgId } from "im-sdk";
+import type { SystemMessageInboxItem, SystemMessageSummary, TokenPair, UserInfo as SDKUserInfo, FriendInfo as SDKFriendInfo, FriendApply as SDKFriendApply, GroupInfo as SDKGroupInfo, GroupMember as SDKGroupMember, GroupApply as SDKGroupApply, Conversation as SDKConversation } from "im-sdk";
+import { AUTH_REFRESH_TOKEN_KEY, AUTH_TOKEN_KEY, AUTH_USER_ID_KEY, SYNC_CURSORS_KEY } from "@/config/storage-keys";
+import { APPLY_REFRESH_DELAY_MS } from "@/config/ui-timing";
+import { toOptimisticMessage, toViewMessage, type ViewMessage } from "@/lib/messages";
 
 // ========== 类型（与 SDK 类型一致） ==========
 
@@ -26,22 +29,11 @@ export type GroupInfo = SDKGroupInfo;
 export type GroupMember = SDKGroupMember;
 export type GroupApply = SDKGroupApply;
 
-export interface Message {
-  messageId: string;
-  seq: number;
-  senderUserId: string;
-  senderNickname?: string;
-  conversationId: string;
-  contentType: number;
-  content: string;
-  createTime: number;
-  status: number;
-}
+export type Message = ViewMessage;
 
 // ========== State ==========
 
 const MAX_MESSAGES_PER_CONVERSATION = 500;
-const SYNC_CURSORS_KEY = "im_sync_cursors";
 export const SYSTEM_CONVERSATION_ID = "__system_notifications__";
 export const FRIEND_APPLY_UPDATED_EVENT = "im:friend-apply-updated";
 export const GROUP_APPLY_UPDATED_EVENT = "im:group-apply-updated";
@@ -72,9 +64,9 @@ interface State {
 }
 
 const initialState: State = {
-  token: localStorage.getItem("im_token"),
-  refreshToken: localStorage.getItem("im_refreshToken"),
-  userId: localStorage.getItem("im_userId"),
+  token: localStorage.getItem(AUTH_TOKEN_KEY),
+  refreshToken: localStorage.getItem(AUTH_REFRESH_TOKEN_KEY),
+  userId: localStorage.getItem(AUTH_USER_ID_KEY),
   connected: false,
   conversations: [],
   messages: {},
@@ -350,51 +342,15 @@ interface StoreContextType {
 const StoreContext = createContext<StoreContextType | null>(null);
 
 function persistTokens(tokens: TokenPair) {
-  if (tokens.token) localStorage.setItem("im_token", tokens.token);
-  if (tokens.refreshToken) localStorage.setItem("im_refreshToken", tokens.refreshToken);
+  if (tokens.token) localStorage.setItem(AUTH_TOKEN_KEY, tokens.token);
+  if (tokens.refreshToken) localStorage.setItem(AUTH_REFRESH_TOKEN_KEY, tokens.refreshToken);
 }
 
 function clearStoredAuth() {
-  localStorage.removeItem("im_userId");
-  localStorage.removeItem("im_token");
-  localStorage.removeItem("im_refreshToken");
+  localStorage.removeItem(AUTH_USER_ID_KEY);
+  localStorage.removeItem(AUTH_TOKEN_KEY);
+  localStorage.removeItem(AUTH_REFRESH_TOKEN_KEY);
   im.clearTokens();
-}
-
-function toViewMessage(sdkMsg: SDKMessage): Message {
-  return {
-    messageId: sdkMsg.messageId,
-    seq: sdkMsg.messageSeq ?? sdkMsg.sequenceId ?? 0,
-    senderUserId: sdkMsg.fromUserId,
-    senderNickname: undefined,
-    conversationId: sdkMsg.conversationId,
-    contentType: Number(sdkMsg.contentType),
-    content: sdkMsg.content,
-    createTime: sdkMsg.timestamp,
-    status: sdkMsg.status,
-  };
-}
-
-function toOutgoingMessageContent(raw: unknown): string {
-  return typeof raw === "string" ? raw : JSON.stringify(raw);
-}
-
-function toOptimisticMessage(
-  ack: SendMessageAck,
-  currentUserId: string,
-  contentType: OutgoingMessageContentTypeValue,
-  content: unknown,
-): Message {
-  return {
-    messageId: ack.messageId,
-    seq: ack.seq ?? 0,
-    senderUserId: currentUserId,
-    conversationId: ack.conversationId,
-    contentType: toMessageContentType(contentType),
-    content: toOutgoingMessageContent(content),
-    createTime: Date.now(),
-    status: 1,
-  };
 }
 
 function persistSyncCursors(messages: Record<string, Message[]>): void {
@@ -517,7 +473,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const unsubConnection = im.on("connectionStateChanged", (s) => {
       dispatch({ type: "SET_CONNECTED", connected: s === "connected" });
-      if (s === "connected" && localStorage.getItem("im_token")) {
+      if (s === "connected" && localStorage.getItem(AUTH_TOKEN_KEY)) {
         void hydrateAfterAuth();
       }
     });
@@ -543,7 +499,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           conversationId,
           latestMsg: latest.content,
           latestMsgSendTime: latest.createTime,
-          incoming: latest.senderUserId !== localStorage.getItem("im_userId"),
+          incoming: latest.senderUserId !== localStorage.getItem(AUTH_USER_ID_KEY),
         });
       }
     });
@@ -619,7 +575,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // ── Actions ──
 
   const login = useCallback(async (userId: string, password?: string) => {
-    localStorage.setItem("im_userId", userId);
+    localStorage.setItem(AUTH_USER_ID_KEY, userId);
     const tokens = await im.login(userId, password);
     persistTokens(tokens);
     dispatch({ type: "SET_AUTH", userId, token: tokens.token ?? "", refreshToken: tokens.refreshToken });
@@ -628,7 +584,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const register = useCallback(async (params: { password?: string; nickname?: string; faceUrl?: string }) => {
     const result = await im.user.register(params);
-    localStorage.setItem("im_userId", result.userId);
+    localStorage.setItem(AUTH_USER_ID_KEY, result.userId);
     await login(result.userId, params.password);
     return result.userId;
   }, [login]);
@@ -644,7 +600,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const clientMsgId = createClientMsgId();
     await im.waitConnected();
     const ack = await im.message.send({ toUserId, contentType: "text", content: messageContent, clientMsgId });
-    const currentUserId = localStorage.getItem("im_userId") || state.userId || "";
+    const currentUserId = localStorage.getItem(AUTH_USER_ID_KEY) || state.userId || "";
     const msg = toOptimisticMessage(ack, currentUserId, "text", messageContent);
     if (msg.conversationId) {
       dispatch({ type: "APPEND_MESSAGE", conversationId: msg.conversationId, msg });
@@ -657,7 +613,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       void fetchConversations();
     }
     return msg;
-  }, [fetchConversations]);
+  }, [fetchConversations, state.userId]);
 
   const searchUser = useCallback(async (keyword: string, limit = 20) => {
     try {
@@ -680,7 +636,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const applyFriend = useCallback(async (targetUserId: string, reqMsg?: string) => {
     try {
       await im.friend.apply(targetUserId, reqMsg);
-      setTimeout(() => void fetchFriends(), 300);
+      setTimeout(() => void fetchFriends(), APPLY_REFRESH_DELAY_MS);
     } catch (err) {
       console.error("applyFriend failed:", err);
     }
@@ -698,7 +654,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const joinGroup = useCallback(async (groupId: string, reqMsg?: string) => {
     try {
       await im.group.join(groupId, reqMsg);
-      setTimeout(() => void fetchConversations(), 300);
+      setTimeout(() => void fetchConversations(), APPLY_REFRESH_DELAY_MS);
     } catch (err) {
       console.error("joinGroup failed:", err);
     }
@@ -707,7 +663,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const quitGroup = useCallback(async (groupId: string) => {
     try {
       await im.group.quit(groupId);
-      setTimeout(() => void fetchConversations(), 300);
+      setTimeout(() => void fetchConversations(), APPLY_REFRESH_DELAY_MS);
     } catch (err) {
       console.error("quitGroup failed:", err);
     }

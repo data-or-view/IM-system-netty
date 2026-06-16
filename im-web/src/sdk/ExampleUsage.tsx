@@ -7,6 +7,7 @@
 import { useEffect } from "react";
 import { im } from "./im-sdk";
 import { useIM } from "./useIM";
+import { AUTH_TOKEN_KEY } from "@/config/storage-keys";
 
 // ── 1. 直接使用 SDK（非 React 场景） ──
 export async function sdkExample() {
@@ -17,7 +18,7 @@ export async function sdkExample() {
     // 登录（自动关联 seq → ack）
     const loginResp = await im.user.login("user_001");
     const token = loginResp.data as string;
-    localStorage.setItem("im_token", token);
+    localStorage.setItem(AUTH_TOKEN_KEY, token);
 
     // 搜索用户
     const users = await im.friend.search("alice");

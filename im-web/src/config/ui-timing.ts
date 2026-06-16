@@ -1,0 +1,4 @@
+export const APPLY_REFRESH_DELAY_MS = 300;
+export const SEARCH_LOADING_DELAY_MS = 500;
+export const CALL_DURATION_TICK_MS = 1_000;
+

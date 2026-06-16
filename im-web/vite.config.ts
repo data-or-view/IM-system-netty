@@ -4,6 +4,9 @@ import react from "@vitejs/plugin-react";
 declare const process: { cwd: () => string };
 
 const root = process.cwd();
+const DEV_WEB_PORT = 39073;
+const DEV_WS_TARGET = "ws://127.0.0.1:8083";
+const DEV_HTTP_TARGET = "http://127.0.0.1:8084";
 
 export default defineConfig({
   plugins: [react()],
@@ -15,16 +18,16 @@ export default defineConfig({
     },
   },
   server: {
-    port: 39073,
+    port: DEV_WEB_PORT,
     strictPort: true,
     host: "0.0.0.0",
     proxy: {
       "/ws": {
-        target: "ws://127.0.0.1:8083",
+        target: DEV_WS_TARGET,
         ws: true,
       },
       "/api": {
-        target: "http://127.0.0.1:8084",
+        target: DEV_HTTP_TARGET,
         changeOrigin: true,
       },
     },
