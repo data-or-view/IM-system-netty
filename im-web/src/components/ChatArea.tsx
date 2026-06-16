@@ -16,7 +16,7 @@ import { toast } from "sonner";
 import { im } from "@/sdk/im-sdk";
 import { MessageContentRenderer } from "@/components/MessageContentRenderer";
 import SystemMessagePanel from "@/components/SystemMessagePanel";
-import { ConversationType, MessageContentType, getErrorText, toMessageContentType, type GroupCallSession, type OutgoingMessageContentTypeValue, type SendMessageAck } from "im-sdk";
+import { ConversationType, MessageContentType, createClientMsgId, getErrorText, toMessageContentType, type GroupCallSession, type OutgoingMessageContentTypeValue, type SendMessageAck } from "im-sdk";
 import { useCall } from "@/components/call/CallProvider";
 
 export default function ChatArea() {
@@ -113,8 +113,15 @@ export default function ChatArea() {
 
     if (conv.conversationType === ConversationType.GROUP && conv.groupId) {
       // Group chat
-      im.message
-        .sendGroup(conv.groupId, "text", { text: content })
+      const groupId = conv.groupId;
+      const clientMsgId = createClientMsgId();
+      im.waitConnected()
+        .then(() => im.message.sendGroup({
+          groupId,
+          contentType: "text",
+          content: { text: content },
+          clientMsgId,
+        }))
         .then((m) => {
           appendSentMessage(m, "text", { text: content });
         })
@@ -147,8 +154,8 @@ export default function ChatArea() {
     dispatch({
       type: "APPEND_MESSAGE",
       conversationId: ack.conversationId,
-      msg: {
-        messageId: "",
+        msg: {
+        messageId: ack.messageId,
         seq: ack.seq ?? 0,
         senderUserId: state.userId || "",
         conversationId: ack.conversationId,
@@ -171,6 +178,7 @@ export default function ChatArea() {
     if (!conv) return;
     setUploading(true);
     try {
+      await im.waitConnected();
       const uploaded = await im.file.upload(file.name, file, file.type || "application/octet-stream");
       const fileContent = {
         uuid: uploaded.fileId,
@@ -180,9 +188,19 @@ export default function ChatArea() {
       };
 
       const msg = conv.conversationType === ConversationType.GROUP && conv.groupId
-        ? await im.message.sendGroup(conv.groupId, "file", fileContent)
+        ? await im.message.sendGroup({
+            groupId: conv.groupId,
+            contentType: "file",
+            content: fileContent,
+            clientMsgId: createClientMsgId(),
+          })
         : conv.userId
-          ? await im.message.send({ toUserId: conv.userId, contentType: "file", content: fileContent })
+          ? await im.message.send({
+              toUserId: conv.userId,
+              contentType: "file",
+              content: fileContent,
+              clientMsgId: createClientMsgId(),
+            })
           : null;
 
       if (msg) {

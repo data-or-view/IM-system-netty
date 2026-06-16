@@ -1,4 +1,4 @@
-import { IMError, OP, PlatformID, type FileUploadResult, type PlatformIDValue, type RegisterResult, type UserInfo, type WSResponse } from "../types.js";
+import { IMConfigError, IMProtocolError, OP, PlatformID, type FileUploadResult, type PlatformIDValue, type RegisterResult, type UserInfo, type WSResponse } from "../types.js";
 import type { WsTransport } from "../transport/ws.js";
 import { type HttpAPI, requireHttp } from "./http-api.js";
 
@@ -81,12 +81,12 @@ export class UserAPI {
   /** 上传头像并更新当前登录用户的 faceUrl。 */
   async updateAvatar(file: Uint8Array | Blob, fileName = "avatar"): Promise<UserInfo> {
     if (!this.uploadAvatarFile) {
-      throw new IMError(-1, "Avatar upload requires httpUrl");
+      throw new IMConfigError("Avatar upload requires httpUrl");
     }
     const mimeType = file instanceof Blob && file.type ? file.type : "application/octet-stream";
     const uploaded = await this.uploadAvatarFile(fileName, file, mimeType);
     if (!uploaded.fileUrl) {
-      throw new IMError(-1, "Avatar upload did not return fileUrl");
+      throw new IMProtocolError("Avatar upload did not return fileUrl");
     }
     return this.updateProfile({ faceUrl: uploaded.fileUrl });
   }

@@ -64,19 +64,8 @@ function AuthGate() {
       connectingRef.current = true;
       setConnecting(true);
       setStatusMsg("连接中...");
-      im.connect();
-      const waitConnected = () =>
-        new Promise<void>((resolve) => {
-          if (im.state === "connected") return resolve();
-          const unsub = im.on("connectionStateChanged", (s) => {
-            if (s === "connected") { unsub(); resolve(); }
-          });
-        });
-      const timeoutPromise = new Promise<void>((_, reject) => {
-        setTimeout(() => reject(new Error("连接超时")), 5000);
-      });
       try {
-        await Promise.race([waitConnected(), timeoutPromise]);
+        await im.ready();
         setStatusMsg("登录中...");
         await storeLogin(userId, password);
         setStatusMsg("");
@@ -96,19 +85,8 @@ function AuthGate() {
       connectingRef.current = true;
       setConnecting(true);
       setStatusMsg("注册中...");
-      im.connect();
-      const waitConnected = () =>
-        new Promise<void>((resolve) => {
-          if (im.state === "connected") return resolve();
-          const unsub = im.on("connectionStateChanged", (s) => {
-            if (s === "connected") { unsub(); resolve(); }
-          });
-        });
-      const timeoutPromise = new Promise<void>((_, reject) => {
-        setTimeout(() => reject(new Error("连接超时")), 5000);
-      });
       try {
-        await Promise.race([waitConnected(), timeoutPromise]);
+        await im.ready();
         setStatusMsg("注册中...");
         const generatedUserId = await storeRegister(params);
         setStatusMsg(`注册成功，你的用户 ID：${generatedUserId}`);

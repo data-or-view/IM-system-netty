@@ -1,4 +1,4 @@
-import { IMError } from "../types.js";
+import { IMConfigError } from "../types.js";
 
 export type HttpAPI = {
   get<T>(path: string, query?: Record<string, unknown>): Promise<T>;
@@ -6,8 +6,8 @@ export type HttpAPI = {
 };
 
 const missingHttpTransport: HttpAPI = {
-  get: () => Promise.reject(new IMError(-1, "HTTP API requires httpUrl")),
-  post: () => Promise.reject(new IMError(-1, "HTTP API requires httpUrl")),
+  get: () => Promise.reject(new IMConfigError("HTTP API requires httpUrl")),
+  post: () => Promise.reject(new IMConfigError("HTTP API requires httpUrl")),
 };
 
 export function requireHttp(transport?: HttpAPI): HttpAPI {

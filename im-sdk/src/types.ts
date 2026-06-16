@@ -1,81 +1,16 @@
+import type { IMError } from "./errors.js";
+import type { Message, OutgoingMessageContentTypeValue } from "./models/message.js";
+
 // ── Connection Events ──
+
+export * from "./errors.js";
+export { OP, PUSH_OP } from "./protocol/ops.js";
+export type { OpValue } from "./protocol/ops.js";
+export * from "./models/message.js";
 
 export type ConnectionState = "disconnected" | "connecting" | "connected" | "reconnecting";
 
 // ── Protocol ──
-
-/** 业务操作名映射（对应后端 Operation 枚举的 opName） */
-export const OP = {
-  // User
-  USER_REGISTER: "user.register",
-  USER_ME: "user.me",
-  USER_INFO: "user.info",
-  USER_SEARCH: "user.search",
-  USER_UPDATE: "user.update",
-  // Friend
-  FRIEND_APPLY: "friend.apply",
-  FRIEND_APPROVE: "friend.approve",
-  FRIEND_REMOVE: "friend.remove",
-  FRIEND_LIST: "friend.list",
-  FRIEND_BLACK: "friend.black",
-  FRIEND_UNBLACK: "friend.unblack",
-  FRIEND_BLACKLIST: "friend.blacklist",
-  FRIEND_APPLY_SENT: "friend.get_sent_apply_list",
-  FRIEND_APPLY_DETAIL: "friend.get_apply_detail",
-  FRIEND_APPLY_UNHANDLED_COUNT: "friend.get_unhandled_apply_count",
-  // Group
-  GROUP_CREATE: "group.create",
-  GROUP_JOIN: "group.join",
-  GROUP_QUIT: "group.quit",
-  GROUP_KICK: "group.kick",
-  GROUP_DISBAND: "group.disband",
-  GROUP_INFO_UPDATE: "group.info.update",
-  GROUP_INFO: "group.info",
-  GROUP_LIST: "group.list",
-  GROUP_SEARCH: "group.search",
-  GROUP_MEMBERS: "group.members",
-  GROUP_MUTE_ALL: "group.mute_all",
-  GROUP_APPLY_LIST: "group.apply.list",
-  GROUP_APPLY_UNHANDLED_COUNT: "group.apply.unhandled.count",
-  GROUP_APPLY_APPROVE: "group.apply.approve",
-  // Conversation
-  CONVERSATION_LIST: "conversation.list",
-  CONVERSATION_SET: "conversation.set",
-  CONVERSATION_READ: "conversation.read",
-  // Message
-  CHAT_PULL: "chat.pull",
-  CHAT_SEQ: "chat.seq",
-  CHAT_SYNC: "chat.sync",
-  CHAT_SEARCH: "chat.search",
-  CHAT_SEND: "chat.send",
-  CHAT_SEND_GROUP: "chat.send.group",
-  CHAT_REVOKE: "msg_revoke",
-  // File
-  FILE_UPLOAD: "file.upload",
-  FILE_UPLOAD_SIGN: "file.upload.sign",
-  FILE_UPLOAD_COMPLETE: "file.upload.complete",
-  FILE_DOWNLOAD_SIGN: "file.download.sign",
-  FILE_MULTIPART_INIT: "file.multipart.init",
-  FILE_MULTIPART_PART_SIGN: "file.multipart.part.sign",
-  FILE_MULTIPART_UPLOAD: "file.multipart.upload",
-  FILE_MULTIPART_COMPLETE: "file.multipart.complete",
-  FILE_MULTIPART_ABORT: "file.multipart.abort",
-  // Auth
-  LOGIN: "login",
-  REGISTER: "register",
-  HEARTBEAT: "heartbeat",
-} as const;
-
-export type OpValue = (typeof OP)[keyof typeof OP];
-
-/** 后端推送的 op 类型 */
-export const PUSH_OP = {
-  MESSAGE: "message",
-  FRIEND_APPLY: "friend.apply",
-  GROUP_APPLY: "group.apply",
-  SYSTEM_MESSAGE: "system.message",
-  MESSAGE_REVOKED: "msg_revoke",
-} as const;
 
 // ── Request / Response ──
 
@@ -294,6 +229,17 @@ export interface SystemMessageInboxItem extends SystemMessageSummary {
   archived?: boolean;
 }
 
+export interface SyncCursor {
+  conversationId: string;
+  lastSeq: number;
+}
+
+export interface ReconnectSyncResult {
+  conversationId: string;
+  messages: Message[];
+  maxSeq: number;
+}
+
 export interface SystemUnreadCount {
   count: number;
   byChannel?: Record<string, number>;
@@ -322,323 +268,6 @@ export interface ConversationReadResult {
   unreadCount: number;
 }
 
-// ── Message ──
-
-export interface Message {
-  messageId: string;
-  sequenceId: number;
-  timestamp: number;
-  fromUserId: string;
-  toUserId?: string;
-  groupId?: string;
-  conversationId: string;
-  contentType: number;
-  content: string;
-  messageSeq: number;
-  status: number;
-}
-
-export const MessageContentType = {
-  TEXT: 1,
-  FILE: 2,
-  IMAGE: 3,
-  SYSTEM: 4,
-  SIGNAL: 5,
-  VOICE: 6,
-  VIDEO: 7,
-  LOCATION: 8,
-  AT_TEXT: 9,
-  QUOTE: 10,
-  CUSTOM: 11,
-  REVOKED: 101,
-} as const;
-
-export type MessageContentTypeValue = (typeof MessageContentType)[keyof typeof MessageContentType];
-
-export const OutgoingMessageContentType = {
-  TEXT: "text",
-  FILE: "file",
-  IMAGE: "image",
-  SYSTEM: "system",
-  SIGNAL: "signal",
-  VOICE: "voice",
-  VIDEO: "video",
-  LOCATION: "location",
-  AT_TEXT: "at_text",
-  QUOTE: "quote",
-  CUSTOM: "custom",
-} as const;
-
-export type OutgoingMessageContentTypeValue =
-  (typeof OutgoingMessageContentType)[keyof typeof OutgoingMessageContentType];
-
-export function toMessageContentType(contentType: OutgoingMessageContentTypeValue): MessageContentTypeValue {
-  switch (contentType) {
-    case OutgoingMessageContentType.TEXT:
-      return MessageContentType.TEXT;
-    case OutgoingMessageContentType.FILE:
-      return MessageContentType.FILE;
-    case OutgoingMessageContentType.IMAGE:
-      return MessageContentType.IMAGE;
-    case OutgoingMessageContentType.SYSTEM:
-      return MessageContentType.SYSTEM;
-    case OutgoingMessageContentType.SIGNAL:
-      return MessageContentType.SIGNAL;
-    case OutgoingMessageContentType.VOICE:
-      return MessageContentType.VOICE;
-    case OutgoingMessageContentType.VIDEO:
-      return MessageContentType.VIDEO;
-    case OutgoingMessageContentType.LOCATION:
-      return MessageContentType.LOCATION;
-    case OutgoingMessageContentType.AT_TEXT:
-      return MessageContentType.AT_TEXT;
-    case OutgoingMessageContentType.QUOTE:
-      return MessageContentType.QUOTE;
-    case OutgoingMessageContentType.CUSTOM:
-      return MessageContentType.CUSTOM;
-  }
-}
-
-export interface TextContent {
-  text: string;
-}
-
-export interface FileContent {
-  uuid?: string;
-  fileName: string;
-  fileSize: number;
-  url: string;
-}
-
-export interface PictureInfo {
-  uuid?: string;
-  type?: string;
-  fileSize?: number;
-  width?: number;
-  height?: number;
-  url: string;
-}
-
-export interface ImageContent {
-  sourcePicture: PictureInfo;
-  bigPicture?: PictureInfo;
-  snapshotPicture?: PictureInfo;
-}
-
-export interface SystemContent {
-  systemType?: string;
-  message?: string;
-}
-
-export interface SignalingContent {
-  action?: SignalingActionName | number | unknown;
-  _act?: SignalingActionCode;
-  callType?: "voice" | "video";
-  roomId?: string;
-  _room?: string;
-  token?: string;
-  _token?: string;
-  sdp?: string;
-  _sdp?: string;
-  ice?: string;
-  _ice?: string;
-  duration?: number;
-}
-
-export const SignalingAction = {
-  INVITE: "INVITE",
-  CALLING: "CALLING",
-  ACCEPT: "ACCEPT",
-  REJECT: "REJECT",
-  CANCEL: "CANCEL",
-  HANGUP: "HANGUP",
-  ICE: "ICE",
-  TIMEOUT: "TIMEOUT",
-} as const;
-
-export type SignalingActionName = (typeof SignalingAction)[keyof typeof SignalingAction];
-export type SignalingActionCode = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
-
-export const SignalingActionCodeMap: Record<SignalingActionName, SignalingActionCode> = {
-  INVITE: 1,
-  CALLING: 2,
-  ACCEPT: 3,
-  REJECT: 4,
-  CANCEL: 5,
-  HANGUP: 6,
-  ICE: 7,
-  TIMEOUT: 8,
-};
-
-const SIGNALING_ACTION_BY_CODE: Record<number, SignalingActionName> = {
-  1: SignalingAction.INVITE,
-  2: SignalingAction.CALLING,
-  3: SignalingAction.ACCEPT,
-  4: SignalingAction.REJECT,
-  5: SignalingAction.CANCEL,
-  6: SignalingAction.HANGUP,
-  7: SignalingAction.ICE,
-  8: SignalingAction.TIMEOUT,
-};
-
-export interface NormalizedSignalingContent {
-  action: SignalingActionName;
-  callType?: "voice" | "video";
-  roomId?: string;
-  token?: string;
-  sdp?: string;
-  ice?: string;
-  duration?: number;
-}
-
-export interface StartCallAck {
-  status: "CALLING";
-  roomId: string;
-  token: string;
-  sfuEndpoint: string;
-}
-
-export interface GroupCallSession {
-  active: boolean;
-  ended?: boolean;
-  groupId?: string;
-  roomId?: string;
-  callType?: "voice" | "video";
-  initiatorUserId?: string;
-  sfuEndpoint?: string;
-  startedAt?: number;
-  participantCount?: number;
-}
-
-export interface GroupCallJoinResult extends GroupCallSession {
-  token: string;
-  sfuEndpoint: string;
-  roomId: string;
-}
-
-export interface VoiceContent {
-  uuid?: string;
-  url: string;
-  fileSize?: number;
-  duration: number;
-}
-
-export interface VideoContent {
-  videoUrl: string;
-  videoUuid?: string;
-  videoType?: string;
-  videoSize?: number;
-  duration?: number;
-  snapshotUrl?: string;
-  snapshotWidth?: number;
-  snapshotHeight?: number;
-  snapshotSize?: number;
-}
-
-export interface LocationContent {
-  description?: string;
-  longitude: number;
-  latitude: number;
-}
-
-export interface AtTextContent {
-  text: string;
-  atUserList: string[];
-}
-
-export interface QuoteContent {
-  text: string;
-  quotedMessageId: string;
-  quotedSenderId?: string;
-  quotedContent?: string;
-}
-
-export interface CustomContent {
-  data: string;
-  description?: string;
-  extension?: string;
-}
-
-export type ParsedMessageContent =
-  | { type: typeof MessageContentType.TEXT; content: TextContent; raw: string }
-  | { type: typeof MessageContentType.FILE; content: FileContent; raw: string }
-  | { type: typeof MessageContentType.IMAGE; content: ImageContent; raw: string }
-  | { type: typeof MessageContentType.SYSTEM; content: SystemContent; raw: string }
-  | { type: typeof MessageContentType.SIGNAL; content: SignalingContent; raw: string }
-  | { type: typeof MessageContentType.VOICE; content: VoiceContent; raw: string }
-  | { type: typeof MessageContentType.VIDEO; content: VideoContent; raw: string }
-  | { type: typeof MessageContentType.LOCATION; content: LocationContent; raw: string }
-  | { type: typeof MessageContentType.AT_TEXT; content: AtTextContent; raw: string }
-  | { type: typeof MessageContentType.QUOTE; content: QuoteContent; raw: string }
-  | { type: typeof MessageContentType.CUSTOM; content: CustomContent; raw: string }
-  | { type: typeof MessageContentType.REVOKED; content: TextContent; raw: string }
-  | { type: "unknown"; content: unknown; raw: string; contentType?: number };
-
-export function parseMessageContent(message: Pick<Message, "contentType" | "content">): ParsedMessageContent {
-  const raw = message.content ?? "";
-  const parsed = parseContentPayload(raw);
-  switch (message.contentType) {
-    case MessageContentType.TEXT:
-      return { type: MessageContentType.TEXT, content: toTextContent(parsed, raw), raw };
-    case MessageContentType.FILE:
-      if (isObject(parsed)) return { type: MessageContentType.FILE, content: parsed as unknown as FileContent, raw };
-      break;
-    case MessageContentType.IMAGE:
-      if (isObject(parsed)) return { type: MessageContentType.IMAGE, content: parsed as unknown as ImageContent, raw };
-      break;
-    case MessageContentType.SYSTEM:
-      return {
-        type: MessageContentType.SYSTEM,
-        content: isObject(parsed) ? parsed as unknown as SystemContent : { message: raw },
-        raw,
-      };
-    case MessageContentType.SIGNAL:
-      if (isObject(parsed)) return { type: MessageContentType.SIGNAL, content: parsed as unknown as SignalingContent, raw };
-      break;
-    case MessageContentType.VOICE:
-      if (isObject(parsed)) return { type: MessageContentType.VOICE, content: parsed as unknown as VoiceContent, raw };
-      break;
-    case MessageContentType.VIDEO:
-      if (isObject(parsed)) return { type: MessageContentType.VIDEO, content: parsed as unknown as VideoContent, raw };
-      break;
-    case MessageContentType.LOCATION:
-      if (isObject(parsed)) return { type: MessageContentType.LOCATION, content: parsed as unknown as LocationContent, raw };
-      break;
-    case MessageContentType.AT_TEXT:
-      if (isObject(parsed)) return { type: MessageContentType.AT_TEXT, content: parsed as unknown as AtTextContent, raw };
-      break;
-    case MessageContentType.QUOTE:
-      if (isObject(parsed)) return { type: MessageContentType.QUOTE, content: parsed as unknown as QuoteContent, raw };
-      break;
-    case MessageContentType.CUSTOM:
-      if (isObject(parsed)) return { type: MessageContentType.CUSTOM, content: parsed as unknown as CustomContent, raw };
-      break;
-    case MessageContentType.REVOKED:
-      return { type: MessageContentType.REVOKED, content: { text: raw || "消息已撤回" }, raw };
-  }
-  return { type: "unknown", content: parsed, raw, contentType: message.contentType };
-}
-
-function parseContentPayload(raw: string): unknown {
-  if (!raw) return "";
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return raw;
-  }
-}
-
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function toTextContent(value: unknown, raw: string): TextContent {
-  if (isObject(value) && typeof value.text === "string") {
-    return { text: value.text };
-  }
-  return { text: raw };
-}
-
 export interface SearchMessagesParam {
   conversationId: string;
   keyword: string;
@@ -659,9 +288,18 @@ export interface SendMessageParam {
   toUserId: string;
   contentType: OutgoingMessageContentTypeValue;
   content: unknown;
+  clientMsgId?: string;
+}
+
+export interface SendGroupMessageParam {
+  groupId: string;
+  contentType: OutgoingMessageContentTypeValue;
+  content: unknown;
+  clientMsgId?: string;
 }
 
 export interface SendMessageAck {
+  messageId: string;
   status: string;
   conversationId: string;
   seq: number;
@@ -676,28 +314,7 @@ export interface RevokeMessageParam {
 export interface StartCallParam {
   toUserId: string;
   callType: "voice" | "video";
-}
-
-export function normalizeSignalingContent(content: SignalingContent): NormalizedSignalingContent | null {
-  const rawAction = content.action ?? content._act;
-  let action: SignalingActionName | undefined;
-  if (typeof rawAction === "string") {
-    action = rawAction.toUpperCase() as SignalingActionName;
-  } else if (typeof rawAction === "number") {
-    action = SIGNALING_ACTION_BY_CODE[rawAction];
-  }
-  if (!action || !(action in SignalingActionCodeMap)) {
-    return null;
-  }
-  return {
-    action,
-    callType: content.callType === "video" ? "video" : content.callType === "voice" ? "voice" : undefined,
-    roomId: content.roomId ?? content._room,
-    token: content.token ?? content._token,
-    sdp: content.sdp ?? content._sdp,
-    ice: content.ice ?? content._ice,
-    duration: content.duration,
-  };
+  clientMsgId?: string;
 }
 
 // ── 事件类型 ──
@@ -709,6 +326,8 @@ export interface IMEvents {
   message: (msg: Message) => void;
   /** 收到一批新消息。Web 端优先订阅这个事件，避免高频推送触发渲染风暴。 */
   messageBatch: (msgs: Message[]) => void;
+  /** 重连后补偿同步到的新消息。 */
+  reconnectSync: (result: ReconnectSyncResult) => void;
   /** 收到好友申请 */
   friendRequest: (apply: FriendApply) => void;
   /** 收到加群申请或审批结果 */
@@ -747,6 +366,12 @@ export interface IMOptions {
   messageBatchInterval?: number;
   /** 单批消息数量上限（默认 100）。超过后立即刷出，避免缓冲过大。 */
   messageBatchSize?: number;
+  /** ready()/waitConnected() 默认等待连接超时 ms（默认 10000）。 */
+  connectTimeout?: number;
+  /** 重连成功后是否按宿主提供的游标补消息（默认 false）。 */
+  syncOnReconnect?: boolean;
+  /** 返回需要在重连后补偿同步的会话游标。 */
+  syncConversations?: () => SyncCursor[] | Promise<SyncCursor[]>;
 }
 
 export interface TokenPair {
@@ -768,39 +393,4 @@ export interface FileUploadResult {
   fileName: string;
   mimeType: string;
   fileSize?: string | number;
-}
-
-// ── Error ──
-
-export class IMError extends Error {
-  constructor(
-    public code: number,
-    message: string,
-    public detail?: string,
-  ) {
-    super(message);
-    this.name = "IMError";
-  }
-}
-
-export function getErrorText(err: unknown, fallback = "未知错误"): string {
-  if (err instanceof IMError) {
-    return err.detail || err.message || fallback;
-  }
-  if (err instanceof Error && err.message) {
-    return err.message;
-  }
-  if (typeof err === "object" && err !== null) {
-    const maybe = err as { detail?: unknown; message?: unknown };
-    if (typeof maybe.detail === "string" && maybe.detail.trim()) return maybe.detail;
-    if (typeof maybe.message === "string" && maybe.message.trim()) return maybe.message;
-  }
-  return fallback;
-}
-
-export class IMTimeoutError extends IMError {
-  constructor(public override code: number = -1) {
-    super(code, "Request timeout");
-    this.name = "IMTimeoutError";
-  }
 }

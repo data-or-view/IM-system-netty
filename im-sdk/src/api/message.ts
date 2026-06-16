@@ -2,10 +2,10 @@ import {
   OP,
   SignalingAction,
   type Message,
-  type OutgoingMessageContentTypeValue,
   type RevokeMessageParam,
   type SearchMessagesParam,
   type SearchMessagesResult,
+  type SendGroupMessageParam,
   type SendMessageAck,
   type SendMessageParam,
   type StartCallAck,
@@ -13,6 +13,8 @@ import {
 } from "../types.js";
 import type { WsTransport } from "../transport/ws.js";
 import { type HttpAPI, requireHttp } from "./http-api.js";
+import { createClientMsgId } from "../protocol/client-msg-id.js";
+import { parseSendMessageAck } from "../protocol/parsers.js";
 
 /**
  * 消息模块 API。
@@ -24,24 +26,27 @@ export class MessageAPI {
   send(param: SendMessageParam): Promise<SendMessageAck> {
     return this.wsTransport.request(OP.CHAT_SEND, {
       toUserId: param.toUserId,
+      clientMsgId: param.clientMsgId ?? createClientMsgId(),
       _ct: param.contentType,
       content: param.content,
-    }).then((r) => r.data as SendMessageAck);
+    }).then((r) => parseSendMessageAck(r.data));
   }
 
   /** 发送群聊消息：实时链路，走 WS */
-  sendGroup(groupId: string, contentType: OutgoingMessageContentTypeValue, content: unknown): Promise<SendMessageAck> {
+  sendGroup(param: SendGroupMessageParam): Promise<SendMessageAck> {
     return this.wsTransport.request(OP.CHAT_SEND_GROUP, {
-      groupId,
-      _ct: contentType,
-      content,
-    }).then((r) => r.data as SendMessageAck);
+      groupId: param.groupId,
+      clientMsgId: param.clientMsgId ?? createClientMsgId(),
+      _ct: param.contentType,
+      content: param.content,
+    }).then((r) => parseSendMessageAck(r.data));
   }
 
   /** 发起语音/视频通话：信令走 WS，媒体走服务端返回的 SFU。 */
   startCall(param: StartCallParam): Promise<StartCallAck> {
     return this.wsTransport.request(OP.CHAT_SEND, {
       toUserId: param.toUserId,
+      clientMsgId: param.clientMsgId ?? createClientMsgId(),
       _ct: "signal",
       content: {
         action: SignalingAction.INVITE,

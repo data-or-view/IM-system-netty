@@ -35,9 +35,10 @@ import { EventBus } from "./event-bus.js";
 
 // ── 导出类型 ──
 export * from "./types.js";
+export { createClientMsgId } from "./protocol/client-msg-id.js";
 
 // ── 内部导入 ──
-import { type ConnectionState, type IMEvents, type IMOptions, type Message, type FriendApply, type GroupApply, type SystemMessageSummary, type MessageRevoked, type TokenPair, type WSPush, IMError, PUSH_OP } from "./types.js";
+import { type ConnectionState, type IMEvents, type IMOptions, type Message, type FriendApply, type GroupApply, type ReconnectSyncResult, type SystemMessageSummary, type MessageRevoked, type TokenPair, type WSPush, IMError, IMTimeoutError, PUSH_OP, toIMError } from "./types.js";
 import { WsTransport } from "./transport/ws.js";
 import { HttpTransport } from "./transport/http.js";
 import { UserAPI } from "./api/user.js";
@@ -77,12 +78,16 @@ export class IMSDK {
   private messageBatchTimer: ReturnType<typeof setTimeout> | null = null;
   private messageBatchInterval: number;
   private messageBatchSize: number;
+  private connectTimeout: number;
+  private wasConnected = false;
+  private reconnectSyncRunning = false;
 
   constructor(private opts: IMOptions) {
     this.getToken = () => this.accessToken ?? opts.getToken?.() ?? null;
     this.getRefreshToken = () => this.refreshTokenValue ?? opts.getRefreshToken?.() ?? null;
     this.messageBatchInterval = opts.messageBatchInterval ?? 16;
     this.messageBatchSize = Math.max(1, opts.messageBatchSize ?? 100);
+    this.connectTimeout = opts.connectTimeout ?? 10000;
     this.transport = new WsTransport({
       getToken: this.getToken,
       getRefreshToken: this.getRefreshToken,
@@ -127,7 +132,11 @@ export class IMSDK {
 
     // 转发连接状态变化
     this.transport.bus.on("stateChanged", (state: unknown) => {
-      this.bus.emit("connectionStateChanged", state as ConnectionState);
+      const connectionState = state as ConnectionState;
+      this.bus.emit("connectionStateChanged", connectionState);
+      if (connectionState === "connected") {
+        void this.handleConnected();
+      }
     });
 
     // 转发错误
@@ -183,9 +192,39 @@ export class IMSDK {
     this.transport.connect(this.opts.wsUrl);
   }
 
+  /** 主动连接并等待 WebSocket 可用。 */
+  ready(timeoutMs = this.connectTimeout): Promise<void> {
+    this.connect();
+    return this.waitConnected(timeoutMs);
+  }
+
+  /** 等待 WebSocket 进入 connected 状态，不主动发起连接。 */
+  waitConnected(timeoutMs = this.connectTimeout): Promise<void> {
+    if (this.transport.connected) {
+      return Promise.resolve();
+    }
+    return new Promise((resolve, reject) => {
+      const unsubscribe = this.on("connectionStateChanged", (state) => {
+        if (state === "connected") {
+          cleanup();
+          resolve();
+        }
+      });
+      const timer = setTimeout(() => {
+        cleanup();
+        reject(new IMTimeoutError(-1, "Wait connected timeout"));
+      }, timeoutMs);
+      const cleanup = () => {
+        clearTimeout(timer);
+        unsubscribe();
+      };
+    });
+  }
+
   /** 断开连接 */
   disconnect(): void {
     this.flushMessageBatch();
+    this.wasConnected = false;
     this.transport.disconnect();
   }
 
@@ -204,6 +243,44 @@ export class IMSDK {
     this.opts.onTokenChanged?.(current);
     this.bus.emit("tokenChanged", current);
     return current;
+  }
+
+  private async handleConnected(): Promise<void> {
+    const isReconnect = this.wasConnected;
+    this.wasConnected = true;
+    if (!isReconnect || !this.opts.syncOnReconnect || this.reconnectSyncRunning) {
+      return;
+    }
+    this.reconnectSyncRunning = true;
+    try {
+      await this.syncAfterReconnect();
+    } catch (err) {
+      this.bus.emit("error", toIMError(err, "Reconnect sync failed"));
+    } finally {
+      this.reconnectSyncRunning = false;
+    }
+  }
+
+  private async syncAfterReconnect(): Promise<void> {
+    const cursors = await this.opts.syncConversations?.();
+    if (!cursors?.length) {
+      return;
+    }
+    for (const cursor of cursors) {
+      const syncs = await this.message.sync(cursor.conversationId, cursor.lastSeq);
+      for (const result of syncs) {
+        this.emitReconnectSync(result);
+      }
+    }
+  }
+
+  private emitReconnectSync(result: ReconnectSyncResult): void {
+    if (result.messages.length > 0) {
+      for (const msg of result.messages) {
+        this.emitMessage(msg);
+      }
+    }
+    this.bus.emit("reconnectSync", result);
   }
 
   private emitMessage(msg: Message): void {

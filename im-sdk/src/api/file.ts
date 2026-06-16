@@ -1,4 +1,4 @@
-import { IMError, type FileUploadResult } from "../types.js";
+import { IMConfigError, type FileUploadResult } from "../types.js";
 import type { HttpTransport } from "../transport/http.js";
 
 export interface MultipartInitResult {
@@ -63,6 +63,6 @@ export class FileAPI {
   }
 
   private missingHttp<T>(): Promise<T> {
-    return Promise.reject(new IMError(-1, "File API requires httpUrl"));
+    return Promise.reject(new IMConfigError("File API requires httpUrl"));
   }
 }

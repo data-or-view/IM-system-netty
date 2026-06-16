@@ -1,4 +1,4 @@
-import { IMError, type FileUploadResult } from "../types.js";
+import { IMHttpError, IMServerError, type FileUploadResult } from "../types.js";
 
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
@@ -95,7 +95,7 @@ export class HttpTransport {
       body: this.toRequestBody(body),
     });
     if (!response.ok) {
-      throw new IMError(response.status, `Object storage upload failed: HTTP ${response.status}`);
+      throw new IMHttpError(response.status, `Object storage upload failed: HTTP ${response.status}`);
     }
     return response;
   }
@@ -110,19 +110,19 @@ export class HttpTransport {
     try {
       payload = await resp.json();
     } catch (err) {
-      throw new IMError(resp.status || -1, "Invalid HTTP response", err instanceof Error ? err.message : String(err));
+      throw new IMHttpError(resp.status || -1, "Invalid HTTP response", err instanceof Error ? err.message : String(err));
     }
 
     if (this.isEnvelope(payload)) {
       if (!resp.ok || payload.code !== 0) {
-        throw new IMError(payload.imCode || payload.code || resp.status || -1, payload.msg || payload.message || "HTTP request failed", payload.detail);
+        throw this.envelopeError(resp, payload);
       }
       return payload.data as T;
     }
 
     if (!resp.ok) {
       const error = payload as Partial<HttpEnvelope<T>> | null;
-      throw new IMError(error?.imCode || error?.code || resp.status || -1, error?.msg || error?.message || "HTTP request failed", error?.detail);
+      throw new IMHttpError(error?.imCode || error?.code || resp.status || -1, error?.msg || error?.message || "HTTP request failed", error?.detail);
     }
     return payload as T;
   }
@@ -131,6 +131,15 @@ export class HttpTransport {
     if (!payload || typeof payload !== "object") return false;
     const candidate = payload as Partial<HttpEnvelope<T>>;
     return typeof candidate.code === "number" && ("data" in candidate || "msg" in candidate || "message" in candidate || "imCode" in candidate);
+  }
+
+  private envelopeError<T>(resp: Response, payload: HttpEnvelope<T>): IMHttpError | IMServerError {
+    const code = payload.imCode || payload.code || resp.status || -1;
+    const message = payload.msg || payload.message || "HTTP request failed";
+    if (!resp.ok) {
+      return new IMHttpError(code, message, payload.detail);
+    }
+    return new IMServerError(code, message, payload.detail);
   }
 
   private authHeader(): Record<string, string> {

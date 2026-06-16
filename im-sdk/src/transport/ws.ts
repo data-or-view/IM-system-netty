@@ -1,4 +1,4 @@
-import { type ConnectionState, type TokenPair, type WSResponse, type WSPush, PUSH_OP, IMError } from "../types.js";
+import { type ConnectionState, type TokenPair, type WSResponse, type WSPush, PUSH_OP, IMConnectionError, IMError } from "../types.js";
 import { EventBus } from "../event-bus.js";
 import { RequestManager } from "../protocol/request-manager.js";
 
@@ -64,6 +64,10 @@ export class WsTransport {
     return this._state;
   }
 
+  get connected(): boolean {
+    return this.ws?.readyState === WebSocket.OPEN && this._state === "connected";
+  }
+
   get requestManager(): RequestManager {
     return this.reqManager;
   }
@@ -99,7 +103,7 @@ export class WsTransport {
 
   send(frame: Record<string, unknown>): boolean {
     if (this.ws?.readyState !== WebSocket.OPEN) {
-      this.emitError(new IMError(-1, "Not connected"));
+      this.emitError(new IMConnectionError());
       return false;
     }
     // 自动注入 Authorization token
@@ -120,7 +124,7 @@ export class WsTransport {
   request(op: string, params: Record<string, unknown> = {}): Promise<WSResponse> {
     const { frame, promise } = this.reqManager.createRequest(op, params);
     if (!this.send(frame)) {
-      this.reqManager.reject(frame.seq, new IMError(-1, "Not connected"));
+      this.reqManager.reject(frame.seq, new IMConnectionError());
     }
     return promise;
   }

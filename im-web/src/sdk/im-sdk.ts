@@ -16,6 +16,25 @@ const DEFAULT_HTTP_URL = "http://127.0.0.1:8084";
 export const im = createIM({
   wsUrl: import.meta.env.VITE_WS_URL ?? DEFAULT_WS_URL,
   httpUrl: import.meta.env.VITE_HTTP_URL ?? DEFAULT_HTTP_URL,
+  connectTimeout: 5000,
+  syncOnReconnect: true,
+  syncConversations: () => {
+    const raw = sessionStorage.getItem("im_sync_cursors");
+    if (!raw) return [];
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (!Array.isArray(parsed)) return [];
+      return parsed
+        .filter((item): item is { conversationId: string; lastSeq: number } =>
+          typeof item === "object" &&
+          item !== null &&
+          typeof (item as { conversationId?: unknown }).conversationId === "string" &&
+          typeof (item as { lastSeq?: unknown }).lastSeq === "number",
+        );
+    } catch {
+      return [];
+    }
+  },
   getToken: () => localStorage.getItem("im_token"),
   getRefreshToken: () => localStorage.getItem("im_refreshToken"),
   onTokenChanged: (tokens) => {

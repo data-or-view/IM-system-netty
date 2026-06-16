@@ -14,7 +14,7 @@ import React, {
   type ReactNode,
 } from "react";
 import { im } from "@/sdk/im-sdk";
-import { ApplyHandleResult, ConversationType, toMessageContentType } from "im-sdk";
+import { ApplyHandleResult, ConversationType, createClientMsgId, toMessageContentType } from "im-sdk";
 import type { Message as SDKMessage, OutgoingMessageContentTypeValue, SendMessageAck, SystemMessageInboxItem, SystemMessageSummary, TokenPair, UserInfo as SDKUserInfo, FriendInfo as SDKFriendInfo, FriendApply as SDKFriendApply, GroupInfo as SDKGroupInfo, GroupMember as SDKGroupMember, GroupApply as SDKGroupApply, Conversation as SDKConversation } from "im-sdk";
 
 // ========== 类型（与 SDK 类型一致） ==========
@@ -41,6 +41,7 @@ export interface Message {
 // ========== State ==========
 
 const MAX_MESSAGES_PER_CONVERSATION = 500;
+const SYNC_CURSORS_KEY = "im_sync_cursors";
 export const SYSTEM_CONVERSATION_ID = "__system_notifications__";
 export const FRIEND_APPLY_UPDATED_EVENT = "im:friend-apply-updated";
 export const GROUP_APPLY_UPDATED_EVENT = "im:group-apply-updated";
@@ -385,7 +386,7 @@ function toOptimisticMessage(
   content: unknown,
 ): Message {
   return {
-    messageId: "",
+    messageId: ack.messageId,
     seq: ack.seq ?? 0,
     senderUserId: currentUserId,
     conversationId: ack.conversationId,
@@ -394,6 +395,16 @@ function toOptimisticMessage(
     createTime: Date.now(),
     status: 1,
   };
+}
+
+function persistSyncCursors(messages: Record<string, Message[]>): void {
+  const cursors = Object.entries(messages)
+    .map(([conversationId, list]) => ({
+      conversationId,
+      lastSeq: list.reduce((max, msg) => Math.max(max, msg.seq || 0), 0),
+    }))
+    .filter((cursor) => cursor.lastSeq > 0);
+  sessionStorage.setItem(SYNC_CURSORS_KEY, JSON.stringify(cursors));
 }
 
 function groupInfoFromConversation(list: Conversation[]): GroupInfo[] {
@@ -596,6 +607,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [markConversationRead, state.activeConversationId, state.messages]);
 
   useEffect(() => {
+    persistSyncCursors(state.messages);
+  }, [state.messages]);
+
+  useEffect(() => {
     if (state.token && state.userId && im.state === "disconnected") {
       im.connect();
     }
@@ -626,7 +641,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const sendMessage = useCallback(async (toUserId: string, content: string) => {
     const messageContent = { text: content };
-    const ack = await im.message.send({ toUserId, contentType: "text", content: messageContent });
+    const clientMsgId = createClientMsgId();
+    await im.waitConnected();
+    const ack = await im.message.send({ toUserId, contentType: "text", content: messageContent, clientMsgId });
     const currentUserId = localStorage.getItem("im_userId") || state.userId || "";
     const msg = toOptimisticMessage(ack, currentUserId, "text", messageContent);
     if (msg.conversationId) {

@@ -1,4 +1,4 @@
-import { type WSRequest, type WSResponse, IMError, IMTimeoutError } from "../types.js";
+import { type WSRequest, type WSResponse, IMConnectionError, IMError, IMServerError, IMTimeoutError } from "../types.js";
 
 /**
  * 请求管理器 —— 通过 seq 关联请求和响应，提供 Promise API。
@@ -48,7 +48,7 @@ export class RequestManager {
     this.pending.delete(resp.seq);
 
     if (resp.code !== 0) {
-      pending.reject(new IMError(resp.code, resp.msg || "Unknown error", resp.detail));
+      pending.reject(new IMServerError(resp.code, resp.msg || "Unknown error", resp.detail));
     } else {
       pending.resolve(resp);
     }
@@ -70,7 +70,7 @@ export class RequestManager {
   rejectAll(reason: string): void {
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timer);
-      pending.reject(new IMError(-1, reason));
+      pending.reject(new IMConnectionError(reason));
     }
     this.pending.clear();
   }

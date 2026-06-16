@@ -9,7 +9,17 @@ import { SystemAPI } from "../dist/api/system.js";
 import { createIM } from "../dist/index.js";
 import { HttpTransport } from "../dist/transport/http.js";
 import { WsTransport } from "../dist/transport/ws.js";
-import { IMError, MessageContentType, normalizeSignalingContent, parseMessageContent } from "../dist/types.js";
+import {
+  createClientMsgId,
+  IMConfigError,
+  IMConnectionError,
+  IMError,
+  IMProtocolError,
+  IMTimeoutError,
+  MessageContentType,
+  normalizeSignalingContent,
+  parseMessageContent,
+} from "../dist/index.js";
 
 function createCapturingTransport(responseData) {
   const sentFrames = [];
@@ -173,7 +183,7 @@ function createHttpCapture(responseData) {
 }
 
 test("resource APIs use HTTP while realtime message send stays on websocket and returns send ack", async () => {
-  const sendAck = { status: "RECEIVED", conversationId: "single_u1_u2", seq: 7 };
+  const sendAck = { messageId: "client-generated-1", status: "RECEIVED", conversationId: "single_u1_u2", seq: 7 };
   const { transport: ws, sentFrames } = createCapturingTransport(sendAck);
   const { http, calls } = createHttpCapture((method, path, payload) => {
     if (path === "/api/group/list") return { groups: [{ groupId: "g1", groupName: "研发群" }] };
@@ -194,7 +204,53 @@ test("resource APIs use HTTP while realtime message send stays on websocket and 
   assert.equal(sentFrames[0].op, "chat.send");
   assert.equal(sentFrames[0]._ct, "text");
   assert.deepEqual(sentFrames[0].content, { text: "hi" });
+  assert.match(sentFrames[0].clientMsgId, /^c_[0-9a-z]+_[0-9a-z]{8}$/);
   assert.equal(sentFrames[0].contentType, undefined);
+});
+
+test("message.send preserves caller supplied clientMsgId", async () => {
+  const sendAck = { messageId: "client-fixed-1", status: "RECEIVED", conversationId: "single_u1_u2", seq: 7 };
+  const { transport: ws, sentFrames } = createCapturingTransport(sendAck);
+  const messageApi = new MessageAPI(ws);
+
+  await messageApi.send({
+    toUserId: "u2",
+    contentType: "text",
+    content: { text: "hi" },
+    clientMsgId: "client-fixed-1",
+  });
+
+  assert.equal(sentFrames[0].clientMsgId, "client-fixed-1");
+});
+
+test("message.sendGroup sends a clientMsgId", async () => {
+  const sendAck = { messageId: "group-fixed-1", status: "RECEIVED", conversationId: "group_g1", seq: 7 };
+  const { transport: ws, sentFrames } = createCapturingTransport(sendAck);
+  const messageApi = new MessageAPI(ws);
+
+  await messageApi.sendGroup({
+    groupId: "g1",
+    contentType: "text",
+    content: { text: "hi" },
+    clientMsgId: "group-fixed-1",
+  });
+
+  assert.equal(sentFrames[0].op, "chat.send.group");
+  assert.equal(sentFrames[0].clientMsgId, "group-fixed-1");
+});
+
+test("message.send rejects malformed send ack at SDK boundary", async () => {
+  const { transport: ws } = createCapturingTransport({ status: "RECEIVED", conversationId: "c1" });
+  const messageApi = new MessageAPI(ws);
+
+  await assert.rejects(
+    () => messageApi.send({ toUserId: "u2", contentType: "text", content: { text: "hi" } }),
+    (err) => err instanceof IMProtocolError && err.message.includes("Invalid send message ack"),
+  );
+});
+
+test("createClientMsgId is exported from the SDK public entry", () => {
+  assert.match(createClientMsgId(), /^c_[0-9a-z]+_[0-9a-z]{8}$/);
 });
 
 test("message.startCall sends invite signaling over websocket", async () => {
@@ -213,6 +269,7 @@ test("message.startCall sends invite signaling over websocket", async () => {
   assert.equal(sentFrames[0].op, "chat.send");
   assert.equal(sentFrames[0].toUserId, "u2");
   assert.equal(sentFrames[0]._ct, "signal");
+  assert.match(sentFrames[0].clientMsgId, /^c_[0-9a-z]+_[0-9a-z]{8}$/);
   assert.deepEqual(sentFrames[0].content, {
     action: "INVITE",
     callType: "video",
@@ -238,7 +295,7 @@ test("HTTP resource APIs require httpUrl instead of falling back to websocket", 
 
   await assert.rejects(
     () => im.group.list(),
-    (err) => err instanceof IMError && err.message === "HTTP API requires httpUrl",
+    (err) => err instanceof IMConfigError && err.message === "HTTP API requires httpUrl",
   );
 });
 
@@ -343,7 +400,7 @@ test("transport.request rejects immediately when websocket is not connected", as
 
   await assert.rejects(
     () => transport.request("chat.seq", { conversationId: "c1" }),
-    (err) => err instanceof IMError && err.message === "Not connected",
+    (err) => err instanceof IMConnectionError && err.message === "Not connected",
   );
   assert.equal(transport.requestManager.pendingCount, 0);
 });
@@ -354,7 +411,7 @@ test("realtime login rejects immediately when websocket is not connected", async
 
   await assert.rejects(
     () => api.login("u1"),
-    (err) => err instanceof IMError && err.message === "Not connected",
+    (err) => err instanceof IMConnectionError && err.message === "Not connected",
   );
   assert.equal(transport.requestManager.pendingCount, 0);
 });
@@ -478,6 +535,71 @@ test("sdk.clearTokens removes in-memory tokens and emits empty tokenChanged", as
   assert.equal(im.refreshToken, null);
   assert.deepEqual(changed.at(-1), {});
   assert.deepEqual(emitted.at(-1), {});
+});
+
+test("sdk.waitConnected resolves on connected state and times out with typed error", async () => {
+  const im = createIM({ wsUrl: "ws://example.test/ws", connectTimeout: 20 });
+  const waiting = im.waitConnected(100);
+
+  im.transport.bus.emit("stateChanged", "connected");
+
+  await waiting;
+
+  const disconnected = createIM({ wsUrl: "ws://example.test/ws", connectTimeout: 5 });
+  await assert.rejects(
+    () => disconnected.waitConnected(),
+    (err) => err instanceof IMTimeoutError && err.message === "Wait connected timeout",
+  );
+});
+
+test("sdk.ready starts transport connect before waiting", async () => {
+  const im = createIM({ wsUrl: "ws://example.test/ws", connectTimeout: 100 });
+  let connectedUrl = "";
+  im.transport.connect = (url) => {
+    connectedUrl = url;
+    setTimeout(() => im.transport.bus.emit("stateChanged", "connected"), 0);
+  };
+
+  await im.ready();
+
+  assert.equal(connectedUrl, "ws://example.test/ws");
+});
+
+test("sdk syncs missed messages after reconnect using host cursors", async () => {
+  const im = createIM({
+    wsUrl: "ws://example.test/ws",
+    httpUrl: "http://example.test",
+    syncOnReconnect: true,
+    syncConversations: () => [{ conversationId: "c1", lastSeq: 2 }],
+  });
+  const synced = [];
+  const batches = [];
+  im.on("reconnectSync", (result) => synced.push(result));
+  im.on("messageBatch", (msgs) => batches.push(msgs));
+  im.message.sync = async (conversationId, lastSeq) => [{
+    conversationId,
+    maxSeq: lastSeq + 1,
+    messages: [{
+      messageId: "m3",
+      conversationId,
+      messageSeq: lastSeq + 1,
+      sequenceId: lastSeq + 1,
+      timestamp: 100,
+      fromUserId: "u2",
+      contentType: 1,
+      content: JSON.stringify({ text: "missed" }),
+      status: 1,
+    }],
+  }];
+
+  im.transport.bus.emit("stateChanged", "connected");
+  im.transport.bus.emit("stateChanged", "disconnected");
+  im.transport.bus.emit("stateChanged", "connected");
+  await new Promise((resolve) => setTimeout(resolve, 25));
+
+  assert.equal(synced.length, 1);
+  assert.equal(synced[0].conversationId, "c1");
+  assert.deepEqual(batches[0].map((m) => m.messageId), ["m3"]);
 });
 
 test("transport heartbeat carries refresh token and updates token from heartbeat ack", async () => {
@@ -738,7 +860,7 @@ test("sdk file api requires httpUrl instead of falling back to websocket", async
 
   await assert.rejects(
     () => im.file.upload("a.txt", new Uint8Array([1]), "text/plain"),
-    (err) => err instanceof IMError && err.message === "File API requires httpUrl",
+    (err) => err instanceof IMConfigError && err.message === "File API requires httpUrl",
   );
 });
 
