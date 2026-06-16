@@ -6,6 +6,7 @@ import com.im.common.enums.ImErrorCode;
 import com.im.common.exception.InfrastructureException;
 import com.im.common.retry.RetryExecutor;
 import com.im.common.retry.RetryStrategies;
+import com.im.core.observability.MessageObservability;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -34,7 +35,9 @@ public final class ReliableMessageHandler implements IMessageQueue.MessageHandle
     @Override
     public void onMessage(Message msg) {
         String key = idempotencyKey(msg);
-        try {
+        try (MessageObservability.Scope ignored = MessageObservability.bind(topic, msg)) {
+            log.debug("Consuming message with reliability guard: fields={}, idempotencyKey={}",
+                    MessageObservability.fields(topic, msg), key);
             idempotency.execute(key, () -> {
                 retryExecutor.execute(RetryStrategies.MQ_CONSUME, () -> {
                     delegate.onMessage(msg);
@@ -50,8 +53,11 @@ public final class ReliableMessageHandler implements IMessageQueue.MessageHandle
     private void recordDeadLetter(Message msg, RuntimeException processingFailure) {
         try {
             failureStore.recordFailure(topic, msg, processingFailure);
-            log.error("Message consumed to dead-letter table: topic={}, messageId={}",
-                    topic, msg.getMessageId(), processingFailure);
+            log.error("Message consumed to dead-letter table: fields={}, causeType={}, causeMessage={}",
+                    MessageObservability.fields(topic, msg),
+                    processingFailure.getClass().getName(),
+                    processingFailure.getMessage(),
+                    processingFailure);
         } catch (RuntimeException recordFailure) {
             throw new InfrastructureException(ImErrorCode.INTERNAL_ERROR,
                     "consumer failed and dead-letter record failed", recordFailure);

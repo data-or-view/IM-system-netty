@@ -6,6 +6,7 @@ import com.im.api.IMessageQueue;
 import com.im.api.Message;
 import com.im.common.lifecycle.Lifecycle;
 import com.im.common.util.IMExecutors;
+import com.im.core.observability.MessageObservability;
 import com.im.core.serialization.jackson.ObjectMapperProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -84,23 +85,36 @@ public final class MessageFailureCompensator implements Lifecycle {
     }
 
     private void replayOne(MessageSendFailureRecord record) {
+        Message message = null;
         try {
-            Message message = deserialize(record.payloadJson());
+            message = deserialize(record.payloadJson());
+            try (MessageObservability.Scope ignored = MessageObservability.bindDeadLetter(record.topic(), record.id(), message)) {
+                log.info("Replaying failed message: id={}, attempt={}, fields={}",
+                        record.id(), record.attemptCount() + 1, MessageObservability.fields(record.topic(), message));
+            }
             messageQueue.publishAsync(record.topic(), message);
             failureStore.markReplayed(record.id());
-            log.info("Replayed failed message: id={}, topic={}, messageId={}",
-                    record.id(), record.topic(), record.messageId());
+            try (MessageObservability.Scope ignored = MessageObservability.bindDeadLetter(record.topic(), record.id(), message)) {
+                log.info("Replayed failed message: id={}, fields={}",
+                        record.id(), MessageObservability.fields(record.topic(), message));
+            }
         } catch (Exception e) {
             int nextAttempt = record.attemptCount() + 1;
             if (nextAttempt >= maxAttempts) {
                 failureStore.markFailed(record.id(), nextAttempt, e);
-                log.error("Failed message replay exhausted: id={}, topic={}, messageId={}",
-                        record.id(), record.topic(), record.messageId(), e);
+                try (MessageObservability.Scope ignored = MessageObservability.bindDeadLetter(record.topic(), record.id(), message)) {
+                    log.error("Failed message replay exhausted: id={}, attempt={}, fields={}, causeType={}, causeMessage={}",
+                            record.id(), nextAttempt, MessageObservability.fields(record.topic(), message),
+                            e.getClass().getName(), e.getMessage(), e);
+                }
                 return;
             }
             failureStore.markRetryLater(record.id(), nextAttempt, nextRetryAt(nextAttempt), e);
-            log.warn("Failed message replay postponed: id={}, topic={}, attempt={}",
-                    record.id(), record.topic(), nextAttempt);
+            try (MessageObservability.Scope ignored = MessageObservability.bindDeadLetter(record.topic(), record.id(), message)) {
+                log.warn("Failed message replay postponed: id={}, attempt={}, fields={}, causeType={}, causeMessage={}",
+                        record.id(), nextAttempt, MessageObservability.fields(record.topic(), message),
+                        e.getClass().getName(), e.getMessage());
+            }
         }
     }
 
