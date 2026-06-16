@@ -41,6 +41,45 @@ check_port() {
   return 0
 }
 
+is_running() {
+  local pid="$1"
+  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
+}
+
+pids_for_port() {
+  local port="$1"
+  lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true
+}
+
+port_is_owned_by_pid() {
+  local port="$1"
+  local pid="$2"
+  pids_for_port "$port" | grep -qx "$pid"
+}
+
+node_is_stable() {
+  local pid="$1"
+  local ws_port="$2"
+  local http_port="$3"
+  local checks=0
+  while [ "$checks" -lt 3 ]; do
+    if ! is_running "$pid"; then
+      return 1
+    fi
+    if ! port_is_owned_by_pid "$ws_port" "$pid"; then
+      return 1
+    fi
+    if ! port_is_owned_by_pid "$http_port" "$pid"; then
+      return 1
+    fi
+    sleep 1
+    checks=$((checks + 1))
+  done
+  is_running "$pid" \
+    && port_is_owned_by_pid "$ws_port" "$pid" \
+    && port_is_owned_by_pid "$http_port" "$pid"
+}
+
 for port in $NODE1_WS_PORT $NODE1_HTTP_PORT $NODE2_WS_PORT $NODE2_HTTP_PORT; do
   check_port "$port" || exit 1
 done
@@ -103,7 +142,7 @@ start_node() {
 
   # Use the im.env=macbook-dev profile (has Redis/MySQL config), override ports and node ID
   # shellcheck disable=SC2086
-  java \
+  nohup java \
     "-Dim.env=macbook-dev" \
     "-Dim.node.id=$node_id" \
     "-Dim.ws.port=$ws_port" \
@@ -114,9 +153,10 @@ start_node() {
     "-Dim.redis.password=$REDIS_PASSWORD" \
     $extra_opts \
     -jar "$JAR" \
-    > "$log_file" 2>&1 &
+    > "$log_file" 2>&1 < /dev/null &
 
   local pid=$!
+  disown "$pid" 2>/dev/null || true
   echo "$pid" > "$pid_file"
   echo "[OK] $node_id started with PID $pid (log: ${log_file/#$HOME/~})"
 }
@@ -134,6 +174,13 @@ all_ok=true
 for node_id in "$NODE1_ID" "$NODE2_ID"; do
   pid_file="$PID_DIR/${node_id}.pid"
   log_file="$LOG_DIR/${node_id}.log"
+  if [ "$node_id" = "$NODE1_ID" ]; then
+    ws_port="$NODE1_WS_PORT"
+    http_port="$NODE1_HTTP_PORT"
+  else
+    ws_port="$NODE2_WS_PORT"
+    http_port="$NODE2_HTTP_PORT"
+  fi
 
   if [ ! -f "$pid_file" ]; then
     echo "[FAIL] $node_id — no PID file found"
@@ -153,10 +200,12 @@ for node_id in "$NODE1_ID" "$NODE2_ID"; do
   waited=0
   while [ $waited -lt 20 ]; do
     if grep -q "Server ready" "$log_file" 2>/dev/null; then
-      echo "[READY] $node_id (PID $pid) — Server ready"
-      break
+      if node_is_stable "$pid" "$ws_port" "$http_port"; then
+        echo "[READY] $node_id (PID $pid) — Server ready, ports listening"
+        break
+      fi
     fi
-    if ! kill -0 "$pid" 2>/dev/null; then
+    if ! is_running "$pid"; then
       echo "[FAIL] $node_id (PID $pid) — process died during startup. Last 20 lines of log:"
       tail -20 "$log_file"
       all_ok=false

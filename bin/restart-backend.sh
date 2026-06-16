@@ -217,17 +217,46 @@ wait_until_ready() {
     fi
 
     if grep -q "Server ready" "$LOG_FILE" 2>/dev/null; then
-      echo "[READY] Backend is ready. PID=$pid, WS=$WS_PORT, HTTP=$HTTP_PORT"
-      echo "[LOG] tail -f ${LOG_FILE/#$HOME/~}"
-      return 0
+      if backend_is_stable "$pid"; then
+        echo "[READY] Backend is ready. PID=$pid, WS=$WS_PORT, HTTP=$HTTP_PORT"
+        echo "[LOG] tail -f ${LOG_FILE/#$HOME/~}"
+        return 0
+      fi
     fi
 
     sleep 1
     waited=$((waited + 1))
   done
 
-  echo "[WARN] Backend is running but readiness log was not found in ${READY_TIMEOUT}s. PID=$pid"
-  echo "[LOG] tail -f ${LOG_FILE/#$HOME/~}"
+  echo "[FAIL] Backend did not become ready in ${READY_TIMEOUT}s. Last 40 log lines:" >&2
+  tail -40 "$LOG_FILE" >&2 || true
+  exit 1
+}
+
+ports_are_listening() {
+  if [ "$WS_PORT" != "disabled" ] && ! pids_for_port "$WS_PORT" | grep -qx "$1"; then
+    return 1
+  fi
+  if [ "$HTTP_PORT" != "disabled" ] && ! pids_for_port "$HTTP_PORT" | grep -qx "$1"; then
+    return 1
+  fi
+  return 0
+}
+
+backend_is_stable() {
+  local pid="$1"
+  local checks=0
+  while [ "$checks" -lt 3 ]; do
+    if ! is_running "$pid"; then
+      return 1
+    fi
+    if ! ports_are_listening "$pid"; then
+      return 1
+    fi
+    sleep 1
+    checks=$((checks + 1))
+  done
+  is_running "$pid" && ports_are_listening "$pid"
 }
 
 start_backend() {
@@ -247,8 +276,9 @@ start_backend() {
 
   : > "$LOG_FILE"
   echo "[START] Background backend: env=$IM_ENV_VALUE node=$NODE_ID WS=$WS_PORT HTTP=$HTTP_PORT"
-  nohup "${java_cmd[@]}" > "$LOG_FILE" 2>&1 &
+  nohup "${java_cmd[@]}" > "$LOG_FILE" 2>&1 < /dev/null &
   local pid=$!
+  disown "$pid" 2>/dev/null || true
   echo "$pid" > "$PID_FILE"
   wait_until_ready "$pid"
 }
