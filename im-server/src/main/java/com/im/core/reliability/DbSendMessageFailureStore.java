@@ -4,6 +4,8 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.im.api.Message;
+import com.im.api.MessageSendFailureRecord;
+import com.im.api.SendMessageFailureStore;
 import com.im.common.exception.DatabasePersistenceException;
 import com.im.core.db.MyBatisPlusFactory;
 import com.im.core.db.entity.MessageSendFailureEntity;

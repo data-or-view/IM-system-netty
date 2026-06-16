@@ -11,7 +11,7 @@ import com.im.api.UserInformation;
 import com.im.core.db.MyBatisPlusFactory;
 import com.im.core.db.entity.UserEntity;
 import com.im.core.db.mapper.UserMapper;
-import com.im.core.auth.IUserCredentialStore;
+import com.im.api.IUserCredentialStore;
 import com.im.common.retry.RetryConfig;
 import com.im.common.retry.RetryExecutor;
 import com.im.common.retry.RetryStrategies;

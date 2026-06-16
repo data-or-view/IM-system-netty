@@ -1,6 +1,4 @@
-package com.im.core.group;
-
-import com.im.api.GroupApply;
+package com.im.api;
 
 import java.util.List;
 

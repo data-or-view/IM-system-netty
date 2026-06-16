@@ -2,6 +2,8 @@ package com.im.core.reliability;
 
 import com.im.api.IMessageQueue;
 import com.im.api.Message;
+import com.im.api.SendMessageFailureStore;
+import com.im.api.SendMessageIdempotency;
 import com.im.common.enums.ImErrorCode;
 import com.im.common.exception.InfrastructureException;
 import com.im.common.retry.RetryExecutor;

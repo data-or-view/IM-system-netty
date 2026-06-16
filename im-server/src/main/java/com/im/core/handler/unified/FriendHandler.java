@@ -11,7 +11,7 @@ import com.im.common.exception.ValidationException;
 import com.im.common.exception.ForbiddenException;
 import com.im.common.exception.NotFoundException;
 import com.im.common.validation.Preconditions;
-import com.im.core.friend.FriendApplyNotifier;
+import com.im.api.FriendApplyNotifier;
 
 import java.util.List;
 import java.util.Map;

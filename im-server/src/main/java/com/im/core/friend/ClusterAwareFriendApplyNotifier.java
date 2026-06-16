@@ -3,6 +3,7 @@ package com.im.core.friend;
 import com.im.api.ClusterCommand;
 import com.im.api.ClusterMessage;
 import com.im.api.FriendApply;
+import com.im.api.FriendApplyNotifier;
 import com.im.api.IClusterMessageBus;
 import com.im.api.IConnectionSession;
 import com.im.api.IRouteTable;

@@ -2,6 +2,8 @@ package com.im.core.reliability;
 
 import com.im.api.IMessageQueue;
 import com.im.api.Message;
+import com.im.api.SendMessageFailureStore;
+import com.im.api.SendMessageIdempotency;
 import com.im.common.retry.RetryConfig;
 import com.im.common.retry.RetryExecutor;
 import org.junit.jupiter.api.Test;

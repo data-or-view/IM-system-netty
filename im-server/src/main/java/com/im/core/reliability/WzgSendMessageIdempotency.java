@@ -1,5 +1,6 @@
 package com.im.core.reliability;
 
+import com.im.api.SendMessageIdempotency;
 import com.im.common.enums.ImErrorCode;
 import com.im.common.exception.ConflictException;
 import com.im.common.exception.InfrastructureException;

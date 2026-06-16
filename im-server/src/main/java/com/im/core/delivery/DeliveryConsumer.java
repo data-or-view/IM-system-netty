@@ -5,8 +5,8 @@ import com.im.common.lifecycle.Lifecycle;
 import com.im.common.retry.RetryExecutor;
 import com.im.common.util.IMExecutors;
 import com.im.core.reliability.ReliableMessageHandler;
-import com.im.core.reliability.SendMessageFailureStore;
-import com.im.core.reliability.SendMessageIdempotency;
+import com.im.api.SendMessageFailureStore;
+import com.im.api.SendMessageIdempotency;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

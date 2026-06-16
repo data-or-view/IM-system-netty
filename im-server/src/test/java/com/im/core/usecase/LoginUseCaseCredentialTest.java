@@ -8,8 +8,8 @@ import com.im.api.Message;
 import com.im.api.UserInformation;
 import com.im.common.exception.UnauthorizedException;
 import com.im.common.exception.ValidationException;
-import com.im.core.auth.IPasswordHasher;
-import com.im.core.auth.IUserCredentialStore;
+import com.im.api.IPasswordHasher;
+import com.im.api.IUserCredentialStore;
 import com.im.core.auth.Pbkdf2PasswordHasher;
 import org.junit.jupiter.api.Test;
 

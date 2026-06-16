@@ -1,4 +1,4 @@
-package com.im.core.group;
+package com.im.api;
 
 public interface GroupSystemMessagePublisher {
 

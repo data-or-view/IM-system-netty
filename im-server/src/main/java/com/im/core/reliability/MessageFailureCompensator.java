@@ -4,6 +4,8 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.im.api.IMessageQueue;
 import com.im.api.Message;
+import com.im.api.MessageSendFailureRecord;
+import com.im.api.SendMessageFailureStore;
 import com.im.common.lifecycle.Lifecycle;
 import com.im.common.util.IMExecutors;
 import com.im.core.observability.MessageObservability;

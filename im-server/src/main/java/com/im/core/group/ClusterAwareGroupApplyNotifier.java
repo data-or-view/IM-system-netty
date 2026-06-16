@@ -3,6 +3,7 @@ package com.im.core.group;
 import com.im.api.ClusterCommand;
 import com.im.api.ClusterMessage;
 import com.im.api.GroupApply;
+import com.im.api.GroupApplyNotifier;
 import com.im.api.IClusterMessageBus;
 import com.im.api.IConnectionSession;
 import com.im.api.IRouteTable;

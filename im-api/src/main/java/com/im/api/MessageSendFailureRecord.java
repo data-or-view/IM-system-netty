@@ -1,4 +1,4 @@
-package com.im.core.reliability;
+package com.im.api;
 
 public record MessageSendFailureRecord(long id,
                                        String topic,

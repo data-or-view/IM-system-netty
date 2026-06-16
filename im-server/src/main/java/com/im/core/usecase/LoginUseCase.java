@@ -4,8 +4,8 @@ import com.im.api.IAuthenticator;
 import com.im.api.IMessageStore;
 import com.im.api.Message;
 import com.im.common.exception.UnauthorizedException;
-import com.im.core.auth.IPasswordHasher;
-import com.im.core.auth.IUserCredentialStore;
+import com.im.api.IPasswordHasher;
+import com.im.api.IUserCredentialStore;
 
 import java.time.Duration;
 import java.util.List;

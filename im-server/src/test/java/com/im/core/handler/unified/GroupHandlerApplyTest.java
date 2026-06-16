@@ -16,7 +16,7 @@ import com.im.api.Conversation;
 import com.im.api.Message;
 import com.im.common.exception.ForbiddenException;
 import com.im.common.exception.NotFoundException;
-import com.im.core.group.GroupSystemMessagePublisher;
+import com.im.api.GroupSystemMessagePublisher;
 import com.im.core.system.SystemMessagePublishUseCase;
 import org.junit.jupiter.api.Test;
 

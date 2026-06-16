@@ -4,8 +4,8 @@ import com.im.api.IUserManager;
 import com.im.common.exception.ImException;
 import com.im.common.exception.ValidationException;
 import com.im.common.id.IdGenerator;
-import com.im.core.auth.IPasswordHasher;
-import com.im.core.auth.IUserCredentialStore;
+import com.im.api.IPasswordHasher;
+import com.im.api.IUserCredentialStore;
 
 public class RegisterUseCase {
 

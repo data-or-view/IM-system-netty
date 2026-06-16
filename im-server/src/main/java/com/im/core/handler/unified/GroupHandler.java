@@ -17,8 +17,8 @@ import com.im.common.exception.ValidationException;
 import com.im.common.exception.NotFoundException;
 import com.im.common.id.IdGenerator;
 import com.im.common.validation.Preconditions;
-import com.im.core.group.GroupApplyNotifier;
-import com.im.core.group.GroupSystemMessagePublisher;
+import com.im.api.GroupApplyNotifier;
+import com.im.api.GroupSystemMessagePublisher;
 import com.im.core.system.SystemMessagePublishUseCase;
 import com.im.api.SystemMessage;
 

@@ -17,8 +17,8 @@ import com.im.common.retry.RetryExecutor;
 import com.im.common.retry.RetryStrategies;
 import com.im.core.handler.ContentSerializer;
 import com.im.core.handler.WebhookService;
-import com.im.core.reliability.SendMessageFailureStore;
-import com.im.core.reliability.SendMessageIdempotency;
+import com.im.api.SendMessageFailureStore;
+import com.im.api.SendMessageIdempotency;
 import com.im.core.retry.FailsafeRetryExecutor;
 
 import java.nio.charset.StandardCharsets;

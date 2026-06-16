@@ -1,6 +1,4 @@
-package com.im.core.reliability;
-
-import com.im.api.Message;
+package com.im.api;
 
 import java.util.List;
 

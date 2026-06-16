@@ -3,6 +3,8 @@ package com.im.core.reliability;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.im.api.IMessageQueue;
 import com.im.api.Message;
+import com.im.api.MessageSendFailureRecord;
+import com.im.api.SendMessageFailureStore;
 import com.im.core.serialization.jackson.ObjectMapperProvider;
 import org.junit.jupiter.api.Test;
 

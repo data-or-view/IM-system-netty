@@ -1,5 +1,6 @@
 package com.im.core.auth;
 
+import com.im.api.IPasswordHasher;
 import com.im.common.exception.ConfigurationException;
 
 import javax.crypto.SecretKeyFactory;

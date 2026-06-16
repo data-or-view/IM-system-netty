@@ -1,5 +1,6 @@
 package com.im.core.group;
 
+import com.im.api.GroupSystemMessagePublisher;
 import com.im.api.content.SystemContent;
 import com.im.core.usecase.SendMessageUseCase;
 

@@ -1,6 +1,4 @@
-package com.im.core.friend;
-
-import com.im.api.FriendApply;
+package com.im.api;
 
 public interface FriendApplyNotifier {
 
