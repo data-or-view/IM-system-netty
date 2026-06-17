@@ -1,5 +1,5 @@
 import { Suspense, lazy, useState, useCallback, useEffect, useRef } from "react";
-import { Routes, Route, Navigate } from "react-router-dom";
+import { Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { Toaster } from "sonner";
 import { StoreProvider, useStore } from "@/store/store";
 import { im } from "@/sdk/im-sdk";
@@ -26,6 +26,8 @@ function PageFallback() {
 
 function AuthGate() {
   const { state, login: storeLogin, register: storeRegister, logout } = useStore();
+  const location = useLocation();
+  const navigate = useNavigate();
   const [connecting, setConnecting] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(Boolean(state.token && state.userId));
   const [statusMsg, setStatusMsg] = useState("");
@@ -70,6 +72,10 @@ function AuthGate() {
     };
   }, [logout, state.token, state.userId]);
 
+  const redirectTarget = getRedirectTarget(location.search);
+  const currentPath = `${location.pathname}${location.search}${location.hash}`;
+  const isLoginRoute = location.pathname === "/login";
+
   const handleLogin = useCallback(
     async (userId: string, password?: string) => {
       if (connectingRef.current) return;
@@ -81,6 +87,7 @@ function AuthGate() {
         setStatusMsg("登录中...");
         await storeLogin(userId, password);
         setStatusMsg("");
+        navigate(redirectTarget, { replace: true });
       } catch {
         setStatusMsg("登录失败");
       } finally {
@@ -88,7 +95,7 @@ function AuthGate() {
         connectingRef.current = false;
       }
     },
-    [storeLogin]
+    [navigate, redirectTarget, storeLogin]
   );
 
   const handleRegister = useCallback(
@@ -102,6 +109,7 @@ function AuthGate() {
         setStatusMsg("注册中...");
         const generatedUserId = await storeRegister(params);
         setStatusMsg(`注册成功，你的用户 ID：${generatedUserId}`);
+        navigate(redirectTarget, { replace: true });
       } catch {
         setStatusMsg("注册失败");
       } finally {
@@ -109,7 +117,7 @@ function AuthGate() {
         connectingRef.current = false;
       }
     },
-    [storeRegister]
+    [navigate, redirectTarget, storeRegister]
   );
 
   if (checkingAuth) {
@@ -124,6 +132,9 @@ function AuthGate() {
   }
 
   if (!state.token || !state.userId) {
+    if (!isLoginRoute) {
+      return <Navigate to={`/login?redirect=${encodeURIComponent(currentPath)}`} replace />;
+    }
     return (
       <LoginPage
         onLogin={handleLogin}
@@ -132,6 +143,10 @@ function AuthGate() {
         statusMsg={statusMsg}
       />
     );
+  }
+
+  if (isLoginRoute) {
+    return <Navigate to={redirectTarget} replace />;
   }
 
   return (
@@ -152,6 +167,14 @@ function AuthGate() {
       </RouteErrorBoundary>
     </CallProvider>
   );
+}
+
+function getRedirectTarget(search: string): string {
+  const redirect = new URLSearchParams(search).get("redirect");
+  if (!redirect || !redirect.startsWith("/") || redirect.startsWith("//")) {
+    return "/chat";
+  }
+  return redirect;
 }
 
 export default function App() {

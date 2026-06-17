@@ -39,6 +39,7 @@ import { toast } from "sonner";
 import { im } from "@/sdk/im-sdk";
 import { useStore } from "@/store/store";
 import { DEV_LIVEKIT_URL } from "@/config/runtime";
+import { toOptimisticMessage } from "@/lib/messages";
 
 export type CallType = "voice" | "video";
 export type CallPhase = "idle" | "dialing" | "ringing" | "incoming" | "accepted" | "connectingMedia" | "connected" | "reconnecting" | "ending" | "ended";
@@ -164,7 +165,7 @@ const EMPTY_CALL: CallState = {
 const CallContext = createContext<CallContextValue | null>(null);
 
 export function CallProvider({ children }: { children: ReactNode }) {
-  const { state } = useStore();
+  const { state, dispatch } = useStore();
   const [call, setCall] = useState<CallState>(EMPTY_CALL);
   const callRef = useRef<CallState>(EMPTY_CALL);
   const roomRef = useRef<Room | null>(null);
@@ -430,10 +431,11 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const rejectCall = useCallback(async () => {
     const current = callRef.current;
     if (current.peer?.userId && current.roomId) {
-      await im.message.sendCallSignal(current.peer.userId, SignalingAction.REJECT, current.roomId).catch(() => undefined);
+      const ack = await im.message.sendCallSignal(current.peer.userId, SignalingAction.REJECT, current.roomId).catch(() => undefined);
+      appendLocalCallSignal(ack, SignalingAction.REJECT, current, state.userId, dispatch);
     }
     await resetCall();
-  }, [resetCall]);
+  }, [dispatch, resetCall, state.userId]);
 
   const endGroupCall = useCallback(async () => {
     const current = callRef.current;
@@ -451,10 +453,11 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const cancelCall = useCallback(async () => {
     const current = callRef.current;
     if (current.peer?.userId && current.roomId) {
-      await im.message.sendCallSignal(current.peer.userId, SignalingAction.CANCEL, current.roomId).catch(() => undefined);
+      const ack = await im.message.sendCallSignal(current.peer.userId, SignalingAction.CANCEL, current.roomId).catch(() => undefined);
+      appendLocalCallSignal(ack, SignalingAction.CANCEL, current, state.userId, dispatch);
     }
     await resetCall();
-  }, [resetCall]);
+  }, [dispatch, resetCall, state.userId]);
 
   const hangupCall = useCallback(async () => {
     const current = callRef.current;
@@ -463,10 +466,11 @@ export function CallProvider({ children }: { children: ReactNode }) {
     if (current.mode === "group" && current.group?.groupId) {
       await im.group.leaveCall(current.group.groupId).catch(() => undefined);
     } else if (current.peer?.userId && current.roomId) {
-      await im.message.sendCallSignal(current.peer.userId, SignalingAction.HANGUP, current.roomId, duration).catch(() => undefined);
+      const ack = await im.message.sendCallSignal(current.peer.userId, SignalingAction.HANGUP, current.roomId, duration).catch(() => undefined);
+      appendLocalCallSignal(ack, SignalingAction.HANGUP, current, state.userId, dispatch, duration);
     }
     await resetCall();
-  }, [resetCall]);
+  }, [dispatch, resetCall, state.userId]);
 
   const toggleMute = useCallback(async () => {
     const nextMuted = !callRef.current.muted;
@@ -574,6 +578,24 @@ export function CallProvider({ children }: { children: ReactNode }) {
   }), [acceptCall, call, cancelCall, endGroupCall, hangupCall, joinGroupCall, rejectCall, startCall, startGroupCall, toggleCamera, toggleMute]);
 
   return <CallContext.Provider value={value}>{children}</CallContext.Provider>;
+}
+
+function appendLocalCallSignal(
+  ack: Awaited<ReturnType<typeof im.message.sendCallSignal>> | undefined,
+  action: SignalingActionName,
+  call: CallState,
+  currentUserId: string | null,
+  dispatch: ReturnType<typeof useStore>["dispatch"],
+  duration?: number,
+) {
+  if (!ack) return;
+  const msg = toOptimisticMessage(ack, currentUserId || "", "signal", {
+    action,
+    roomId: call.roomId,
+    callType: call.callType,
+    ...(duration !== undefined ? { duration } : {}),
+  });
+  dispatch({ type: "APPEND_MESSAGE", conversationId: ack.conversationId, msg });
 }
 
 export function useCall() {

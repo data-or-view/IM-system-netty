@@ -11,14 +11,14 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
-import { MessageCircle, Send, Paperclip, MoreHorizontal, Undo2, Info, Phone, Video, PhoneOff } from "lucide-react";
+import { AlertCircle, MessageCircle, Send, Paperclip, MoreHorizontal, Undo2, Info, Phone, Video, PhoneOff } from "lucide-react";
 import { toast } from "sonner";
 import { im } from "@/sdk/im-sdk";
 import { MessageContentRenderer } from "@/components/MessageContentRenderer";
 import SystemMessagePanel from "@/components/SystemMessagePanel";
 import { ConversationType, MessageContentType, GroupMemberRole, createClientMsgId, getErrorText, groupMemberRoleRank, type GroupCallSession, type OutgoingMessageContentTypeValue, type SendMessageAck } from "im-sdk";
 import { useCall } from "@/components/call/CallProvider";
-import { messageRenderKey, toOptimisticMessage } from "@/lib/messages";
+import { messageRenderKey, toLocalFailedMessage, toLocalPendingMessage, toOptimisticMessage } from "@/lib/messages";
 
 export default function ChatArea() {
   const { state, fetchConversations, fetchGroupMembers, dispatch } = useStore();
@@ -47,7 +47,6 @@ export default function ChatArea() {
   useEffect(() => {
     if (isSystemConversation) return;
     if (!conv?.conversationId) return;
-    if (!conv.latestMsg && !conv.latestMsgSendTime && messages.length === 0) return;
     const loadHistory = async () => {
       try {
         const maxSeq = await im.message.seq(conv.conversationId);
@@ -141,29 +140,43 @@ export default function ChatArea() {
 
   const sendCurrentTextMessage = useCallback(async (content: string) => {
     if (!conv) return;
-    await im.waitConnected();
     const messageContent = { text: content };
     const clientMsgId = createClientMsgId();
-    const ack = conv.conversationType === ConversationType.GROUP && conv.groupId
-      ? await im.message.sendGroup({
-          groupId: conv.groupId,
-          contentType: "text",
-          content: messageContent,
-          clientMsgId,
-        })
-      : conv.userId
-        ? await im.message.send({
-            toUserId: conv.userId,
+    const pending = toLocalPendingMessage({
+      conversationId: conv.conversationId,
+      senderUserId: state.userId || "",
+      contentType: "text",
+      content: messageContent,
+      messageId: clientMsgId,
+    });
+    dispatch({ type: "APPEND_MESSAGE", conversationId: conv.conversationId, msg: pending });
+    try {
+      await im.waitConnected();
+      const ack = conv.conversationType === ConversationType.GROUP && conv.groupId
+        ? await im.message.sendGroup({
+            groupId: conv.groupId,
             contentType: "text",
             content: messageContent,
             clientMsgId,
           })
-        : null;
+        : conv.userId
+          ? await im.message.send({
+              toUserId: conv.userId,
+              contentType: "text",
+              content: messageContent,
+              clientMsgId,
+            })
+          : null;
 
-    if (ack) {
-      appendSentMessage(ack, "text", messageContent);
+      if (ack) {
+        appendSentMessage(ack, "text", messageContent);
+      }
+    } catch (err) {
+      const failed = toLocalFailedMessage(pending, getErrorText(err));
+      dispatch({ type: "APPEND_MESSAGE", conversationId: conv.conversationId, msg: failed });
+      throw err;
     }
-  }, [appendSentMessage, conv]);
+  }, [appendSentMessage, conv, dispatch, state.userId]);
 
   const handleSend = () => {
     if (!input.trim() || !conv || isSystemConversation) return;
@@ -171,8 +184,7 @@ export default function ChatArea() {
     setInput("");
 
     void sendCurrentTextMessage(content).catch((err) => {
-      toast(`发送失败：${getErrorText(err)}`);
-      setInput(content);
+      console.error("send message failed:", err);
     });
   };
 
@@ -474,9 +486,14 @@ export default function ChatArea() {
                         }`}
                       >
                         {formatMsgTime(msg.createTime)}
-                        {isMine && (msg.status === 0 ? " 发送中..." : msg.status === 1 ? " ✓" : " ✓✓")}
+                        {isMine && (msg.status === -1 ? " 发送失败" : msg.status === 0 ? " 发送中..." : msg.status === 1 ? " ✓" : " ✓✓")}
                       </div>
                     </div>
+                    {isMine && msg.status === -1 && (
+                      <span title={msg.errorText || "发送失败"} className="mb-2 text-red-500">
+                        <AlertCircle className="h-4 w-4 fill-red-500/10" />
+                      </span>
+                    )}
 
                     {/* Revoke button (own messages only) */}
                     {isMine && (

@@ -15,6 +15,7 @@ export interface ViewMessage {
   content: string;
   createTime: number;
   status: number;
+  errorText?: string;
 }
 
 export function toViewMessage(sdkMsg: SDKMessage): ViewMessage {
@@ -53,6 +54,34 @@ export function toOptimisticMessage(
   };
 }
 
+export function toLocalPendingMessage(input: {
+  conversationId: string;
+  senderUserId: string;
+  contentType: OutgoingMessageContentTypeValue | number;
+  content: unknown;
+  messageId?: string;
+  createTime?: number;
+}): ViewMessage {
+  return {
+    messageId: input.messageId ?? `local_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+    seq: 0,
+    senderUserId: input.senderUserId,
+    conversationId: input.conversationId,
+    contentType: typeof input.contentType === "number" ? input.contentType : toMessageContentType(input.contentType),
+    content: toOutgoingMessageContent(input.content),
+    createTime: input.createTime ?? Date.now(),
+    status: 0,
+  };
+}
+
+export function toLocalFailedMessage(message: ViewMessage, errorText: string): ViewMessage {
+  return {
+    ...message,
+    status: -1,
+    errorText,
+  };
+}
+
 export function messageRenderKey(msg: {
   messageId?: string;
   seq?: number;
@@ -64,4 +93,3 @@ export function messageRenderKey(msg: {
   if (msg.seq && msg.seq > 0) return `seq:${msg.seq}`;
   return `tmp:${msg.senderUserId || "unknown"}:${msg.createTime || 0}:${msg.content || ""}`;
 }
-
