@@ -78,9 +78,12 @@ export class IMSDK {
   private messageBatchTimer: ReturnType<typeof setTimeout> | null = null;
   private messageBatchInterval: number;
   private messageBatchSize: number;
+  private seenMessageKeys: string[] = [];
+  private seenMessageKeySet = new Set<string>();
   private connectTimeout: number;
   private wasConnected = false;
   private reconnectSyncRunning = false;
+  private readonly maxSeenMessageKeys = 1000;
 
   constructor(private opts: IMOptions) {
     this.getToken = () => this.accessToken ?? opts.getToken?.() ?? null;
@@ -285,6 +288,9 @@ export class IMSDK {
   }
 
   private emitMessage(msg: Message): void {
+    if (this.hasSeenMessage(msg)) {
+      return;
+    }
     this.bus.emit("message", msg);
     this.messageBatch.push(msg);
     if (this.messageBatch.length >= this.messageBatchSize || this.messageBatchInterval <= 0) {
@@ -308,6 +314,25 @@ export class IMSDK {
     this.messageBatch = [];
     this.bus.emit("messageBatch", batch);
   }
+
+  private hasSeenMessage(msg: Message): boolean {
+    const key = messageDedupeKey(msg);
+    if (!key) {
+      return false;
+    }
+    if (this.seenMessageKeySet.has(key)) {
+      return true;
+    }
+    this.seenMessageKeySet.add(key);
+    this.seenMessageKeys.push(key);
+    while (this.seenMessageKeys.length > this.maxSeenMessageKeys) {
+      const removed = this.seenMessageKeys.shift();
+      if (removed) {
+        this.seenMessageKeySet.delete(removed);
+      }
+    }
+    return false;
+  }
 }
 
 // ── 工厂函数 ──
@@ -328,4 +353,15 @@ export class IMSDK {
  */
 export function createIM(opts: IMOptions): IMSDK {
   return new IMSDK(opts);
+}
+
+function messageDedupeKey(msg: Message): string | null {
+  if (msg.messageId) {
+    return `id:${msg.messageId}`;
+  }
+  const seq = msg.messageSeq ?? msg.sequenceId;
+  if (msg.conversationId && seq && seq > 0) {
+    return `seq:${msg.conversationId}:${seq}`;
+  }
+  return null;
 }

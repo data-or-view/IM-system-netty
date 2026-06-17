@@ -21,7 +21,15 @@ function roleLabel(role: GroupMemberRoleValue): { text: string; className: strin
 export default function GroupInfoPage() {
   const { groupId } = useParams<{ groupId: string }>();
   const navigate = useNavigate();
-  const { state, dispatch, fetchGroupMembers, fetchGroupInfo } = useStore();
+  const {
+    state,
+    dispatch,
+    fetchGroupMembers,
+    fetchGroupInfo,
+    quitGroup,
+    removeConversationLocal,
+    refreshAfterMembershipChanged,
+  } = useStore();
   const [currentUserRole, setCurrentUserRole] = useState<GroupMemberRoleValue>(GroupMemberRole.MEMBER);
   const [loading, setLoading] = useState(true);
   const [kicking, setKicking] = useState<Record<string, boolean>>({});
@@ -80,6 +88,8 @@ export default function GroupInfoPage() {
     if (!groupId) return;
     try {
       await im.group.disband(groupId);
+      removeConversationLocal(`group_${groupId}`);
+      await refreshAfterMembershipChanged();
       toast("群已解散");
       navigate("/chat");
     } catch (err) {
@@ -90,7 +100,7 @@ export default function GroupInfoPage() {
   const handleQuit = async () => {
     if (!groupId) return;
     try {
-      await im.group.quit(groupId);
+      await quitGroup(groupId);
       toast("已退出群");
       navigate("/chat");
     } catch (err) {

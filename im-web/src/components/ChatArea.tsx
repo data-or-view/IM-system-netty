@@ -18,7 +18,7 @@ import { MessageContentRenderer } from "@/components/MessageContentRenderer";
 import SystemMessagePanel from "@/components/SystemMessagePanel";
 import { ConversationType, MessageContentType, createClientMsgId, getErrorText, type GroupCallSession, type OutgoingMessageContentTypeValue, type SendMessageAck } from "im-sdk";
 import { useCall } from "@/components/call/CallProvider";
-import { messageRenderKey, toOptimisticMessage, toOutgoingMessageContent } from "@/lib/messages";
+import { messageRenderKey, toOptimisticMessage } from "@/lib/messages";
 
 export default function ChatArea() {
   const { state, fetchConversations, dispatch } = useStore();
@@ -115,23 +115,13 @@ export default function ChatArea() {
     if (!conv) return;
     const msg = toOptimisticMessage(ack, state.userId || "", contentType, content);
     dispatch({
-      type: "CONFIRM_CONVERSATION",
+      type: "UPSERT_SENT_MESSAGE",
       previousConversationId: conv.conversationId,
       conversation: {
         ...conv,
         conversationId: ack.conversationId,
       },
-    });
-    dispatch({
-      type: "APPEND_MESSAGE",
-      conversationId: ack.conversationId,
       msg,
-    });
-    dispatch({
-      type: "UPDATE_CONVERSATION_LATEST",
-      conversationId: ack.conversationId,
-      latestMsg: toOutgoingMessageContent(content),
-      latestMsgSendTime: msg.createTime,
     });
     void fetchConversations();
   }, [conv, dispatch, fetchConversations, state.userId]);

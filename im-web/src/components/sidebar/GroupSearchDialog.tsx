@@ -6,7 +6,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Inbox, Users } from "lucide-react";
 import { toast } from "sonner";
 import { DialogBody, EmptyState, ResultRow, SearchBar } from "./DialogParts";
-import { SEARCH_LOADING_DELAY_MS } from "@/config/ui-timing";
+import { getErrorText } from "im-sdk";
 
 interface Props {
   open: boolean;
@@ -14,30 +14,56 @@ interface Props {
 }
 
 export default function GroupSearchDialog({ open, onOpenChange }: Props) {
-  const { state, searchGroup, joinGroup } = useStore();
+  const { state, dispatch, searchGroup, joinGroup } = useStore();
   const [keyword, setKeyword] = useState("");
   const [searching, setSearching] = useState(false);
+  const [joining, setJoining] = useState<Record<string, boolean>>({});
+  const [applied, setApplied] = useState<Record<string, boolean>>({});
 
   const handleSearch = useCallback(() => {
     if (!keyword.trim()) return;
     setSearching(true);
-    searchGroup(keyword.trim());
-    setTimeout(() => setSearching(false), SEARCH_LOADING_DELAY_MS);
+    void searchGroup(keyword.trim())
+      .catch((err) => {
+        console.error("search group failed:", err);
+        toast(`搜索失败：${getErrorText(err)}`);
+      })
+      .finally(() => setSearching(false));
   }, [keyword, searchGroup]);
 
   const handleJoin = useCallback(
-    (g: GroupInfo) => {
-      joinGroup(g.groupId);
-      toast(`已发送加群申请: ${g.groupName}`);
+    async (g: GroupInfo) => {
+      setJoining((prev) => ({ ...prev, [g.groupId]: true }));
+      try {
+        await joinGroup(g.groupId);
+        setApplied((prev) => ({ ...prev, [g.groupId]: true }));
+        toast(`已发送加群申请: ${g.groupName}`);
+      } catch (err) {
+        toast(`申请失败：${getErrorText(err)}`);
+      } finally {
+        setJoining((prev) => ({ ...prev, [g.groupId]: false }));
+      }
     },
     [joinGroup]
   );
 
   const isMember = (gid: string) =>
-    state.conversations.some((c) => c.groupId === gid || c.conversationId === gid);
+    state.myGroups.some((group) => group.groupId === gid)
+    || state.conversations.some((c) => c.groupId === gid || c.conversationId === gid || c.conversationId === `group_${gid}`);
+
+  const handleOpenChange = useCallback((nextOpen: boolean) => {
+    if (!nextOpen) {
+      setKeyword("");
+      setSearching(false);
+      setJoining({});
+      setApplied({});
+      dispatch({ type: "SET_SEARCH_GROUPS", list: [] });
+    }
+    onOpenChange(nextOpen);
+  }, [dispatch, onOpenChange]);
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>搜索群组</DialogTitle>
@@ -46,7 +72,7 @@ export default function GroupSearchDialog({ open, onOpenChange }: Props) {
 
         <DialogBody className="space-y-4">
           <SearchBar
-            placeholder="输入群名关键词"
+            placeholder="输入群名或群 ID"
             value={keyword}
             onChange={setKeyword}
             onSearch={handleSearch}
@@ -59,7 +85,7 @@ export default function GroupSearchDialog({ open, onOpenChange }: Props) {
             <EmptyState
               icon={<Inbox className="h-4 w-4" />}
               title="未找到群组"
-              description="可以换一个群名关键词，或先创建一个新群。"
+              description="可以换一个群名或群 ID，或先创建一个新群。"
             />
           )}
 
@@ -79,10 +105,12 @@ export default function GroupSearchDialog({ open, onOpenChange }: Props) {
 
               {isMember(g.groupId) ? (
                 <span className="shrink-0 rounded-full bg-emerald-50 px-2 py-1 text-xs text-emerald-700">已加入</span>
+              ) : applied[g.groupId] ? (
+                <span className="shrink-0 rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-500">已申请</span>
               ) : (
-                <Button variant="outline" size="sm" onClick={() => handleJoin(g)}>
+                <Button variant="outline" size="sm" onClick={() => void handleJoin(g)} disabled={!!joining[g.groupId]}>
                   <Users className="h-3.5 w-3.5" />
-                  加入
+                  {joining[g.groupId] ? "申请中" : "加入"}
                 </Button>
               )}
             </ResultRow>

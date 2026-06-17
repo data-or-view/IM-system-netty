@@ -15,15 +15,16 @@ import { Input } from "@/components/ui/input";
 import { Ban, Camera, Loader2, MessageCircle, Shield, UserMinus, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import { im } from "@/sdk/im-sdk";
-import type { UserInfo } from "im-sdk";
+import { getErrorText, type UserInfo } from "im-sdk";
 import { AppPage, Surface } from "@/components/AppPage";
 
 export default function UserProfilePage() {
   const { userId } = useParams<{ userId: string }>();
   const navigate = useNavigate();
-  const { state, dispatch, fetchUserProfile, removeFriend } = useStore();
+  const { state, dispatch, applyFriend, fetchFriends, openSingleChat, removeFriend } = useStore();
   const [profile, setProfile] = useState<UserInfo | null>(null);
   const [loading, setLoading] = useState(true);
+  const [friendshipChecked, setFriendshipChecked] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [nickname, setNickname] = useState("");
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
@@ -32,17 +33,32 @@ export default function UserProfilePage() {
 
   useEffect(() => {
     if (!userId) return;
+    let cancelled = false;
     setLoading(true);
-    const request = userId === state.userId ? im.user.me() : im.user.info(userId);
-    request.then((info) => {
-      setProfile(info as unknown as UserInfo);
-      dispatch({ type: "SET_USER_PROFILE", userId, info: info as unknown as UserInfo });
-    }).catch(() => {
-      toast("获取用户信息失败");
-    }).finally(() => {
-      setLoading(false);
-    });
-  }, [userId, state.userId, dispatch, fetchUserProfile]);
+    setFriendshipChecked(userId === state.userId);
+
+    const loadProfile = userId === state.userId ? im.user.me() : im.user.info(userId);
+    const loadFriendship = userId === state.userId ? Promise.resolve() : fetchFriends();
+
+    Promise.all([loadProfile, loadFriendship])
+      .then(([info]) => {
+        if (cancelled) return;
+        setProfile(info as unknown as UserInfo);
+        dispatch({ type: "SET_USER_PROFILE", userId, info: info as unknown as UserInfo });
+        setFriendshipChecked(true);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        toast("获取用户信息失败");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, state.userId, dispatch, fetchFriends]);
 
   useEffect(() => {
     if (!editOpen || !profile) return;
@@ -78,6 +94,12 @@ export default function UserProfilePage() {
   const avatarSrc = avatarPreview || profile.faceUrl;
 
   const handleSendMessage = () => {
+    if (!userId || !profile) return;
+    openSingleChat({
+      userId,
+      nickname: profile.nickname || userId,
+      faceUrl: profile.faceUrl,
+    });
     navigate("/chat");
   };
 
@@ -102,12 +124,68 @@ export default function UserProfilePage() {
   };
 
   const handleApplyFriend = async () => {
-    try {
-      await im.friend.apply(userId);
-      toast("好友申请已发送");
-    } catch {
-      toast("操作失败");
+    if (isFriend) {
+      toast("已经是好友");
+      return;
     }
+    try {
+      await applyFriend(userId);
+      toast("好友申请已发送");
+    } catch (err) {
+      const text = getErrorText(err);
+      if (text.toLowerCase().includes("already friends")) {
+        await fetchFriends();
+        toast("已经是好友");
+        return;
+      }
+      toast(`操作失败：${text}`);
+    }
+  };
+
+  const renderActions = () => {
+    if (!friendshipChecked) {
+      return (
+        <Button variant="outline" className="justify-start" disabled>
+          <Loader2 className="h-4 w-4 animate-spin" />
+          正在确认关系
+        </Button>
+      );
+    }
+
+    if (isSelf) {
+      return (
+        <Button variant="outline" className="justify-start" onClick={() => setEditOpen(true)}>
+          <Camera className="h-4 w-4" />
+          编辑资料
+        </Button>
+      );
+    }
+
+    if (isFriend) {
+      return (
+        <>
+          <Button className="justify-start" onClick={handleSendMessage}>
+            <MessageCircle className="h-4 w-4" />
+            发消息
+          </Button>
+          <Button variant="outline" className="justify-start text-red-600 hover:border-red-200 hover:bg-red-50" onClick={handleRemoveFriend}>
+            <UserMinus className="h-4 w-4" />
+            删除好友
+          </Button>
+          <Button variant="outline" className="justify-start text-red-600 hover:border-red-200 hover:bg-red-50" onClick={handleBlack}>
+            <Ban className="h-4 w-4" />
+            拉黑
+          </Button>
+        </>
+      );
+    }
+
+    return (
+      <Button className="justify-start" onClick={handleApplyFriend}>
+        <UserPlus className="h-4 w-4" />
+        加好友
+      </Button>
+    );
   };
 
   const handleAvatarChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -181,36 +259,7 @@ export default function UserProfilePage() {
         <Surface className="p-4">
           <div className="mb-3 text-sm font-semibold text-slate-900">操作</div>
           <div className="grid gap-2 sm:grid-cols-2">
-            {isSelf && (
-              <Button variant="outline" className="justify-start" onClick={() => setEditOpen(true)}>
-                <Camera className="h-4 w-4" />
-                编辑资料
-              </Button>
-            )}
-
-            {isFriend && (
-              <>
-                <Button className="justify-start" onClick={handleSendMessage}>
-                  <MessageCircle className="h-4 w-4" />
-                  发消息
-                </Button>
-                <Button variant="outline" className="justify-start text-red-600 hover:border-red-200 hover:bg-red-50" onClick={handleRemoveFriend}>
-                  <UserMinus className="h-4 w-4" />
-                  删除好友
-                </Button>
-                <Button variant="outline" className="justify-start text-red-600 hover:border-red-200 hover:bg-red-50" onClick={handleBlack}>
-                  <Ban className="h-4 w-4" />
-                  拉黑
-                </Button>
-              </>
-            )}
-
-            {!isSelf && !isFriend && (
-              <Button className="justify-start" onClick={handleApplyFriend}>
-                <UserPlus className="h-4 w-4" />
-                加好友
-              </Button>
-            )}
+            {renderActions()}
           </div>
         </Surface>
       </div>

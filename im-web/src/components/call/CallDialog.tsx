@@ -99,6 +99,7 @@ function VideoStage({ call, peerName }: { call: CallState; peerName: string }) {
             </AvatarFallback>
           </Avatar>
           <div className="mt-5 text-lg font-medium">等待对方视频画面...</div>
+          <div className="mt-2 text-xs text-white/50">对方可能还未接通，或摄像头暂时关闭</div>
         </div>
       )}
 
@@ -143,7 +144,7 @@ function LocalTile({ call, videoRef }: { call: CallState; videoRef: React.RefObj
       {call.localVideoTrack && !call.cameraOff ? (
         <video ref={videoRef} autoPlay muted playsInline className="h-full w-full object-cover" />
       ) : (
-        <TileFallback name="我" />
+        <TileFallback name="我" description="摄像头已关闭" />
       )}
       <div className="absolute bottom-2 left-2 rounded-full bg-black/55 px-2 py-1 text-xs">我</div>
     </div>
@@ -158,7 +159,7 @@ function RemoteTile({ media }: { media: RemoteMedia }) {
       {media.videoTrack ? (
         <video ref={videoRef} autoPlay playsInline className="h-full w-full object-cover" />
       ) : (
-        <TileFallback name={media.name || media.participantId} />
+        <TileFallback name={media.name || media.participantId} description="等待视频画面" />
       )}
       <div className="absolute bottom-2 left-2 rounded-full bg-black/55 px-2 py-1 text-xs">
         {media.name || media.participantId}
@@ -167,12 +168,13 @@ function RemoteTile({ media }: { media: RemoteMedia }) {
   );
 }
 
-function TileFallback({ name }: { name: string }) {
+function TileFallback({ name, description }: { name: string; description?: string }) {
   return (
-    <div className="flex h-full w-full items-center justify-center bg-[radial-gradient(circle_at_top,#064e3b,#18181b)]">
+    <div className="flex h-full w-full flex-col items-center justify-center bg-[radial-gradient(circle_at_top,#064e3b,#18181b)] px-3 text-center">
       <div className="flex h-14 w-14 items-center justify-center rounded-full bg-emerald-500 text-xl font-semibold text-white">
         {name.charAt(0).toUpperCase()}
       </div>
+      {description && <div className="mt-2 text-xs text-white/55">{description}</div>}
     </div>
   );
 }

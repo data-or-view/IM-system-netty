@@ -751,7 +751,9 @@ public class DbGroupManager implements IGroupManager, GroupApplyPolicy.Gateway {
             try (SqlSession session = MyBatisPlusFactory.openSession()) {
                 GroupMapper mapper = session.getMapper(GroupMapper.class);
                 var qw = new LambdaQueryWrapper<GroupEntity>()
-                        .like(GroupEntity::getGroupName, keyword)
+                        .and(w -> w.like(GroupEntity::getGroupName, keyword)
+                                .or()
+                                .like(GroupEntity::getGroupId, keyword))
                         .eq(GroupEntity::getStatus, searchableGroupStatus())
                         .orderByDesc(GroupEntity::getCreatedAt)
                         .last("LIMIT " + limit);

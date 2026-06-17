@@ -5,6 +5,7 @@ import { StoreProvider, useStore } from "@/store/store";
 import { im } from "@/sdk/im-sdk";
 import LoginPage from "@/pages/LoginPage";
 import { CallProvider } from "@/components/call/CallProvider";
+import RouteErrorBoundary from "@/components/RouteErrorBoundary";
 
 const ChatLayout = lazy(() => import("@/pages/ChatLayout"));
 const ChatArea = lazy(() => import("@/components/ChatArea"));
@@ -135,18 +136,20 @@ function AuthGate() {
 
   return (
     <CallProvider>
-      <Suspense fallback={<PageFallback />}>
-        <Routes>
-          <Route path="/chat" element={<ChatLayout />}>
-            <Route index element={<ChatArea />} />
-            <Route path="create-group" element={<CreateGroupPage />} />
-            <Route path="group/:groupId" element={<GroupInfoPage />} />
-            <Route path="user/:userId" element={<UserProfilePage />} />
-          </Route>
-          <Route path="*" element={<Navigate to="/chat" replace />} />
-        </Routes>
-        <CallDialog />
-      </Suspense>
+      <RouteErrorBoundary>
+        <Suspense fallback={<PageFallback />}>
+          <Routes>
+            <Route path="/chat" element={<ChatLayout />}>
+              <Route index element={<ChatArea />} />
+              <Route path="create-group" element={<CreateGroupPage />} />
+              <Route path="group/:groupId" element={<GroupInfoPage />} />
+              <Route path="user/:userId" element={<UserProfilePage />} />
+            </Route>
+            <Route path="*" element={<Navigate to="/chat" replace />} />
+          </Routes>
+          <CallDialog />
+        </Suspense>
+      </RouteErrorBoundary>
     </CallProvider>
   );
 }

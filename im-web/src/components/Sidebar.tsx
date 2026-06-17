@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { SYSTEM_CONVERSATION_ID, useStore, type Conversation, type FriendInfo, type GroupInfo } from "@/store/store";
-import { ConversationType, MessageReceiveOption } from "im-sdk";
+import { ConversationType } from "im-sdk";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -412,33 +412,16 @@ function ConversationItem({ conv }: { conv: Conversation }) {
 }
 
 function FriendItem({ friend }: { friend: FriendInfo }) {
-  const { state, dispatch, removeFriend } = useStore();
+  const { openSingleChat, removeFriend } = useStore();
   const navigate = useNavigate();
   const displayName = friend.remark || friend.nickname || friend.friendUserId;
 
   const openChat = () => {
-    const existing = state.conversations.find((conv) => conv.conversationType === ConversationType.SINGLE && conv.userId === friend.friendUserId);
-    if (existing) {
-      dispatch({ type: "SET_ACTIVE_CONVERSATION", conversationId: existing.conversationId });
-      navigate("/chat");
-      return;
-    }
-
-    const conversation: Conversation = {
-      conversationId: singleConversationId(state.userId || "", friend.friendUserId),
-      ownerUserId: state.userId || "",
-      conversationType: ConversationType.SINGLE,
+    openSingleChat({
       userId: friend.friendUserId,
-      showName: displayName,
+      nickname: displayName,
       faceUrl: friend.faceUrl,
-      latestMsg: "",
-      latestMsgSendTime: 0,
-      unreadCount: 0,
-      recvMsgOpt: MessageReceiveOption.NORMAL,
-      isPinned: false,
-    };
-    dispatch({ type: "ADD_CONVERSATION", conversation });
-    dispatch({ type: "SET_ACTIVE_CONVERSATION", conversationId: conversation.conversationId });
+    });
     navigate("/chat");
   };
 
@@ -464,9 +447,13 @@ function FriendItem({ friend }: { friend: FriendInfo }) {
         <DropdownMenuContent align="end">
           <DropdownMenuItem
             className="text-destructive"
-            onClick={() => {
-              removeFriend(friend.friendUserId);
-              toast("已删除好友");
+            onClick={async () => {
+              try {
+                await removeFriend(friend.friendUserId);
+                toast("已删除好友");
+              } catch (err) {
+                toast(`删除失败：${err instanceof Error ? err.message : "请稍后重试"}`);
+              }
             }}
           >
             <UserMinus className="mr-2 h-4 w-4" />
@@ -479,7 +466,7 @@ function FriendItem({ friend }: { friend: FriendInfo }) {
 }
 
 function GroupItem({ group }: { group: GroupInfo }) {
-  const { state, dispatch } = useStore();
+  const { state, openGroupChat } = useStore();
   const navigate = useNavigate();
   const conversation = useMemo(
     () => state.conversations.find((conv) => conv.conversationType === ConversationType.GROUP && (conv.groupId === group.groupId || conv.conversationId === `group_${group.groupId}`)),
@@ -487,28 +474,11 @@ function GroupItem({ group }: { group: GroupInfo }) {
   );
 
   const openChat = () => {
-    if (conversation) {
-      dispatch({ type: "SET_ACTIVE_CONVERSATION", conversationId: conversation.conversationId });
-      navigate("/chat");
-      return;
-    }
-
-    const localConversation: Conversation = {
-      conversationId: `group_${group.groupId}`,
-      ownerUserId: state.userId || "",
-      conversationType: ConversationType.GROUP,
+    openGroupChat({
       groupId: group.groupId,
-      groupName: groupTitle(group),
-      showName: groupTitle(group),
-      faceUrl: group.faceUrl,
-      latestMsg: "",
-      latestMsgSendTime: 0,
-      unreadCount: 0,
-      recvMsgOpt: MessageReceiveOption.NORMAL,
-      isPinned: false,
-    };
-    dispatch({ type: "ADD_CONVERSATION", conversation: localConversation });
-    dispatch({ type: "SET_ACTIVE_CONVERSATION", conversationId: localConversation.conversationId });
+      groupName: conversation?.showName || groupTitle(group),
+      faceUrl: conversation?.faceUrl || group.faceUrl,
+    });
     navigate("/chat");
   };
 
@@ -561,10 +531,6 @@ function formatMessagePreview(content?: string): string {
     return content;
   }
   return content;
-}
-
-function singleConversationId(userA: string, userB: string): string {
-  return userA <= userB ? `single_${userA}_${userB}` : `single_${userB}_${userA}`;
 }
 
 function formatTime(ts: number): string {

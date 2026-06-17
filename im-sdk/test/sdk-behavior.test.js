@@ -780,6 +780,26 @@ test("sdk batches websocket message pushes before emitting messageBatch", async 
   assert.deepEqual(singles.map((m) => m.messageId), ["m1", "m2"]);
 });
 
+test("sdk does not emit duplicate message pushes with the same message id", async () => {
+  const im = createIM({ wsUrl: "ws://example.test/ws" });
+  const batches = [];
+  const singles = [];
+  im.on("messageBatch", (msgs) => batches.push(msgs));
+  im.on("message", (msg) => singles.push(msg));
+
+  const payload = {
+    op: "message",
+    data: { messageId: "m-dup", conversationId: "c1", messageSeq: 9, content: "same" },
+  };
+  im.transport.handleMessage(JSON.stringify(payload));
+  im.transport.handleMessage(JSON.stringify(payload));
+
+  await new Promise((resolve) => setTimeout(resolve, 25));
+
+  assert.deepEqual(singles.map((m) => m.messageId), ["m-dup"]);
+  assert.deepEqual(batches.map((batch) => batch.map((m) => m.messageId)), [["m-dup"]]);
+});
+
 
 test("http transport calls default fetch with the global object binding", async () => {
   const originalFetch = globalThis.fetch;

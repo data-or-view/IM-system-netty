@@ -326,7 +326,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       setCall((prev) => ({ ...prev, phase: "connected", startedAt: Date.now(), roomId: ack.roomId }));
     } catch (err) {
       console.error("start call failed:", err);
-      toast("发起通话失败");
+      toast(callErrorText(err, "发起通话失败"));
       await resetCall();
     }
   }, [connectRoom, resetCall]);
@@ -359,7 +359,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       }));
     } catch (err) {
       console.error("join group call failed:", err);
-      toast("加入群视频失败");
+      toast(callErrorText(err, "加入群视频失败"));
       await resetCall();
     }
   }, [connectRoom, resetCall]);
@@ -371,7 +371,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       await joinGroupCall({ group });
     } catch (err) {
       console.error("start group call failed:", err);
-      toast("发起群视频失败");
+      toast(callErrorText(err, "发起群视频失败"));
       await resetCall();
     }
   }, [joinGroupCall, resetCall]);
@@ -387,7 +387,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       setCall((prev) => ({ ...prev, phase: "connected", startedAt: Date.now() }));
     } catch (err) {
       console.error("accept call failed:", err);
-      toast("接听失败");
+      toast(callErrorText(err, "接听失败"));
       await resetCall();
     }
   }, [connectRoom, resetCall]);
@@ -529,4 +529,19 @@ function handleRemoteSignal(action: SignalingActionName, resetCall: () => Promis
     toast("无人接听");
     void resetCall();
   }
+}
+
+function callErrorText(err: unknown, fallback: string): string {
+  const text = err instanceof Error ? err.message : String(err ?? "");
+  const lower = text.toLowerCase();
+  if (lower.includes("permission") || lower.includes("notallowed") || lower.includes("denied")) {
+    return "摄像头或麦克风权限不可用，请检查浏览器权限";
+  }
+  if (lower.includes("timeout") || lower.includes("websocket") || lower.includes("connect")) {
+    return "媒体服务连接失败，请确认 LiveKit 已启动";
+  }
+  if (lower.includes("not found") || lower.includes("not_active") || lower.includes("inactive")) {
+    return "通话已结束或对方尚未接入";
+  }
+  return fallback;
 }
