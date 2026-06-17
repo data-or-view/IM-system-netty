@@ -153,11 +153,12 @@ public class DbGroupManager implements IGroupManager, GroupApplyPolicy.Gateway {
                                      String introduction, String faceUrl, int needVerification,
                                      int lookMemberInfo, int applyMemberFriend,
                                      String notificationUserId) {
+        requireAdminOrOwner(groupId, notificationUserId);
         PersistenceExceptions.runDatabase("set group information", () -> retryExecutor.execute(CFG, () -> {
         try (SqlSession session = MyBatisPlusFactory.openSession()) {
             GroupMapper mapper = session.getMapper(GroupMapper.class);
             GroupEntity entity = mapper.selectById(groupId);
-            if (entity == null) return null;
+            if (entity == null) throw new NotFoundException("group not found");
             if (groupName != null) entity.setGroupName(groupName);
             if (notification != null) entity.setNotification(notification);
             if (introduction != null) entity.setIntroduction(introduction);
@@ -214,8 +215,12 @@ public class DbGroupManager implements IGroupManager, GroupApplyPolicy.Gateway {
             GroupMemberMapper memberMapper = session.getMapper(GroupMemberMapper.class);
             GroupMemberEntity operator = getMemberInSession(memberMapper, groupId, operatorId);
             GroupMemberEntity target = getMemberInSession(memberMapper, groupId, targetUserId);
-            if (operator == null || target == null) return null;
-            if (operator.getRoleLevel() < 100 || target.getRoleLevel() >= operator.getRoleLevel()) return null;
+            if (operator == null) throw new ForbiddenException("not a group member");
+            if (target == null) throw new NotFoundException("target group member not found");
+            if (operator.getRoleLevel() < 100) throw new ForbiddenException("only group owner or admin can kick member");
+            if (target.getRoleLevel() >= operator.getRoleLevel()) {
+                throw new ForbiddenException("cannot kick member with same or higher role");
+            }
 
             LambdaQueryWrapper<GroupMemberEntity> qw = new LambdaQueryWrapper<>();
             qw.eq(GroupMemberEntity::getGroupId, groupId)
@@ -347,7 +352,7 @@ public class DbGroupManager implements IGroupManager, GroupApplyPolicy.Gateway {
         GroupMemberEntity operator = getMemberInSession(null, groupId, operatorId);
         if (operator == null || operator.getRoleLevel() < 100) {
             log.warn("Only admin can toggle mute-all: groupId={}, operator={}", groupId, operatorId);
-            return;
+            throw new ForbiddenException("only group owner or admin can mute all");
         }
 
         long muteEndTime = mute ? FAR_FUTURE : 0;
@@ -734,6 +739,7 @@ public class DbGroupManager implements IGroupManager, GroupApplyPolicy.Gateway {
         GroupApply ga = new GroupApply();
         ga.setGroupId(entity.getGroupId());
         ga.setUserId(entity.getUserId());
+        hydrateGroupApplyDisplayFields(ga);
         ga.setReqMsg(entity.getReqMsg());
         ga.setHandledMsg(entity.getHandledMsg());
         ga.setHandlerUserId(entity.getHandlerUserId());
@@ -743,6 +749,32 @@ public class DbGroupManager implements IGroupManager, GroupApplyPolicy.Gateway {
         ga.setCreateTime(entity.getCreatedAt());
         ga.setHandledTime(entity.getHandledTime());
         return ga;
+    }
+
+    private void hydrateGroupApplyDisplayFields(GroupApply apply) {
+        try (SqlSession session = MyBatisPlusFactory.openSession()) {
+            GroupMapper groupMapper = session.getMapper(GroupMapper.class);
+            UserMapper userMapper = session.getMapper(UserMapper.class);
+            GroupEntity group = groupMapper.selectById(apply.getGroupId());
+            if (group != null) {
+                apply.setGroupName(group.getGroupName());
+            }
+            UserEntity user = userMapper.selectById(apply.getUserId());
+            if (user != null) {
+                apply.setUserNickname(user.getNickname());
+                apply.setUserFaceUrl(user.getFaceUrl());
+            }
+        }
+    }
+
+    private void requireAdminOrOwner(String groupId, String operatorId) {
+        if (operatorId == null || operatorId.isBlank()) {
+            throw new ForbiddenException("operator is required");
+        }
+        GroupMemberEntity operator = getMemberInSession(null, groupId, operatorId);
+        if (operator == null || operator.getRoleLevel() < GROUP_ROLE_ADMIN) {
+            throw new ForbiddenException("only group owner or admin can update group information");
+        }
     }
 
     @Override

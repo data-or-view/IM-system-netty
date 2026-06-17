@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { im } from "@/sdk/im-sdk";
-import { GroupMemberRole, getErrorText, groupMemberRoleRank, type GroupMemberRoleValue } from "im-sdk";
+import { GroupJoinVerification, GroupMemberRole, getErrorText, groupMemberRoleRank, type GroupMemberRoleValue } from "im-sdk";
 import { AppPage, Surface } from "@/components/AppPage";
 
 function roleLabel(role: GroupMemberRoleValue): { text: string; className: string } | null {
@@ -32,14 +32,19 @@ export default function GroupInfoPage() {
   } = useStore();
   const [currentUserRole, setCurrentUserRole] = useState<GroupMemberRoleValue>(GroupMemberRole.MEMBER);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [kicking, setKicking] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     if (!groupId) return;
+    setLoading(true);
+    setLoadError("");
     Promise.all([
       fetchGroupInfo(groupId),
       fetchGroupMembers(groupId),
-    ]).then(() => setLoading(false));
+    ])
+      .catch((err) => setLoadError(getErrorText(err)))
+      .finally(() => setLoading(false));
   }, [groupId, fetchGroupInfo, fetchGroupMembers]);
 
   const groupInfo = groupId ? state.groupInfoCache[groupId] : undefined;
@@ -116,6 +121,17 @@ export default function GroupInfoPage() {
     );
   }
 
+  if (loadError) {
+    return (
+      <div className="flex flex-1 items-center justify-center">
+        <div className="text-center">
+          <p className="text-sm text-slate-600">加载群信息失败：{loadError}</p>
+          <Button variant="outline" className="mt-3" onClick={() => navigate("/chat")}>返回聊天</Button>
+        </div>
+      </div>
+    );
+  }
+
   if (!groupInfo) {
     return (
       <div className="flex flex-1 items-center justify-center">
@@ -150,7 +166,15 @@ export default function GroupInfoPage() {
             <div className="grid gap-3 px-5 py-4 sm:grid-cols-2">
               <InfoItem label="群主" value={groupInfo.ownerUserId || "-"} />
               <InfoItem label="我的权限" value={roleText(currentUserRole)} />
+              <InfoItem label="入群方式" value={joinPolicyText(groupInfo.needVerification)} />
+              <InfoItem label="群类型" value={groupInfo.groupType === "PUBLIC" ? "公开群" : "私有群"} />
             </div>
+            {(groupInfo.notification || groupInfo.introduction) && (
+              <div className="space-y-3 border-t border-slate-100 px-5 py-4">
+                {groupInfo.notification && <InfoText title="群公告" text={groupInfo.notification} />}
+                {groupInfo.introduction && <InfoText title="群简介" text={groupInfo.introduction} />}
+              </div>
+            )}
           </Surface>
 
           <Surface>
@@ -263,11 +287,27 @@ function roleText(role: GroupMemberRoleValue): string {
   return "成员";
 }
 
+function joinPolicyText(policy?: string): string {
+  if (policy === GroupJoinVerification.NEED_APPROVAL) return "需要审批";
+  if (policy === GroupJoinVerification.INVITE_ONLY) return "仅邀请入群";
+  if (policy === GroupJoinVerification.FORBIDDEN) return "禁止加入";
+  return "可直接加入";
+}
+
 function InfoItem({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-md bg-slate-50 px-3 py-2">
       <div className="text-xs text-slate-500">{label}</div>
       <div className="mt-1 truncate text-sm font-medium text-slate-900">{value}</div>
+    </div>
+  );
+}
+
+function InfoText({ title, text }: { title: string; text: string }) {
+  return (
+    <div>
+      <div className="text-xs font-medium text-slate-500">{title}</div>
+      <div className="mt-1 whitespace-pre-wrap text-sm leading-6 text-slate-800">{text}</div>
     </div>
   );
 }

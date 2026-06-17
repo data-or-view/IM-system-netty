@@ -395,6 +395,31 @@ test("friend and group mutation payloads match backend HTTP contract", async () 
   assert.deepEqual(calls[3], { method: "POST", path: "/api/group/mute/all", body: { groupId: "g1", mute: true } });
 });
 
+test("group.join preserves backend join result", async () => {
+  const { http, calls } = createHttpCapture({ status: "APPLY_CREATED", result: "APPLY_CREATED" });
+  const groupApi = new GroupAPI(http);
+
+  const result = await groupApi.join("g1", "let me in");
+
+  assert.deepEqual(result, { status: "APPLY_CREATED", result: "APPLY_CREATED" });
+  assert.deepEqual(calls[0], { method: "POST", path: "/api/group/join", body: { groupId: "g1", reqMsg: "let me in" } });
+});
+
+test("group.applyList preserves display fields for approval UI", async () => {
+  const apply = {
+    groupId: "g1",
+    groupName: "工程群",
+    userId: "u1",
+    userNickname: "Alice",
+    userFaceUrl: "https://example.test/a.png",
+    handleResult: "PENDING",
+  };
+  const { http } = createHttpCapture({ applies: [apply] });
+  const groupApi = new GroupAPI(http);
+
+  assert.deepEqual(await groupApi.applyList(true), [apply]);
+});
+
 test("system API uses system message HTTP endpoints", async () => {
   const { http, calls } = createHttpCapture((method, path) => {
     if (path === "/api/system/channels") return { channels: [{ channelId: "wallet", channelName: "钱包通知" }] };

@@ -6,7 +6,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Inbox, Users } from "lucide-react";
 import { toast } from "sonner";
 import { DialogBody, EmptyState, ResultRow, SearchBar } from "./DialogParts";
-import { getErrorText } from "im-sdk";
+import { GroupJoinVerification, getErrorText, type GroupJoinResultValue } from "im-sdk";
 
 interface Props {
   open: boolean;
@@ -18,7 +18,7 @@ export default function GroupSearchDialog({ open, onOpenChange }: Props) {
   const [keyword, setKeyword] = useState("");
   const [searching, setSearching] = useState(false);
   const [joining, setJoining] = useState<Record<string, boolean>>({});
-  const [applied, setApplied] = useState<Record<string, boolean>>({});
+  const [joinResults, setJoinResults] = useState<Record<string, GroupJoinResultValue>>({});
 
   const handleSearch = useCallback(() => {
     if (!keyword.trim()) return;
@@ -35,9 +35,15 @@ export default function GroupSearchDialog({ open, onOpenChange }: Props) {
     async (g: GroupInfo) => {
       setJoining((prev) => ({ ...prev, [g.groupId]: true }));
       try {
-        await joinGroup(g.groupId);
-        setApplied((prev) => ({ ...prev, [g.groupId]: true }));
-        toast(`已发送加群申请: ${g.groupName}`);
+        const result = await joinGroup(g.groupId);
+        setJoinResults((prev) => ({ ...prev, [g.groupId]: result.status }));
+        if (result.status === "JOINED" || result.status === "ALREADY_MEMBER") {
+          toast(`已加入群聊：${g.groupName}`);
+        } else if (result.status === "ALREADY_PENDING") {
+          toast("申请已提交，等待管理员审批");
+        } else {
+          toast(`已发送加群申请：${g.groupName}`);
+        }
       } catch (err) {
         toast(`申请失败：${getErrorText(err)}`);
       } finally {
@@ -56,7 +62,7 @@ export default function GroupSearchDialog({ open, onOpenChange }: Props) {
       setKeyword("");
       setSearching(false);
       setJoining({});
-      setApplied({});
+      setJoinResults({});
       dispatch({ type: "SET_SEARCH_GROUPS", list: [] });
     }
     onOpenChange(nextOpen);
@@ -99,14 +105,22 @@ export default function GroupSearchDialog({ open, onOpenChange }: Props) {
                 </Avatar>
                 <div className="min-w-0">
                   <div className="truncate text-sm font-semibold text-slate-900">{g.groupName}</div>
-                  <div className="truncate text-xs text-slate-500">{g.memberCount || "?"} 人 · ID: {g.groupId}</div>
+                  <div className="truncate text-xs text-slate-500">
+                    {g.memberCount || "?"} 人 · {joinPolicyText(g.needVerification)} · ID: {g.groupId}
+                  </div>
                 </div>
               </div>
 
               {isMember(g.groupId) ? (
                 <span className="shrink-0 rounded-full bg-emerald-50 px-2 py-1 text-xs text-emerald-700">已加入</span>
-              ) : applied[g.groupId] ? (
+              ) : joinResults[g.groupId] === "JOINED" || joinResults[g.groupId] === "ALREADY_MEMBER" ? (
+                <span className="shrink-0 rounded-full bg-emerald-50 px-2 py-1 text-xs text-emerald-700">已加入</span>
+              ) : joinResults[g.groupId] === "APPLY_CREATED" || joinResults[g.groupId] === "ALREADY_PENDING" ? (
                 <span className="shrink-0 rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-500">已申请</span>
+              ) : g.needVerification === GroupJoinVerification.INVITE_ONLY || g.needVerification === GroupJoinVerification.FORBIDDEN ? (
+                <span className="shrink-0 rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-500">
+                  {g.needVerification === GroupJoinVerification.INVITE_ONLY ? "仅邀请" : "禁止加入"}
+                </span>
               ) : (
                 <Button variant="outline" size="sm" onClick={() => void handleJoin(g)} disabled={!!joining[g.groupId]}>
                   <Users className="h-3.5 w-3.5" />
@@ -120,4 +134,11 @@ export default function GroupSearchDialog({ open, onOpenChange }: Props) {
       </DialogContent>
     </Dialog>
   );
+}
+
+function joinPolicyText(policy?: GroupInfo["needVerification"]) {
+  if (policy === GroupJoinVerification.NEED_APPROVAL) return "需审批";
+  if (policy === GroupJoinVerification.INVITE_ONLY) return "仅邀请";
+  if (policy === GroupJoinVerification.FORBIDDEN) return "禁止加入";
+  return "可直接加入";
 }

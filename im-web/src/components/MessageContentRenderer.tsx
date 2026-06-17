@@ -33,7 +33,7 @@ export function MessageContentRenderer({ message }: Props) {
     case MessageContentType.LOCATION:
       return <LocationBlock parsed={parsed} />;
     case MessageContentType.SYSTEM:
-      return <SystemBlock text={parsed.content.message || parsed.content.systemType || parsed.raw || "系统消息"} />;
+      return <SystemBlock text={systemText(parsed.content.systemType, parsed.content.message || parsed.raw)} />;
     case MessageContentType.SIGNAL:
       return <InfoBlock icon={<Phone className="h-4 w-4" />} {...signalDisplay(parsed.content)} />;
     case MessageContentType.CUSTOM:
@@ -153,6 +153,25 @@ function LocationBlock({ parsed }: { parsed: Extract<ParsedMessageContent, { typ
 
 function SystemBlock({ text }: { text: string }) {
   return <span className="text-xs opacity-75">{text}</span>;
+}
+
+function systemText(systemType?: string, message?: string): string {
+  switch (systemType) {
+    case "group_member_joined":
+      return message || "有成员加入群聊";
+    case "group_member_left":
+      return message || "有成员离开群聊";
+    case "group_member_kicked":
+      return message || "有成员被移出群聊";
+    case "group_disbanded":
+      return message || "群聊已解散";
+    case "group_info_updated":
+      return message || "群资料已更新";
+    case "group_role_changed":
+      return message || "群成员权限已变更";
+    default:
+      return message || systemType || "系统消息";
+  }
 }
 
 function InfoBlock({ icon, title, detail }: { icon: React.ReactNode; title: string; detail?: string }) {

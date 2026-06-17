@@ -10,7 +10,10 @@ package com.im.api;
 public class GroupApply {
 
     private String groupId;
+    private String groupName;
     private String userId;
+    private String userNickname;
+    private String userFaceUrl;
     private String reqMsg;
     private String handledMsg;
     private String handlerUserId;
@@ -28,8 +31,17 @@ public class GroupApply {
     public String getGroupId() { return groupId; }
     public void setGroupId(String groupId) { this.groupId = groupId; }
 
+    public String getGroupName() { return groupName; }
+    public void setGroupName(String groupName) { this.groupName = groupName; }
+
     public String getUserId() { return userId; }
     public void setUserId(String userId) { this.userId = userId; }
+
+    public String getUserNickname() { return userNickname; }
+    public void setUserNickname(String userNickname) { this.userNickname = userNickname; }
+
+    public String getUserFaceUrl() { return userFaceUrl; }
+    public void setUserFaceUrl(String userFaceUrl) { this.userFaceUrl = userFaceUrl; }
 
     public String getReqMsg() { return reqMsg; }
     public void setReqMsg(String reqMsg) { this.reqMsg = reqMsg; }

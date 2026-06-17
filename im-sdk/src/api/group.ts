@@ -5,6 +5,7 @@ import {
   type GroupCallJoinResult,
   type GroupCallSession,
   type GroupInfo,
+  type GroupJoinResponse,
   type GroupJoinVerificationValue,
   type GroupMember,
   type GroupTypeValue,
@@ -45,11 +46,14 @@ export class GroupAPI {
   }
 
   /** 加入群组 */
-  join(groupId: string, reqMsg?: string): Promise<void> {
-    return requireHttp(this.transport).post("/api/group/join", {
+  join(groupId: string, reqMsg?: string): Promise<GroupJoinResponse> {
+    return requireHttp(this.transport).post<GroupJoinResponse>("/api/group/join", {
       groupId,
       ...(reqMsg ? { reqMsg } : {}),
-    }).then(() => undefined);
+    }).then((data) => ({
+      status: data.result ?? data.status,
+      ...(data.result ? { result: data.result } : {}),
+    }));
   }
 
   /** 退出群组 */

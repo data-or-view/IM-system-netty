@@ -103,7 +103,8 @@ public class GroupHandler implements RequestHandler {
         if (members == null) members = List.of();
 
         groupManager.createGroup(groupId, ownerId, groupName, faceUrl, members, groupType, needVerification);
-        return Map.of("groupId", groupId, "status", "OK");
+        GroupInformation info = groupManager.getGroupInformation(groupId);
+        return info != null ? info : Map.of("groupId", groupId, "status", "OK");
     }
 
     private Object handleJoin(ApiRequest req) {
@@ -123,7 +124,7 @@ public class GroupHandler implements RequestHandler {
                 groupApplyNotifier.notifyApplyCreated(groupManager.getManagerIds(groupId), apply);
             }
         }
-        return Map.of("status", "OK");
+        return Map.of("status", result.name(), "result", result.name());
     }
 
     private Object handleQuit(ApiRequest req) {
@@ -149,6 +150,10 @@ public class GroupHandler implements RequestHandler {
             throw new ValidationException("groupId and targetUserId are required");
         }
         groupManager.kickMember(groupId, operatorId, targetUserId);
+        if (conversationManager != null) {
+            conversationManager.deleteConversation(targetUserId, ConversationIds.group(groupId));
+        }
+        groupSystemMessagePublisher.memberLeft(groupId, targetUserId, operatorId);
         return Map.of("status", "OK");
     }
 

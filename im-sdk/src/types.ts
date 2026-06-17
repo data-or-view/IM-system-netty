@@ -100,6 +100,14 @@ export const GroupJoinVerification = {
 } as const;
 export type GroupJoinVerificationValue = (typeof GroupJoinVerification)[keyof typeof GroupJoinVerification];
 
+export const GroupJoinResult = {
+  JOINED: "JOINED",
+  APPLY_CREATED: "APPLY_CREATED",
+  ALREADY_MEMBER: "ALREADY_MEMBER",
+  ALREADY_PENDING: "ALREADY_PENDING",
+} as const;
+export type GroupJoinResultValue = (typeof GroupJoinResult)[keyof typeof GroupJoinResult];
+
 export const GroupMemberRole = {
   REMOVED: "REMOVED",
   MEMBER: "MEMBER",
@@ -168,6 +176,8 @@ export interface FriendApply {
 export interface GroupInfo {
   groupId: string;
   groupName: string;
+  notification?: string;
+  introduction?: string;
   faceUrl?: string;
   ownerUserId?: string;
   memberCount?: number;
@@ -187,7 +197,10 @@ export interface GroupMember {
 
 export interface GroupApply {
   groupId: string;
+  groupName?: string;
   userId: string;
+  userNickname?: string;
+  userFaceUrl?: string;
   reqMsg?: string;
   handledMsg?: string;
   handlerUserId?: string;
@@ -196,6 +209,11 @@ export interface GroupApply {
   inviterUserId?: string;
   createTime: number;
   handledTime?: number;
+}
+
+export interface GroupJoinResponse {
+  status: GroupJoinResultValue;
+  result?: GroupJoinResultValue;
 }
 
 // ── System Message ──

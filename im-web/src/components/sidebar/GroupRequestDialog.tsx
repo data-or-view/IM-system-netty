@@ -3,10 +3,11 @@ import { GROUP_APPLY_UPDATED_EVENT, useStore, type GroupApply } from "@/store/st
 import { im } from "@/sdk/im-sdk";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Check, Inbox, Loader2, Users, X } from "lucide-react";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Check, Inbox, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 import { DialogBody, EmptyState, ResultRow } from "./DialogParts";
+import { getErrorText } from "im-sdk";
 
 interface Props {
   open: boolean;
@@ -27,7 +28,7 @@ export default function GroupRequestDialog({ open, onOpenChange }: Props) {
       await fetchUnhandledGroupApplyCount();
     } catch (err) {
       console.error("load group applies failed:", err);
-      toast("加载群申请失败");
+      toast(`加载群申请失败：${getErrorText(err)}`);
     } finally {
       setLoading(false);
     }
@@ -51,8 +52,8 @@ export default function GroupRequestDialog({ open, onOpenChange }: Props) {
       await approveGroupApply(apply.groupId, apply.userId, agreed);
       setApplies((prev) => prev.filter((item) => applyKey(item) !== key));
       toast(agreed ? "已同意加群申请" : "已拒绝加群申请");
-    } catch {
-      toast("操作失败");
+    } catch (err) {
+      toast(`操作失败：${getErrorText(err)}`);
     } finally {
       setProcessing((prev) => ({ ...prev, [key]: false }));
     }
@@ -85,13 +86,14 @@ export default function GroupRequestDialog({ open, onOpenChange }: Props) {
                 <ResultRow key={key}>
                   <div className="flex min-w-0 items-center gap-3">
                     <Avatar className="h-10 w-10 border border-white shadow-sm">
+                      <AvatarImage src={apply.userFaceUrl} alt={apply.userNickname || apply.userId} />
                       <AvatarFallback className="bg-slate-900 text-white">
-                        <Users className="h-4 w-4" />
+                        {(apply.userNickname || apply.userId || "?").charAt(0).toUpperCase()}
                       </AvatarFallback>
                     </Avatar>
                     <div className="min-w-0">
-                      <div className="truncate text-sm font-semibold text-slate-900">{apply.userId}</div>
-                      <div className="truncate text-xs text-slate-500">申请加入群：{apply.groupId}</div>
+                      <div className="truncate text-sm font-semibold text-slate-900">{apply.userNickname || apply.userId}</div>
+                      <div className="truncate text-xs text-slate-500">申请加入：{apply.groupName || apply.groupId}</div>
                       {apply.reqMsg && (
                         <div className="mt-0.5 truncate text-xs text-slate-500">{apply.reqMsg}</div>
                       )}

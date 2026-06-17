@@ -16,7 +16,7 @@ import React, {
 } from "react";
 import { im } from "@/sdk/im-sdk";
 import { ConversationType, MessageReceiveOption, createClientMsgId } from "im-sdk";
-import type { SystemMessageInboxItem, SystemMessageSummary, TokenPair, UserInfo as SDKUserInfo, FriendInfo as SDKFriendInfo, FriendApply as SDKFriendApply, GroupInfo as SDKGroupInfo, GroupMember as SDKGroupMember, GroupApply as SDKGroupApply, Conversation as SDKConversation } from "im-sdk";
+import type { SystemMessageInboxItem, SystemMessageSummary, TokenPair, UserInfo as SDKUserInfo, FriendInfo as SDKFriendInfo, FriendApply as SDKFriendApply, GroupInfo as SDKGroupInfo, GroupMember as SDKGroupMember, GroupApply as SDKGroupApply, Conversation as SDKConversation, GroupJoinResponse } from "im-sdk";
 import { AUTH_REFRESH_TOKEN_KEY, AUTH_TOKEN_KEY, AUTH_USER_ID_KEY, SYNC_CURSORS_KEY } from "@/config/storage-keys";
 import { toOptimisticMessage, toViewMessage, type ViewMessage } from "@/lib/messages";
 import {
@@ -357,7 +357,7 @@ interface StoreContextType {
   applyFriend: (targetUserId: string, reqMsg?: string) => Promise<void>;
   removeFriend: (targetUserId: string) => Promise<void>;
   searchGroup: (keyword: string, limit?: number) => Promise<void>;
-  joinGroup: (groupId: string, reqMsg?: string) => Promise<void>;
+  joinGroup: (groupId: string, reqMsg?: string) => Promise<GroupJoinResponse>;
   quitGroup: (groupId: string) => Promise<void>;
   fetchMyGroups: () => Promise<void>;
   approveFriend: (fromUserId: string, agreed: boolean) => Promise<void>;
@@ -795,9 +795,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const joinGroup = useCallback(async (groupId: string, reqMsg?: string) => {
-    await im.group.join(groupId, reqMsg);
-    await Promise.all([fetchMyGroups(), fetchConversations()]);
-  }, [fetchConversations, fetchMyGroups]);
+    const result = await im.group.join(groupId, reqMsg);
+    if (result.status === "JOINED" || result.status === "ALREADY_MEMBER") {
+      await Promise.all([fetchMyGroups(), fetchConversations()]);
+    } else {
+      await fetchUnhandledGroupApplyCount();
+    }
+    return result;
+  }, [fetchConversations, fetchMyGroups, fetchUnhandledGroupApplyCount]);
 
   const quitGroup = useCallback(async (groupId: string) => {
     await im.group.quit(groupId);
