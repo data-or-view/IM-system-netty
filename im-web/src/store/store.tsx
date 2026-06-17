@@ -108,6 +108,7 @@ type Action =
   | { type: "ADD_FRIEND"; friend: FriendInfo }
   | { type: "REMOVE_FRIEND"; friendUserId: string }
   | { type: "ADD_CONVERSATION"; conversation: Conversation }
+  | { type: "CONFIRM_CONVERSATION"; previousConversationId: string; conversation: Conversation }
   | { type: "UPDATE_CONVERSATION_LATEST"; conversationId: string; latestMsg: string; latestMsgSendTime: number; incoming?: boolean }
   | { type: "UPDATE_CONVERSATION_UNREAD"; conversationId: string; unreadCount: number }
   | { type: "SET_GROUP_MEMBERS"; groupId: string; members: GroupMember[] }
@@ -271,6 +272,39 @@ function reducer(state: State, action: Action): State {
     case "ADD_CONVERSATION": {
       if (state.conversations.some((c) => c.conversationId === action.conversation.conversationId)) return state;
       return { ...state, conversations: [...state.conversations, action.conversation] };
+    }
+    case "CONFIRM_CONVERSATION": {
+      const previousId = action.previousConversationId;
+      const next = action.conversation;
+      const nextId = next.conversationId;
+      const mergedMessages = mergeConversationMessages(
+        state.messages[nextId] || [],
+        state.messages[previousId] || [],
+      );
+      const messages = { ...state.messages, [nextId]: mergedMessages };
+      if (previousId !== nextId) {
+        delete messages[previousId];
+      }
+
+      let replaced = false;
+      const conversations = state.conversations
+        .filter((c) => c.conversationId !== nextId || c.conversationId === previousId)
+        .map((c) => {
+          if (c.conversationId !== previousId) return c;
+          replaced = true;
+          return { ...c, ...next };
+        });
+
+      if (!replaced) {
+        conversations.push(next);
+      }
+
+      return {
+        ...state,
+        conversations,
+        messages,
+        activeConversationId: state.activeConversationId === previousId ? nextId : state.activeConversationId,
+      };
     }
     case "UPDATE_CONVERSATION_LATEST": {
       const convExists = state.conversations.some((c) => c.conversationId === action.conversationId);

@@ -112,7 +112,16 @@ export default function ChatArea() {
     contentType: OutgoingMessageContentTypeValue,
     content: unknown,
   ) => {
+    if (!conv) return;
     const msg = toOptimisticMessage(ack, state.userId || "", contentType, content);
+    dispatch({
+      type: "CONFIRM_CONVERSATION",
+      previousConversationId: conv.conversationId,
+      conversation: {
+        ...conv,
+        conversationId: ack.conversationId,
+      },
+    });
     dispatch({
       type: "APPEND_MESSAGE",
       conversationId: ack.conversationId,
@@ -125,7 +134,7 @@ export default function ChatArea() {
       latestMsgSendTime: msg.createTime,
     });
     void fetchConversations();
-  }, [dispatch, fetchConversations, state.userId]);
+  }, [conv, dispatch, fetchConversations, state.userId]);
 
   const sendCurrentTextMessage = useCallback(async (content: string) => {
     if (!conv) return;
