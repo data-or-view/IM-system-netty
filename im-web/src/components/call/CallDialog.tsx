@@ -197,21 +197,26 @@ function CallStatus({ call, title }: { call: CallState; title: string }) {
 
   const text = useMemo(() => {
     if (call.mode === "group") {
-      if (call.phase === "connecting") return "正在加入群视频...";
+      if (call.phase === "connectingMedia") return "正在加入群视频...";
+      if (call.phase === "reconnecting") return "媒体连接正在恢复...";
       return duration;
     }
     if (call.phase === "incoming") {
       return `${title} 邀请你${call.callType === "video" ? "视频" : "语音"}通话`;
     }
-    if (call.phase === "outgoing") return "正在呼叫对方...";
-    if (call.phase === "connecting") return "正在接入通话...";
+    if (call.phase === "dialing") return "正在发起呼叫...";
+    if (call.phase === "ringing") return "等待对方接听...";
+    if (call.phase === "accepted") return "对方已接听，正在准备媒体...";
+    if (call.phase === "connectingMedia") return "正在接入通话...";
+    if (call.phase === "reconnecting") return "媒体连接正在恢复...";
+    if (call.phase === "ending") return "正在结束通话...";
     return duration;
   }, [call.callType, call.mode, call.phase, duration, title]);
 
   return (
     <div className="mb-7 text-center">
       <div className="text-sm font-medium text-white/90">{text}</div>
-      {call.phase !== "connected" && (
+      {call.phase !== "connected" && call.phase !== "reconnecting" && (
         <div className="mt-2 text-xs text-white/50">请保持页面打开，媒体连接由 LiveKit 承载</div>
       )}
     </div>
@@ -248,7 +253,7 @@ function CallActions({
     );
   }
 
-  if (call.phase === "outgoing" || call.phase === "connecting") {
+  if (call.phase === "dialing" || call.phase === "ringing" || call.phase === "accepted" || call.phase === "connectingMedia") {
     return (
       <div className="flex items-center justify-center">
         <RoundButton label="取消" tone="danger" onClick={() => void onCancel()}>

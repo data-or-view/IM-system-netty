@@ -9,8 +9,10 @@ import com.im.api.SignalingAction;
 import com.im.api.content.ContentType;
 import com.im.api.content.IMessageContent;
 import com.im.api.content.SignalingContent;
+import com.im.common.exception.ConflictException;
 import com.im.common.exception.ValidationException;
 import com.im.common.exception.ForbiddenException;
+import com.im.core.call.SingleCallSession;
 import com.im.core.call.CallStateManager;
 import com.im.core.handler.ContentParser;
 import com.im.core.usecase.SendMessageResult;
@@ -93,19 +95,35 @@ public class ChatHandler implements RequestHandler {
      */
     private Object handleInvite(Map<String, Object> params, String callerId,
                                 String calleeId, SignalingContent signal) {
+        if (callStateManager != null
+                && (callStateManager.getActiveByUser(callerId) != null
+                || callStateManager.getActiveByUser(calleeId) != null)) {
+            throw new ConflictException("call busy");
+        }
+
         // 创建 LiveKit 房间并签发 token
         RoomInformation room = callManager.createRoom(callerId, calleeId, null);
+        String callType = normalizeCallType(signal.getCallType());
+        if (callStateManager != null) {
+            SingleCallSession session = callStateManager.createRinging(
+                    callerId, calleeId, callType, room.getRoomId(), room.getSfuEndpoint());
+            if (session == null) {
+                throw new ConflictException("call busy");
+            }
+        }
 
         // 构建携带有 room 信息的 INVITE 消息，转发给被叫
         SignalingContent inviteContent = new SignalingContent(
-                SignalingAction.CALLING, normalizeCallType(signal.getCallType()), room.getRoomId(), room.getCalleeToken(),
+                SignalingAction.CALLING, callType, room.getRoomId(), room.getCalleeToken(),
                 room.getSfuEndpoint(), signal.getSdp(), null, 0);
 
-        sendMessageUseCase.execute(params, callerId, calleeId, null, inviteContent);
-
-        // 开始超时计时
-        if (callStateManager != null) {
-            callStateManager.onInvite(callerId, calleeId, room.getRoomId());
+        try {
+            sendMessageUseCase.execute(params, callerId, calleeId, null, inviteContent);
+        } catch (RuntimeException e) {
+            if (callStateManager != null) {
+                callStateManager.onCancel(room.getRoomId());
+            }
+            throw e;
         }
 
         // 返回 room 信息给主叫（含 callerToken），主叫据此加入房间

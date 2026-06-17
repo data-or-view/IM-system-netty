@@ -56,7 +56,7 @@ export class MessageAPI {
   }
 
   /** 发送通话信令：接听、拒绝、取消、挂断等。 */
-  sendCallSignal(toUserId: string, action: string, roomId: string, duration?: number): Promise<SendMessageAck> {
+  sendCallSignal(toUserId: string, action: string, roomId: string, duration?: number, reason?: string): Promise<SendMessageAck> {
     return this.send({
       toUserId,
       contentType: "signal",
@@ -64,6 +64,7 @@ export class MessageAPI {
         action,
         roomId,
         ...(duration !== undefined ? { duration } : {}),
+        ...(reason ? { reason } : {}),
       },
     });
   }

@@ -149,7 +149,7 @@ class CallE2ETest extends BaseE2ETest {
 
             Map<String, Object> login2 = readJson(sendAndWait(callee, calleeIn,
                     "{\"op\":\"login\",\"seq\":1,\"userId\":\"" + uid2 + "\",\"platformId\":1}"));
-            String token2 = (String) ((Map<String, Object>) login2.get("data")).get("token");
+            assertNotNull(((Map<String, Object>) login2.get("data")).get("token"));
 
             // ── 主叫 INVITE ──
             String inviteJson = "{\"op\":\"chat.send\",\"seq\":10,"
@@ -194,6 +194,71 @@ class CallE2ETest extends BaseE2ETest {
         } finally {
             closeWs(caller);
             closeWs(callee);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void testInviteRejectedWhenParticipantBusy() throws Exception {
+        BlockingQueue<String> callerIn = new LinkedBlockingQueue<>();
+        BlockingQueue<String> calleeIn = new LinkedBlockingQueue<>();
+        BlockingQueue<String> secondCallerIn = new LinkedBlockingQueue<>();
+
+        var caller = connectWs(callerIn);
+        var callee = connectWs(calleeIn);
+        var secondCaller = connectWs(secondCallerIn);
+
+        try {
+            String uid1 = CALLER_ID + "_busy_1";
+            String uid2 = CALLEE_ID + "_busy_2";
+            String uid3 = CALLER_ID + "_busy_3";
+
+            assertEquals(0, readJson(sendAndWait(caller, callerIn,
+                    "{\"op\":\"register\",\"seq\":1,\"userId\":\"" + uid1 + "\"}")).get("code"));
+            assertEquals(0, readJson(sendAndWait(callee, calleeIn,
+                    "{\"op\":\"register\",\"seq\":1,\"userId\":\"" + uid2 + "\"}")).get("code"));
+            assertEquals(0, readJson(sendAndWait(secondCaller, secondCallerIn,
+                    "{\"op\":\"register\",\"seq\":1,\"userId\":\"" + uid3 + "\"}")).get("code"));
+
+            Map<String, Object> login1 = readJson(sendAndWait(caller, callerIn,
+                    "{\"op\":\"login\",\"seq\":1,\"userId\":\"" + uid1 + "\",\"platformId\":1}"));
+            String token1 = (String) ((Map<String, Object>) login1.get("data")).get("token");
+            Map<String, Object> login2 = readJson(sendAndWait(callee, calleeIn,
+                    "{\"op\":\"login\",\"seq\":1,\"userId\":\"" + uid2 + "\",\"platformId\":1}"));
+            String token2 = (String) ((Map<String, Object>) login2.get("data")).get("token");
+            Map<String, Object> login3 = readJson(sendAndWait(secondCaller, secondCallerIn,
+                    "{\"op\":\"login\",\"seq\":1,\"userId\":\"" + uid3 + "\",\"platformId\":1}"));
+            String token3 = (String) ((Map<String, Object>) login3.get("data")).get("token");
+
+            String firstInvite = "{\"op\":\"chat.send\",\"seq\":10,"
+                    + "\"toUserId\":\"" + uid2 + "\","
+                    + "\"_ct\":\"signal\","
+                    + "\"content\":{\"action\":\"INVITE\",\"callType\":\"video\"},"
+                    + "\"Authorization\":\"Bearer " + token1 + "\"}";
+            Map<String, Object> firstResp = readJson(sendAndWait(caller, callerIn, firstInvite));
+            assertEquals(0, firstResp.get("code"));
+            String roomId = (String) ((Map<String, Object>) firstResp.get("data")).get("roomId");
+            drainQueue(calleeIn);
+
+            String secondInvite = "{\"op\":\"chat.send\",\"seq\":11,"
+                    + "\"toUserId\":\"" + uid2 + "\","
+                    + "\"_ct\":\"signal\","
+                    + "\"content\":{\"action\":\"INVITE\",\"callType\":\"voice\"},"
+                    + "\"Authorization\":\"Bearer " + token3 + "\"}";
+            Map<String, Object> busyResp = readJson(sendAndWait(secondCaller, secondCallerIn, secondInvite));
+            assertEquals(409, busyResp.get("code"));
+            assertEquals("call busy", busyResp.get("detail"));
+
+            String cancel = "{\"op\":\"chat.send\",\"seq\":12,"
+                    + "\"toUserId\":\"" + uid2 + "\","
+                    + "\"_ct\":\"signal\","
+                    + "\"content\":{\"action\":\"CANCEL\",\"roomId\":\"" + roomId + "\"},"
+                    + "\"Authorization\":\"Bearer " + token1 + "\"}";
+            sendAndWait(caller, callerIn, cancel);
+        } finally {
+            closeWs(caller);
+            closeWs(callee);
+            closeWs(secondCaller);
         }
     }
 }

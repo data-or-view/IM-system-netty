@@ -734,6 +734,61 @@ test("sdk treats offline bare message payloads as message pushes", () => {
   assert.equal(rawPushes[0].data.messageId, "m-offline");
 });
 
+test("sdk emits typed call signal events from signal messages", () => {
+  const im = createIM({ wsUrl: "ws://example.test/ws" });
+  const incoming = [];
+  const rejected = [];
+  const allSignals = [];
+  im.on("callIncoming", (event) => incoming.push(event));
+  im.on("callRejected", (event) => rejected.push(event));
+  im.on("callSignal", (event) => allSignals.push(event));
+
+  im.transport.handleMessage(JSON.stringify({
+    op: "message",
+    data: {
+      messageId: "m-call-1",
+      conversationId: "single_u1_u2",
+      sequenceId: 1,
+      messageSeq: 1,
+      timestamp: 10,
+      fromUserId: "u1",
+      toUserId: "u2",
+      contentType: MessageContentType.SIGNAL,
+      content: JSON.stringify({
+        action: "CALLING",
+        roomId: "room_1",
+        token: "callee-token",
+        callType: "video",
+      }),
+    },
+  }));
+  im.transport.handleMessage(JSON.stringify({
+    op: "message",
+    data: {
+      messageId: "m-call-2",
+      conversationId: "single_u1_u2",
+      sequenceId: 2,
+      messageSeq: 2,
+      timestamp: 11,
+      fromUserId: "u1",
+      toUserId: "u2",
+      contentType: MessageContentType.SIGNAL,
+      content: JSON.stringify({
+        action: "REJECT",
+        roomId: "room_1",
+        reason: "busy",
+      }),
+    },
+  }));
+
+  assert.equal(incoming.length, 1);
+  assert.equal(incoming[0].signal.action, "CALLING");
+  assert.equal(incoming[0].signal.callType, "video");
+  assert.equal(rejected.length, 1);
+  assert.equal(rejected[0].signal.reason, "busy");
+  assert.deepEqual(allSignals.map((event) => event.signal.action), ["CALLING", "REJECT"]);
+});
+
 
 
 test("parseMessageContent exposes typed message content contracts", () => {

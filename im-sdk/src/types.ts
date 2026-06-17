@@ -1,5 +1,5 @@
 import type { IMError } from "./errors.js";
-import type { Message, OutgoingMessageContentTypeValue } from "./models/message.js";
+import type { Message, NormalizedSignalingContent, OutgoingMessageContentTypeValue } from "./models/message.js";
 
 // ── Connection Events ──
 
@@ -317,6 +317,13 @@ export interface StartCallParam {
   clientMsgId?: string;
 }
 
+export interface CallSignalEvent {
+  message: Message;
+  signal: NormalizedSignalingContent;
+  peerUserId: string;
+  roomId?: string;
+}
+
 // ── 事件类型 ──
 
 export interface IMEvents {
@@ -336,6 +343,20 @@ export interface IMEvents {
   systemMessage: (message: SystemMessageSummary) => void;
   /** 收到消息撤回通知 */
   messageRevoked: (event: MessageRevoked) => void;
+  /** 收到来电。 */
+  callIncoming: (event: CallSignalEvent) => void;
+  /** 对方已接听。 */
+  callAccepted: (event: CallSignalEvent) => void;
+  /** 对方已拒绝。 */
+  callRejected: (event: CallSignalEvent) => void;
+  /** 对方已取消。 */
+  callCanceled: (event: CallSignalEvent) => void;
+  /** 通话结束。 */
+  callEnded: (event: CallSignalEvent) => void;
+  /** 通话无人接听或服务端超时。 */
+  callTimeout: (event: CallSignalEvent) => void;
+  /** 兜底通话信令事件。 */
+  callSignal: (event: CallSignalEvent) => void;
   /** 所有服务端推送的兜底事件 */
   push: (event: WSPush) => void;
   /** 登录或心跳续期后 token 发生变化 */

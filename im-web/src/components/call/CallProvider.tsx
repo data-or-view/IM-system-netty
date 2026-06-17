@@ -6,6 +6,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type MutableRefObject,
   type ReactNode,
 } from "react";
 import {
@@ -29,11 +30,8 @@ import {
   type TrackPublishOptions,
 } from "livekit-client";
 import {
-  MessageContentType,
   SignalingAction,
-  normalizeSignalingContent,
-  parseMessageContent,
-  type Message as SDKMessage,
+  type CallSignalEvent,
   type SignalingActionName,
 } from "im-sdk";
 import { toast } from "sonner";
@@ -42,7 +40,7 @@ import { useStore } from "@/store/store";
 import { DEV_LIVEKIT_URL } from "@/config/runtime";
 
 export type CallType = "voice" | "video";
-export type CallPhase = "idle" | "outgoing" | "incoming" | "connecting" | "connected";
+export type CallPhase = "idle" | "dialing" | "ringing" | "incoming" | "accepted" | "connectingMedia" | "connected" | "reconnecting" | "ending" | "ended";
 export type CallMode = "single" | "group";
 
 export type CallPeer = {
@@ -79,6 +77,7 @@ export type CallState = {
   remoteAudioTrack?: RemoteAudioTrack;
   remoteVideoTrack?: RemoteVideoTrack;
   remoteMedias: RemoteMedia[];
+  endReason?: string;
 };
 
 type StartCallInput = {
@@ -165,8 +164,13 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const localAudioRef = useRef<LocalAudioTrack | null>(null);
   const localVideoRef = useRef<LocalVideoTrack | null>(null);
   const incomingTokenRef = useRef<string | null>(null);
+  const outgoingTokenRef = useRef<string | null>(null);
   const liveKitUrlRef = useRef<string>(import.meta.env.VITE_LIVEKIT_URL ?? DEV_LIVEKIT_URL);
   const weakNetworkNotifiedRef = useRef(false);
+  const seenSignalsRef = useRef(new Set<string>());
+  const titleBlinkTimerRef = useRef<number | null>(null);
+  const originalTitleRef = useRef(typeof document !== "undefined" ? document.title : "");
+  const ringtoneRef = useRef<AudioContext | null>(null);
 
   useEffect(() => {
     callRef.current = call;
@@ -184,6 +188,9 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const resetCall = useCallback(async () => {
     await disconnectCurrentRoom();
     incomingTokenRef.current = null;
+    outgoingTokenRef.current = null;
+    seenSignalsRef.current.clear();
+    stopIncomingAttention(titleBlinkTimerRef, ringtoneRef, originalTitleRef.current);
     setCall(EMPTY_CALL);
   }, [disconnectCurrentRoom]);
 
@@ -262,8 +269,14 @@ export function CallProvider({ children }: { children: ReactNode }) {
         weakNetworkNotifiedRef.current = false;
       }
     });
-    room.on(RoomEvent.Reconnecting, () => toast("媒体连接正在恢复..."));
-    room.on(RoomEvent.Reconnected, () => toast("媒体连接已恢复"));
+    room.on(RoomEvent.Reconnecting, () => {
+      setCall((prev) => prev.phase === "connected" ? { ...prev, phase: "reconnecting" } : prev);
+      toast("媒体连接正在恢复...");
+    });
+    room.on(RoomEvent.Reconnected, () => {
+      setCall((prev) => prev.phase === "reconnecting" ? { ...prev, phase: "connected" } : prev);
+      toast("媒体连接已恢复");
+    });
     room.on(RoomEvent.MediaDevicesError, (_error, kind) => {
       toast(kind === "videoinput" ? "摄像头不可用，请检查浏览器权限" : "麦克风不可用，请检查浏览器权限");
     });
@@ -308,7 +321,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
     if (!peer.userId || callRef.current.phase !== "idle") return;
 
     setCall({
-      phase: "outgoing",
+      phase: "dialing",
       mode: "single",
       direction: "outgoing",
       callType,
@@ -319,11 +332,11 @@ export function CallProvider({ children }: { children: ReactNode }) {
     });
 
     try {
+      await ensureMediaPermission(callType);
       const ack = await im.message.startCall({ toUserId: peer.userId, callType });
       liveKitUrlRef.current = ack.sfuEndpoint || liveKitUrlRef.current;
-      setCall((prev) => ({ ...prev, phase: "connecting", roomId: ack.roomId }));
-      await connectRoom(liveKitUrlRef.current, ack.token, callType);
-      setCall((prev) => ({ ...prev, phase: "connected", startedAt: Date.now(), roomId: ack.roomId }));
+      outgoingTokenRef.current = ack.token;
+      setCall((prev) => ({ ...prev, phase: "ringing", roomId: ack.roomId }));
     } catch (err) {
       console.error("start call failed:", err);
       toast(callErrorText(err, "发起通话失败"));
@@ -334,7 +347,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const joinGroupCall = useCallback(async ({ group }: JoinGroupCallInput) => {
     if (!group.groupId || callRef.current.phase !== "idle") return;
     setCall({
-      phase: "connecting",
+      phase: "connectingMedia",
       mode: "group",
       callType: "video",
       group,
@@ -381,8 +394,11 @@ export function CallProvider({ children }: { children: ReactNode }) {
     if (current.phase !== "incoming" || !current.peer?.userId || !current.roomId || !incomingTokenRef.current) return;
 
     try {
-      setCall((prev) => ({ ...prev, phase: "connecting" }));
+      stopIncomingAttention(titleBlinkTimerRef, ringtoneRef, originalTitleRef.current);
+      await ensureMediaPermission(current.callType);
+      setCall((prev) => ({ ...prev, phase: "accepted" }));
       await im.message.sendCallSignal(current.peer.userId, SignalingAction.ACCEPT, current.roomId);
+      setCall((prev) => ({ ...prev, phase: "connectingMedia" }));
       await connectRoom(liveKitUrlRef.current, incomingTokenRef.current, current.callType);
       setCall((prev) => ({ ...prev, phase: "connected", startedAt: Date.now() }));
     } catch (err) {
@@ -410,6 +426,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
   const hangupCall = useCallback(async () => {
     const current = callRef.current;
+    setCall((prev) => prev.phase === "idle" ? prev : { ...prev, phase: "ending" });
     const duration = current.startedAt ? Math.max(0, Math.floor((Date.now() - current.startedAt) / 1000)) : 0;
     if (current.mode === "group" && current.group?.groupId) {
       await im.group.leaveCall(current.group.groupId).catch(() => undefined);
@@ -440,45 +457,71 @@ export function CallProvider({ children }: { children: ReactNode }) {
     setCall((prev) => ({ ...prev, cameraOff: nextOff }));
   }, []);
 
-  const handleSignalMessage = useCallback((msg: SDKMessage) => {
-    if (msg.contentType !== MessageContentType.SIGNAL || msg.fromUserId === state.userId) return;
+  const handleCallIncoming = useCallback((event: CallSignalEvent) => {
+    const { message: msg, signal } = event;
+    if (msg.fromUserId === state.userId) return;
 
-    const parsed = parseMessageContent(msg);
-    if (parsed.type !== MessageContentType.SIGNAL) return;
-
-    const signal = normalizeSignalingContent(parsed.content);
-    if (!signal) return;
-
-    if (signal.action === SignalingAction.CALLING) {
-      if (!signal.roomId || !signal.token) return;
-      incomingTokenRef.current = signal.token;
-      liveKitUrlRef.current = signal.sfuEndpoint || liveKitUrlRef.current;
-      setCall((prev) => {
-        if (prev.phase !== "idle") return prev;
-        return {
-          phase: "incoming",
-          mode: "single",
-          direction: "incoming",
-          callType: signal.callType ?? "voice",
-          peer: resolvePeer(msg.fromUserId, state),
-          roomId: signal.roomId,
-          muted: false,
-          cameraOff: signal.callType !== "video",
-          remoteMedias: [],
-        };
-      });
+    if (!signal.roomId || !signal.token) return;
+    if (callRef.current.phase !== "idle") {
+      void im.message.sendCallSignal(msg.fromUserId, SignalingAction.REJECT, signal.roomId, undefined, "busy")
+        .catch(() => undefined);
       return;
     }
 
+    incomingTokenRef.current = signal.token;
+    liveKitUrlRef.current = signal.sfuEndpoint || liveKitUrlRef.current;
+    setCall({
+      phase: "incoming",
+      mode: "single",
+      direction: "incoming",
+      callType: signal.callType ?? "voice",
+      peer: resolvePeer(msg.fromUserId, state),
+      roomId: signal.roomId,
+      muted: false,
+      cameraOff: signal.callType !== "video",
+      remoteMedias: [],
+    });
+    startIncomingAttention(titleBlinkTimerRef, ringtoneRef, originalTitleRef.current, `${resolvePeer(msg.fromUserId, state).name || msg.fromUserId} 来电`);
+  }, [state]);
+
+  const handleCallSignal = useCallback((event: CallSignalEvent) => {
+    const { message: msg, signal } = event;
+    if (msg.fromUserId === state.userId) return;
+    const key = `${signal.roomId || ""}:${signal.action}:${msg.messageId || msg.messageSeq || msg.timestamp}`;
+    if (seenSignalsRef.current.has(key)) return;
+    seenSignalsRef.current.add(key);
+    if (seenSignalsRef.current.size > 200) {
+      seenSignalsRef.current.clear();
+    }
     const current = callRef.current;
     if (!signal.roomId || signal.roomId !== current.roomId) return;
-    handleRemoteSignal(signal.action, resetCall);
-  }, [resetCall, state]);
+
+    if (signal.action === SignalingAction.ACCEPT) {
+      if (current.direction !== "outgoing" || !outgoingTokenRef.current) return;
+      setCall((prev) => ({ ...prev, phase: "connectingMedia" }));
+      void connectRoom(liveKitUrlRef.current, outgoingTokenRef.current, current.callType)
+        .then(() => setCall((prev) => ({ ...prev, phase: "connected", startedAt: Date.now() })))
+        .catch(async (err) => {
+          console.error("connect accepted call failed:", err);
+          toast(callErrorText(err, "接入通话失败"));
+          await im.message.sendCallSignal(msg.fromUserId, SignalingAction.HANGUP, signal.roomId!, undefined, "media_failed")
+            .catch(() => undefined);
+          await resetCall();
+        });
+      return;
+    }
+
+    handleRemoteSignal(signal.action, signal.reason, resetCall);
+  }, [connectRoom, resetCall, state.userId]);
 
   useEffect(() => {
-    const unsub = im.on("message", handleSignalMessage);
-    return () => unsub();
-  }, [handleSignalMessage]);
+    const unsubIncoming = im.on("callIncoming", handleCallIncoming);
+    const unsubSignal = im.on("callSignal", handleCallSignal);
+    return () => {
+      unsubIncoming();
+      unsubSignal();
+    };
+  }, [handleCallIncoming, handleCallSignal]);
 
   useEffect(() => () => {
     void disconnectCurrentRoom();
@@ -515,9 +558,9 @@ function resolvePeer(userId: string, state: ReturnType<typeof useStore>["state"]
   };
 }
 
-function handleRemoteSignal(action: SignalingActionName, resetCall: () => Promise<void>) {
+function handleRemoteSignal(action: SignalingActionName, reason: string | undefined, resetCall: () => Promise<void>) {
   if (action === SignalingAction.REJECT) {
-    toast("对方已拒绝");
+    toast(reason === "busy" ? "对方正在通话中" : "对方已拒绝");
     void resetCall();
   } else if (action === SignalingAction.CANCEL) {
     toast("对方已取消");
@@ -543,5 +586,71 @@ function callErrorText(err: unknown, fallback: string): string {
   if (lower.includes("not found") || lower.includes("not_active") || lower.includes("inactive")) {
     return "通话已结束或对方尚未接入";
   }
+  if (lower.includes("conflict") || lower.includes("busy") || lower.includes("409")) {
+    return "当前已有通话或对方正在通话中";
+  }
   return fallback;
+}
+
+async function ensureMediaPermission(callType: CallType): Promise<void> {
+  if (!navigator.mediaDevices?.getUserMedia) return;
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: AUDIO_CAPTURE_OPTIONS,
+    video: callType === "video" ? VIDEO_CAPTURE_OPTIONS : false,
+  });
+  stream.getTracks().forEach((track) => track.stop());
+}
+
+function startIncomingAttention(
+  titleTimerRef: MutableRefObject<number | null>,
+  ringtoneRef: MutableRefObject<AudioContext | null>,
+  originalTitle: string,
+  title: string,
+) {
+  stopIncomingAttention(titleTimerRef, ringtoneRef, originalTitle);
+  if (typeof document !== "undefined") {
+    let visible = false;
+    titleTimerRef.current = window.setInterval(() => {
+      visible = !visible;
+      document.title = visible ? title : originalTitle;
+    }, 900);
+  }
+  try {
+    const AudioCtor = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioCtor) return;
+    const ctx = new AudioCtor();
+    ringtoneRef.current = ctx;
+    const ring = () => {
+      if (ringtoneRef.current !== ctx) return;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.frequency.value = 880;
+      gain.gain.value = 0.04;
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      window.setTimeout(() => osc.stop(), 180);
+      window.setTimeout(ring, 1200);
+    };
+    void ctx.resume().then(ring).catch(() => undefined);
+  } catch {
+    // Browser autoplay rules may block audio until user gesture; title blinking still works.
+  }
+}
+
+function stopIncomingAttention(
+  titleTimerRef: MutableRefObject<number | null>,
+  ringtoneRef: MutableRefObject<AudioContext | null>,
+  originalTitle: string,
+) {
+  if (titleTimerRef.current !== null) {
+    window.clearInterval(titleTimerRef.current);
+    titleTimerRef.current = null;
+  }
+  if (typeof document !== "undefined") {
+    document.title = originalTitle;
+  }
+  const ctx = ringtoneRef.current;
+  ringtoneRef.current = null;
+  void ctx?.close().catch(() => undefined);
 }

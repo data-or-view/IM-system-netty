@@ -24,7 +24,7 @@ import java.util.concurrent.TimeUnit;
  * <p>追踪活跃通话，在 INVITE 后启动定时器。
  * 若超时未收到 ACCEPT/REJECT，向双方推送 TIMEOUT 信令。</p>
  *
- * <p>线程安全：ConcurrentHashMap.remove() 保证 cancel/fire 不冲突。</p>
+ * <p>通话状态以 Redis store 为准，本地 map 只保存当前节点创建的超时任务。</p>
  */
 public class CallStateManager {
 
@@ -34,49 +34,76 @@ public class CallStateManager {
     private final ConcurrentHashMap<String, CallSession> activeCalls = new ConcurrentHashMap<>();
     private final ScheduledExecutorService timeoutExecutor;
     private final IMessageQueue messageQueue;
+    private final SingleCallStateStore stateStore;
     private final long timeoutSeconds;
 
     private record CallSession(String callerId, String calleeId, String roomId,
                                ScheduledFuture<?> timeoutFuture) {}
 
-    public CallStateManager(IMessageQueue messageQueue, long timeoutSeconds) {
+    public CallStateManager(IMessageQueue messageQueue, SingleCallStateStore stateStore, long timeoutSeconds) {
         this.messageQueue = messageQueue;
+        this.stateStore = stateStore;
         this.timeoutSeconds = timeoutSeconds;
         this.timeoutExecutor = IMExecutors.newScheduledExecutor("im-call-timeout", 1);
         log.info("CallStateManager initialized: timeout={}s", timeoutSeconds);
+    }
+
+    public SingleCallSession createRinging(String callerId, String calleeId, String callType,
+                                           String roomId, String sfuEndpoint) {
+        long now = System.currentTimeMillis();
+        SingleCallSession session = new SingleCallSession(roomId, callerId, calleeId, callType,
+                SingleCallSession.STATUS_RINGING, sfuEndpoint, now, 0);
+        SingleCallSession created = stateStore.createIfUsersIdle(session);
+        if (created != null) {
+            scheduleTimeout(created);
+        }
+        return created;
+    }
+
+    public SingleCallSession getActiveByUser(String userId) {
+        return stateStore.getActiveByUser(userId);
     }
 
     /**
      * INVITE 已处理，开始超时计时。
      */
     public void onInvite(String callerId, String calleeId, String roomId) {
+        scheduleTimeout(new SingleCallSession(roomId, callerId, calleeId, "voice",
+                SingleCallSession.STATUS_RINGING, null, System.currentTimeMillis(), 0));
+    }
+
+    private void scheduleTimeout(SingleCallSession session) {
         ScheduledFuture<?> future = timeoutExecutor.schedule(
-                () -> fireTimeout(roomId, callerId, calleeId),
+                () -> fireTimeout(session.roomId()),
                 timeoutSeconds, TimeUnit.SECONDS);
 
-        activeCalls.put(roomId, new CallSession(callerId, calleeId, roomId, future));
+        activeCalls.put(session.roomId(), new CallSession(session.callerId(), session.calleeId(), session.roomId(), future));
         log.debug("Call timeout scheduled: room={}, caller={}, callee={}, timeout={}s",
-                roomId, callerId, calleeId, timeoutSeconds);
+                session.roomId(), session.callerId(), session.calleeId(), timeoutSeconds);
     }
 
     /** 被叫接听。 */
     public void onAccept(String roomId) {
         cancelTimeout(roomId, "ACCEPT");
+        stateStore.accept(roomId);
     }
 
     /** 被叫拒绝。 */
     public void onReject(String roomId) {
         cancelTimeout(roomId, "REJECT");
+        stateStore.end(roomId);
     }
 
     /** 主叫取消。 */
     public void onCancel(String roomId) {
         cancelTimeout(roomId, "CANCEL");
+        stateStore.end(roomId);
     }
 
     /** 挂断。 */
     public void onHangup(String roomId) {
         cancelTimeout(roomId, "HANGUP");
+        stateStore.end(roomId);
     }
 
     /** 关闭调度器，取消所有待执行超时。 */
@@ -106,36 +133,35 @@ public class CallStateManager {
         }
     }
 
-    private void fireTimeout(String roomId, String callerId, String calleeId) {
-        // 原子移除，防止重复执行
-        CallSession session = activeCalls.remove(roomId);
-        if (session == null) {
-            return; // 已经被 ACCEPT/REJECT 等取消
-        }
+    private void fireTimeout(String roomId) {
+        activeCalls.remove(roomId);
+        SingleCallSession session = stateStore.timeoutIfRinging(roomId);
+        if (session == null) return;
 
-        log.info("Call timeout fired: room={}, caller={}, callee={}", roomId, callerId, calleeId);
+        log.info("Call timeout fired: room={}, caller={}, callee={}", roomId, session.callerId(), session.calleeId());
 
         try {
             SignalingContent signal = new SignalingContent(SignalingAction.TIMEOUT, roomId, null);
+            signal.setReason("timeout");
             byte[] body = ContentSerializer.toBytes(signal);
             String contentStr = new String(body, StandardCharsets.UTF_8);
             long now = System.currentTimeMillis();
 
             // 发给主叫
-            Message callerMsg = Message.createSingle(SYSTEM_USER_ID, callerId, null,
+            Message callerMsg = Message.createSingle(SYSTEM_USER_ID, session.callerId(), null,
                     ContentType.SIGNAL.getId(), contentStr, 0);
             callerMsg.setMessageId(IdGenerator.messageId());
             callerMsg.setTimestamp(now);
             messageQueue.publishAsync(MessageQueueTopics.DELIVER, callerMsg);
 
             // 发给被叫
-            Message calleeMsg = Message.createSingle(SYSTEM_USER_ID, calleeId, null,
+            Message calleeMsg = Message.createSingle(SYSTEM_USER_ID, session.calleeId(), null,
                     ContentType.SIGNAL.getId(), contentStr, 0);
             calleeMsg.setMessageId(IdGenerator.messageId());
             calleeMsg.setTimestamp(now);
             messageQueue.publishAsync(MessageQueueTopics.DELIVER, calleeMsg);
 
-            log.info("Timeout messages sent: room={}, caller={}, callee={}", roomId, callerId, calleeId);
+            log.info("Timeout messages sent: room={}, caller={}, callee={}", roomId, session.callerId(), session.calleeId());
         } catch (Exception e) {
             log.error("Failed to send timeout messages for room={}", roomId, e);
         }

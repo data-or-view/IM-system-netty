@@ -30,6 +30,7 @@ import com.im.core.call.CallStateManager;
 import com.im.core.call.GroupCallManager;
 import com.im.core.call.LiveKitCallManager;
 import com.im.core.call.RedisGroupCallStateStore;
+import com.im.core.call.RedisSingleCallStateStore;
 import com.im.core.cache.RedisJsonCache;
 import com.im.core.cache.SafeCache;
 import com.im.core.conversation.DbConversationManager;
@@ -282,7 +283,8 @@ final class ServerComponentsFactory {
         }
 
         CallStateManager callStateManager = callManager != null
-                ? new CallStateManager(messageQueue, config.getLong("im.call.timeout-seconds", 30))
+                ? new CallStateManager(messageQueue, new RedisSingleCallStateStore(redisConfig),
+                config.getLong("im.call.timeout-seconds", 30))
                 : null;
         GroupCallManager groupCallManager = callManager != null
                 ? new GroupCallManager(groupManager, callManager, new RedisGroupCallStateStore(redisConfig),

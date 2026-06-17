@@ -1,5 +1,7 @@
 import {
   MessageContentType,
+  SignalingAction,
+  normalizeSignalingContent,
   parseMessageContent,
   type ParsedMessageContent,
 } from "im-sdk";
@@ -33,7 +35,7 @@ export function MessageContentRenderer({ message }: Props) {
     case MessageContentType.SYSTEM:
       return <SystemBlock text={parsed.content.message || parsed.content.systemType || parsed.raw || "系统消息"} />;
     case MessageContentType.SIGNAL:
-      return <InfoBlock icon={<Phone className="h-4 w-4" />} title="音视频通话" detail={signalText(parsed.content.duration)} />;
+      return <InfoBlock icon={<Phone className="h-4 w-4" />} {...signalDisplay(parsed.content)} />;
     case MessageContentType.CUSTOM:
       return <InfoBlock icon={<Package className="h-4 w-4" />} title={parsed.content.description || "自定义消息"} detail={parsed.content.data} />;
     case MessageContentType.REVOKED:
@@ -193,6 +195,25 @@ function formatDuration(duration?: number): string {
   return minute > 0 ? `${minute}:${second.toString().padStart(2, "0")}` : `${second}s`;
 }
 
-function signalText(duration?: number): string | undefined {
-  return duration && duration > 0 ? `通话 ${formatDuration(duration)}` : undefined;
+function signalDisplay(content: Extract<ParsedMessageContent, { type: typeof MessageContentType.SIGNAL }>["content"]): { title: string; detail?: string } {
+  const signal = normalizeSignalingContent(content);
+  const callType = signal?.callType === "video" ? "视频通话" : "语音通话";
+  if (!signal) return { title: "音视频通话" };
+  switch (signal.action) {
+    case SignalingAction.CALLING:
+    case SignalingAction.INVITE:
+      return { title: callType, detail: "正在呼叫" };
+    case SignalingAction.ACCEPT:
+      return { title: callType, detail: "已接听" };
+    case SignalingAction.REJECT:
+      return { title: callType, detail: signal.reason === "busy" ? "对方忙线" : "已拒绝" };
+    case SignalingAction.CANCEL:
+      return { title: callType, detail: "已取消" };
+    case SignalingAction.HANGUP:
+      return { title: callType, detail: signal.duration && signal.duration > 0 ? `通话 ${formatDuration(signal.duration)}` : "已结束" };
+    case SignalingAction.TIMEOUT:
+      return { title: callType, detail: "未接听" };
+    default:
+      return { title: callType };
+  }
 }

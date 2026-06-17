@@ -39,6 +39,8 @@ public class SignalingContent implements IMessageContent {
     private String ice;
     /** 通话时长（秒，仅 HANGUP 时携带） */
     private int duration;
+    /** 状态原因：busy / offline / timeout / media_failed 等 */
+    private String reason;
 
     /** Jackson 反序列化用 */
     public SignalingContent() {
@@ -90,6 +92,7 @@ public class SignalingContent implements IMessageContent {
     public String getSdp() { return sdp; }
     public String getIce() { return ice; }
     public int getDuration() { return duration; }
+    public String getReason() { return reason; }
 
     public void setAction(SignalingAction action) { this.action = action; }
     public void setCallType(String callType) { this.callType = callType; }
@@ -99,4 +102,5 @@ public class SignalingContent implements IMessageContent {
     public void setSdp(String sdp) { this.sdp = sdp; }
     public void setIce(String ice) { this.ice = ice; }
     public void setDuration(int duration) { this.duration = duration; }
+    public void setReason(String reason) { this.reason = reason; }
 }

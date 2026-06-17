@@ -118,6 +118,7 @@ export interface SignalingContent {
   ice?: string;
   _ice?: string;
   duration?: number;
+  reason?: string;
 }
 
 export const SignalingAction = {
@@ -165,6 +166,7 @@ export interface NormalizedSignalingContent {
   sdp?: string;
   ice?: string;
   duration?: number;
+  reason?: string;
 }
 
 export interface StartCallAck {
@@ -315,6 +317,7 @@ export function normalizeSignalingContent(content: SignalingContent): Normalized
     sdp: content.sdp ?? content._sdp,
     ice: content.ice ?? content._ice,
     duration: content.duration,
+    reason: typeof content.reason === "string" ? content.reason : undefined,
   };
 }
 

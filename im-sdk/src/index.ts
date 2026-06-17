@@ -38,7 +38,27 @@ export * from "./types.js";
 export { createClientMsgId } from "./protocol/client-msg-id.js";
 
 // ── 内部导入 ──
-import { type ConnectionState, type IMEvents, type IMOptions, type Message, type FriendApply, type GroupApply, type ReconnectSyncResult, type SystemMessageSummary, type MessageRevoked, type TokenPair, type WSPush, IMError, IMTimeoutError, PUSH_OP, toIMError } from "./types.js";
+import {
+  MessageContentType,
+  SignalingAction,
+  normalizeSignalingContent,
+  parseMessageContent,
+  type ConnectionState,
+  type IMEvents,
+  type IMOptions,
+  type Message,
+  type FriendApply,
+  type GroupApply,
+  type ReconnectSyncResult,
+  type SystemMessageSummary,
+  type MessageRevoked,
+  type TokenPair,
+  type WSPush,
+  IMError,
+  IMTimeoutError,
+  PUSH_OP,
+  toIMError,
+} from "./types.js";
 import { WsTransport } from "./transport/ws.js";
 import { HttpTransport } from "./transport/http.js";
 import { UserAPI } from "./api/user.js";
@@ -292,6 +312,7 @@ export class IMSDK {
       return;
     }
     this.bus.emit("message", msg);
+    this.emitCallSignalIfNeeded(msg);
     this.messageBatch.push(msg);
     if (this.messageBatch.length >= this.messageBatchSize || this.messageBatchInterval <= 0) {
       this.flushMessageBatch();
@@ -299,6 +320,43 @@ export class IMSDK {
     }
     if (!this.messageBatchTimer) {
       this.messageBatchTimer = setTimeout(() => this.flushMessageBatch(), this.messageBatchInterval);
+    }
+  }
+
+  private emitCallSignalIfNeeded(msg: Message): void {
+    if (msg.contentType !== MessageContentType.SIGNAL) return;
+    const parsed = parseMessageContent(msg);
+    if (parsed.type !== MessageContentType.SIGNAL) return;
+    const signal = normalizeSignalingContent(parsed.content);
+    if (!signal) return;
+    const event = {
+      message: msg,
+      signal,
+      peerUserId: msg.fromUserId,
+      roomId: signal.roomId,
+    };
+    this.bus.emit("callSignal", event);
+    switch (signal.action) {
+      case SignalingAction.CALLING:
+        this.bus.emit("callIncoming", event);
+        break;
+      case SignalingAction.ACCEPT:
+        this.bus.emit("callAccepted", event);
+        break;
+      case SignalingAction.REJECT:
+        this.bus.emit("callRejected", event);
+        break;
+      case SignalingAction.CANCEL:
+        this.bus.emit("callCanceled", event);
+        break;
+      case SignalingAction.HANGUP:
+        this.bus.emit("callEnded", event);
+        break;
+      case SignalingAction.TIMEOUT:
+        this.bus.emit("callTimeout", event);
+        break;
+      default:
+        break;
     }
   }
 
