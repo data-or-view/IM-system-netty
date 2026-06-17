@@ -3,12 +3,14 @@ package com.im.core.call;
 import com.im.core.redis.RedisConfiguration;
 import io.lettuce.core.api.sync.RedisCommands;
 
+import java.util.Comparator;
+import java.util.List;
 import java.util.Map;
 
 public class RedisGroupCallStateStore implements GroupCallStateStore {
 
     private static final String GROUP_KEY_PREFIX = "im:group_call:group:";
-    private static final String MEMBER_KEY_PREFIX = "im:group_call:members:";
+    private static final String MEMBER_KEY_PREFIX = "im:group_call:members:v2:";
     private static final long DEFAULT_TTL_SECONDS = 12 * 60 * 60;
 
     private final RedisConfiguration redisConfig;
@@ -45,10 +47,11 @@ public class RedisGroupCallStateStore implements GroupCallStateStore {
                     "callType", session.callType(),
                     "initiatorUserId", session.initiatorUserId(),
                     "sfuEndpoint", session.sfuEndpoint(),
-                    "startedAt", String.valueOf(session.startedAt())
+                    "startedAt", String.valueOf(session.startedAt()),
+                    "updatedAt", String.valueOf(session.updatedAt())
             ));
             sync.expire(key, ttlSeconds);
-            sync.sadd(memberKey(session.groupId()), session.initiatorUserId());
+            sync.hset(memberKey(session.groupId()), session.initiatorUserId(), String.valueOf(session.startedAt()));
             sync.expire(memberKey(session.groupId()), ttlSeconds);
             return read(sync, session.groupId());
         }
@@ -59,8 +62,10 @@ public class RedisGroupCallStateStore implements GroupCallStateStore {
         try (RedisConfiguration.CloseableRedisCommands redis = redisConfig.createSyncCommands()) {
             RedisCommands<String, String> sync = redis.sync();
             if (!sync.exists(groupKey(groupId)).equals(1L)) return null;
-            sync.sadd(memberKey(groupId), userId);
+            sync.hset(memberKey(groupId), userId, String.valueOf(System.currentTimeMillis()));
             sync.expire(memberKey(groupId), ttlSeconds);
+            sync.hset(groupKey(groupId), "updatedAt", String.valueOf(System.currentTimeMillis()));
+            sync.expire(groupKey(groupId), ttlSeconds);
             return read(sync, groupId);
         }
     }
@@ -71,12 +76,13 @@ public class RedisGroupCallStateStore implements GroupCallStateStore {
             RedisCommands<String, String> sync = redis.sync();
             GroupCallSession before = read(sync, groupId);
             if (before == null) return null;
-            sync.srem(memberKey(groupId), userId);
-            Long count = sync.scard(memberKey(groupId));
+            sync.hdel(memberKey(groupId), userId);
+            Long count = sync.hlen(memberKey(groupId));
             if (count == null || count == 0L) {
                 sync.del(groupKey(groupId), memberKey(groupId));
                 return before.withParticipantCount(0).markEnded();
             }
+            sync.hset(groupKey(groupId), "updatedAt", String.valueOf(System.currentTimeMillis()));
             return read(sync, groupId);
         }
     }
@@ -94,7 +100,10 @@ public class RedisGroupCallStateStore implements GroupCallStateStore {
     private GroupCallSession read(RedisCommands<String, String> sync, String groupId) {
         Map<String, String> data = sync.hgetall(groupKey(groupId));
         if (data == null || data.isEmpty()) return null;
-        Long participants = sync.scard(memberKey(groupId));
+        List<GroupCallParticipant> participants = sync.hgetall(memberKey(groupId)).entrySet().stream()
+                .map(entry -> new GroupCallParticipant(entry.getKey(), parseLong(entry.getValue())))
+                .sorted(Comparator.comparingLong(GroupCallParticipant::joinedAt))
+                .toList();
         return new GroupCallSession(
                 data.get("groupId"),
                 data.get("roomId"),
@@ -102,7 +111,9 @@ public class RedisGroupCallStateStore implements GroupCallStateStore {
                 data.get("initiatorUserId"),
                 data.get("sfuEndpoint"),
                 parseLong(data.get("startedAt")),
-                participants != null ? participants.intValue() : 0,
+                parseLong(data.get("updatedAt")),
+                participants.size(),
+                participants,
                 false);
     }
 

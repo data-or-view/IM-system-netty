@@ -15,7 +15,7 @@ package com.im.api;
  * 离线推送触发时机：
  *   DeliveryConsumer 中查路由表发现全部离线 → 调用本接口发送推送。
  *
- * 当前实现：LocalOfflinePush（占位 no-op）。
+ * 当前尚未接入生产实现；不要用 no-op 占位实现冒充真实离线推送。
  */
 public interface IOfflinePush {
 

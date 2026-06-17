@@ -7,6 +7,7 @@ import com.im.api.GroupDisbandResult;
 import com.im.api.GroupInformation;
 import com.im.api.GroupJoinResult;
 import com.im.api.GroupMemberInformation;
+import com.im.api.GroupMemberRole;
 import com.im.api.ConversationIds;
 import com.im.api.IConversationManager;
 import com.im.api.IGroupManager;
@@ -79,6 +80,9 @@ public class GroupHandler implements RequestHandler {
             case "group.kick" -> handleKick(req);
             case "group.disband" -> handleDisband(req);
             case "group.info.update" -> handleInfoUpdate(req);
+            case "group.owner.transfer" -> handleOwnerTransfer(req);
+            case "group.member.role.set" -> handleMemberRoleSet(req);
+            case "group.member.info.update" -> handleMemberInfoUpdate(req);
             case "group.info" -> handleInfo(req);
             case "group.list" -> handleList(req);
             case "group.search" -> handleSearch(req);
@@ -195,6 +199,34 @@ public class GroupHandler implements RequestHandler {
                 req.getInt("lookMemberInfo", -1),
                 req.getInt("applyMemberFriend", -1),
                 req.currentUserId());
+        groupSystemMessagePublisher.groupInfoUpdated(groupId, req.currentUserId());
+        return Map.of("status", "OK");
+    }
+
+    private Object handleOwnerTransfer(ApiRequest req) {
+        String groupId = Preconditions.requireText(req.getString("groupId"), "groupId");
+        String operatorId = RequestPreconditions.requireUser(req);
+        String targetUserId = Preconditions.requireText(req.getString("targetUserId"), "targetUserId");
+        groupManager.transferOwner(groupId, operatorId, targetUserId);
+        groupSystemMessagePublisher.ownerTransferred(groupId, operatorId, targetUserId);
+        return Map.of("status", "OK");
+    }
+
+    private Object handleMemberRoleSet(ApiRequest req) {
+        String groupId = Preconditions.requireText(req.getString("groupId"), "groupId");
+        String operatorId = RequestPreconditions.requireUser(req);
+        String targetUserId = Preconditions.requireText(req.getString("targetUserId"), "targetUserId");
+        GroupMemberRole role = parseMutableRole(req.param("roleLevel"));
+        groupManager.setMemberRole(groupId, operatorId, targetUserId, role.getCode());
+        groupSystemMessagePublisher.roleChanged(groupId, targetUserId, operatorId, role);
+        return Map.of("status", "OK", "roleLevel", role.name());
+    }
+
+    private Object handleMemberInfoUpdate(ApiRequest req) {
+        String groupId = Preconditions.requireText(req.getString("groupId"), "groupId");
+        String userId = RequestPreconditions.requireUser(req);
+        String nickname = Preconditions.requireText(req.getString("nickname"), "nickname");
+        groupManager.setMemberInfo(groupId, userId, nickname);
         return Map.of("status", "OK");
     }
 
@@ -287,5 +319,32 @@ public class GroupHandler implements RequestHandler {
         if (!"owner".equals(role) && !"admin".equals(role)) {
             throw new ForbiddenException("only group owner or admin can operate group apply");
         }
+    }
+
+    private GroupMemberRole parseMutableRole(Object value) {
+        if (value instanceof Number number) {
+            GroupMemberRole role = GroupMemberRole.fromCode(number.intValue());
+            return requireMutableRole(role);
+        }
+        if (value instanceof String text) {
+            String trimmed = Preconditions.requireText(text, "roleLevel");
+            try {
+                return requireMutableRole(GroupMemberRole.valueOf(trimmed.toUpperCase()));
+            } catch (IllegalArgumentException ignored) {
+                try {
+                    return requireMutableRole(GroupMemberRole.fromCode(Integer.parseInt(trimmed)));
+                } catch (NumberFormatException ex) {
+                    throw new ValidationException("roleLevel must be MEMBER or ADMIN");
+                }
+            }
+        }
+        throw new ValidationException("roleLevel is required");
+    }
+
+    private GroupMemberRole requireMutableRole(GroupMemberRole role) {
+        if (role != GroupMemberRole.MEMBER && role != GroupMemberRole.ADMIN) {
+            throw new ValidationException("roleLevel must be MEMBER or ADMIN");
+        }
+        return role;
     }
 }

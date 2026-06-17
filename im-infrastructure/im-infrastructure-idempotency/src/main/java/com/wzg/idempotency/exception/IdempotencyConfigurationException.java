@@ -24,7 +24,7 @@ package com.wzg.idempotency.exception;
  * <h3>典型场景示例：</h3>
  * <pre>{@code
  * Idempotency.config()
- *     .withPersistenceStore(new InMemoryPersistenceStore())
+ *     .withPersistenceStore(persistenceStore)
  *     .withConfig(IdempotencyConfig.builder().build())
  *     .configure();
  *

@@ -388,11 +388,19 @@ test("friend and group mutation payloads match backend HTTP contract", async () 
   await friendApi.black("u3");
   await groupApi.kick("g1", "u4");
   await groupApi.muteAll("g1", true);
+  await groupApi.transferOwner("g1", "u5");
+  await groupApi.setMemberRole("g1", "u6", "ADMIN");
+  await groupApi.updateMyGroupNickname("g1", "群内小王");
+  await groupApi.updateInfo("g1", { groupName: "新群名", needVerification: "NEED_APPROVAL" });
 
   assert.deepEqual(calls[0], { method: "POST", path: "/api/friend/remove", body: { friendUserId: "u2" } });
   assert.deepEqual(calls[1], { method: "POST", path: "/api/friend/black", body: { blockedUserId: "u3" } });
   assert.deepEqual(calls[2], { method: "POST", path: "/api/group/kick", body: { groupId: "g1", targetUserId: "u4" } });
   assert.deepEqual(calls[3], { method: "POST", path: "/api/group/mute/all", body: { groupId: "g1", mute: true } });
+  assert.deepEqual(calls[4], { method: "POST", path: "/api/group/owner/transfer", body: { groupId: "g1", targetUserId: "u5" } });
+  assert.deepEqual(calls[5], { method: "POST", path: "/api/group/member/role", body: { groupId: "g1", targetUserId: "u6", roleLevel: "ADMIN" } });
+  assert.deepEqual(calls[6], { method: "POST", path: "/api/group/member/info/update", body: { groupId: "g1", nickname: "群内小王" } });
+  assert.deepEqual(calls[7], { method: "POST", path: "/api/group/info/update", body: { groupId: "g1", groupName: "新群名", needVerification: 1 } });
 });
 
 test("group.join preserves backend join result", async () => {
@@ -418,6 +426,39 @@ test("group.applyList preserves display fields for approval UI", async () => {
   const groupApi = new GroupAPI(http);
 
   assert.deepEqual(await groupApi.applyList(true), [apply]);
+});
+
+test("group call APIs preserve active state and participant summaries", async () => {
+  const active = {
+    active: true,
+    groupId: "g1",
+    roomId: "room1",
+    callType: "video",
+    initiatorUserId: "u1",
+    startedAt: 10,
+    updatedAt: 20,
+    participantCount: 2,
+    participants: [
+      { userId: "u1", joinedAt: 10 },
+      { userId: "u2", joinedAt: 20 },
+    ],
+  };
+  const { http, calls } = createHttpCapture((method, path) => {
+    if (path === "/api/group/call/active") return { active: false, ended: true, groupId: "g1" };
+    if (path === "/api/group/call/join") return { ...active, token: "token-u2", sfuEndpoint: "ws://livekit.test" };
+    return active;
+  });
+  const groupApi = new GroupAPI(http);
+
+  assert.deepEqual(await groupApi.activeCall("g1"), { active: false, ended: true, groupId: "g1" });
+  assert.deepEqual(await groupApi.joinCall("g1"), { ...active, token: "token-u2", sfuEndpoint: "ws://livekit.test" });
+  await groupApi.leaveCall("g1");
+  await groupApi.endCall("g1");
+
+  assert.deepEqual(calls[0], { method: "GET", path: "/api/group/call/active", query: { groupId: "g1" } });
+  assert.deepEqual(calls[1], { method: "POST", path: "/api/group/call/join", body: { groupId: "g1" } });
+  assert.deepEqual(calls[2], { method: "POST", path: "/api/group/call/leave", body: { groupId: "g1" } });
+  assert.deepEqual(calls[3], { method: "POST", path: "/api/group/call/end", body: { groupId: "g1" } });
 });
 
 test("system API uses system message HTTP endpoints", async () => {

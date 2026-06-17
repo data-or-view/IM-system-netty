@@ -30,8 +30,10 @@ public class GroupCallManager {
 
         String roomId = IdGenerator.roomId();
         RoomInformation room = callManager.createRoom(operatorId, null, roomId);
+        long now = System.currentTimeMillis();
         GroupCallSession session = new GroupCallSession(groupId, room.getRoomId(), normalizedCallType,
-                operatorId, room.getSfuEndpoint(), System.currentTimeMillis(), 1, false);
+                operatorId, room.getSfuEndpoint(), now, now, 1,
+                java.util.List.of(new GroupCallParticipant(operatorId, now)), false);
         return stateStore.createIfAbsent(session);
     }
 
@@ -41,7 +43,8 @@ public class GroupCallManager {
         if (active == null) {
             throw new ValidationException("no active group call");
         }
-        if (maxParticipants > 0 && active.participantCount() >= maxParticipants) {
+        boolean alreadyJoined = active.participants().stream().anyMatch(participant -> userId.equals(participant.userId()));
+        if (!alreadyJoined && maxParticipants > 0 && active.participantCount() >= maxParticipants) {
             throw new ForbiddenException("group call is full");
         }
         GroupCallSession joined = stateStore.addParticipant(groupId, userId);

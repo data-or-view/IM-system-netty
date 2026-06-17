@@ -1,8 +1,8 @@
 package com.im.core.call;
 
-import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 class InMemoryGroupCallStateStore implements GroupCallStateStore {
@@ -26,7 +26,7 @@ class InMemoryGroupCallStateStore implements GroupCallStateStore {
         MutableSession session = sessions.get(groupId);
         if (session == null) return null;
         synchronized (session) {
-            session.participants.add(userId);
+            session.participants.putIfAbsent(userId, System.currentTimeMillis());
             return session.snapshot();
         }
     }
@@ -53,15 +53,24 @@ class InMemoryGroupCallStateStore implements GroupCallStateStore {
 
     private static final class MutableSession {
         private final GroupCallSession base;
-        private final Set<String> participants = new HashSet<>();
+        private final Map<String, Long> participants = new LinkedHashMap<>();
 
         private MutableSession(GroupCallSession base) {
             this.base = base;
-            participants.add(base.initiatorUserId());
+            if (!base.participants().isEmpty()) {
+                for (GroupCallParticipant participant : base.participants()) {
+                    participants.put(participant.userId(), participant.joinedAt());
+                }
+            } else {
+                participants.put(base.initiatorUserId(), base.startedAt());
+            }
         }
 
         private GroupCallSession snapshot() {
-            return base.withParticipantCount(participants.size());
+            List<GroupCallParticipant> list = participants.entrySet().stream()
+                    .map(entry -> new GroupCallParticipant(entry.getKey(), entry.getValue()))
+                    .toList();
+            return base.withParticipants(list);
         }
     }
 }

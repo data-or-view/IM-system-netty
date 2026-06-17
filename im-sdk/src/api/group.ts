@@ -8,6 +8,7 @@ import {
   type GroupJoinResponse,
   type GroupJoinVerificationValue,
   type GroupMember,
+  type GroupMemberRoleValue,
   type GroupTypeValue,
 } from "../types.js";
 import { type HttpAPI, requireHttp } from "./http-api.js";
@@ -76,9 +77,13 @@ export class GroupAPI {
 
   /** 更新群信息 */
   updateInfo(groupId: string, params: Record<string, unknown>): Promise<void> {
+    const needVerification = params.needVerification;
     return requireHttp(this.transport).post("/api/group/info/update", {
       groupId,
       ...params,
+      ...(typeof needVerification === "string" && needVerification in GROUP_JOIN_VERIFICATION_CODE
+        ? { needVerification: GROUP_JOIN_VERIFICATION_CODE[needVerification as GroupJoinVerificationValue] }
+        : {}),
     }).then(() => undefined);
   }
 
@@ -112,6 +117,31 @@ export class GroupAPI {
     return requireHttp(this.transport).post("/api/group/mute/all", {
       groupId,
       mute: muted,
+    }).then(() => undefined);
+  }
+
+  /** 转让群主。 */
+  transferOwner(groupId: string, targetUserId: string): Promise<void> {
+    return requireHttp(this.transport).post("/api/group/owner/transfer", {
+      groupId,
+      targetUserId,
+    }).then(() => undefined);
+  }
+
+  /** 设置或取消管理员。 */
+  setMemberRole(groupId: string, targetUserId: string, roleLevel: GroupMemberRoleValue): Promise<void> {
+    return requireHttp(this.transport).post("/api/group/member/role", {
+      groupId,
+      targetUserId,
+      roleLevel,
+    }).then(() => undefined);
+  }
+
+  /** 更新当前用户在群内的昵称。 */
+  updateMyGroupNickname(groupId: string, nickname: string): Promise<void> {
+    return requireHttp(this.transport).post("/api/group/member/info/update", {
+      groupId,
+      nickname,
     }).then(() => undefined);
   }
 

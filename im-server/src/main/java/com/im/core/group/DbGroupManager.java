@@ -15,6 +15,7 @@ import com.im.core.sync.DbIncrementalSync;
 import com.im.common.exception.ForbiddenException;
 import com.im.common.exception.NotFoundException;
 import com.im.common.exception.PersistenceExceptions;
+import com.im.common.exception.ValidationException;
 import com.im.common.retry.RetryConfig;
 import com.im.common.retry.RetryExecutor;
 import com.im.common.retry.RetryStrategies;
@@ -176,6 +177,7 @@ public class DbGroupManager implements IGroupManager, GroupApplyPolicy.Gateway {
         }
                     return null;
         }));
+        sync.recordChange(groupId, "group_info", groupId, "update");
     }
 
     @Override
@@ -283,22 +285,37 @@ public class DbGroupManager implements IGroupManager, GroupApplyPolicy.Gateway {
             GroupMapper groupMapper = session.getMapper(GroupMapper.class);
             GroupMemberMapper memberMapper = session.getMapper(GroupMemberMapper.class);
 
-            GroupMemberEntity oldOwner = getMemberInSession(memberMapper, groupId, oldOwnerId);
-            if (oldOwner != null) {
-                oldOwner.setRoleLevel(100);
-                memberMapper.updateById(oldOwner);
+            if (oldOwnerId == null || oldOwnerId.isBlank()) {
+                throw new ForbiddenException("operator is required");
             }
-            GroupMemberEntity newOwner = getMemberInSession(memberMapper, groupId, newOwnerId);
-            if (newOwner != null) {
-                newOwner.setRoleLevel(200);
-                memberMapper.updateById(newOwner);
+            if (newOwnerId == null || newOwnerId.isBlank()) {
+                throw new ValidationException("targetUserId is required");
+            }
+            if (oldOwnerId.equals(newOwnerId)) {
+                throw new ValidationException("cannot transfer group owner to self");
             }
             GroupEntity entity = groupMapper.selectById(groupId);
-            if (entity != null) {
-                entity.setOwnerUserId(newOwnerId);
-                entity.setUpdatedAt(System.currentTimeMillis());
-                groupMapper.updateById(entity);
+            if (entity == null) {
+                throw new NotFoundException("group not found");
             }
+            if (!oldOwnerId.equals(entity.getOwnerUserId())) {
+                throw new ForbiddenException("only group owner can transfer ownership");
+            }
+            GroupMemberEntity oldOwner = getMemberInSession(memberMapper, groupId, oldOwnerId);
+            if (oldOwner == null || oldOwner.getRoleLevel() != GROUP_ROLE_OWNER) {
+                throw new ForbiddenException("operator is not group owner");
+            }
+            GroupMemberEntity newOwner = getMemberInSession(memberMapper, groupId, newOwnerId);
+            if (newOwner == null) {
+                throw new NotFoundException("target group member not found");
+            }
+            oldOwner.setRoleLevel(GroupMemberRole.MEMBER.getCode());
+            memberMapper.updateById(oldOwner);
+            newOwner.setRoleLevel(GROUP_ROLE_OWNER);
+            memberMapper.updateById(newOwner);
+            entity.setOwnerUserId(newOwnerId);
+            entity.setUpdatedAt(System.currentTimeMillis());
+            groupMapper.updateById(entity);
             session.commit();
         }
                     return null;
@@ -306,6 +323,7 @@ public class DbGroupManager implements IGroupManager, GroupApplyPolicy.Gateway {
 
         sync.recordChange(groupId, "member", oldOwnerId, "update");
         sync.recordChange(groupId, "member", newOwnerId, "update");
+        sync.recordChange(groupId, "group_info", groupId, "update");
     }
 
     @Override
@@ -313,12 +331,23 @@ public class DbGroupManager implements IGroupManager, GroupApplyPolicy.Gateway {
         PersistenceExceptions.runDatabase("set group member role", () -> retryExecutor.execute(CFG, () -> {
         try (SqlSession session = MyBatisPlusFactory.openSession()) {
             GroupMemberMapper mapper = session.getMapper(GroupMemberMapper.class);
-            GroupMemberEntity member = getMemberInSession(mapper, groupId, targetUserId);
-            if (member != null) {
-                member.setRoleLevel(roleLevel);
-                mapper.updateById(member);
-                session.commit();
+            GroupMemberEntity operator = getMemberInSession(mapper, groupId, operatorId);
+            if (operator == null || operator.getRoleLevel() != GROUP_ROLE_OWNER) {
+                throw new ForbiddenException("only group owner can set member role");
             }
+            GroupMemberEntity member = getMemberInSession(mapper, groupId, targetUserId);
+            if (member == null) {
+                throw new NotFoundException("target group member not found");
+            }
+            if (member.getRoleLevel() == GROUP_ROLE_OWNER) {
+                throw new ForbiddenException("cannot change group owner role");
+            }
+            if (roleLevel != GroupMemberRole.MEMBER.getCode() && roleLevel != GROUP_ROLE_ADMIN) {
+                throw new ValidationException("roleLevel must be MEMBER or ADMIN");
+            }
+            member.setRoleLevel(roleLevel);
+            mapper.updateById(member);
+            session.commit();
         }
                     return null;
         }));
@@ -342,6 +371,29 @@ public class DbGroupManager implements IGroupManager, GroupApplyPolicy.Gateway {
         }));
 
         sync.recordChange(groupId, "member", targetUserId, "update");
+    }
+
+    @Override
+    public void setMemberInfo(String groupId, String userId, String nickname) {
+        String normalizedNickname = nickname != null ? nickname.trim() : "";
+        if (normalizedNickname.isEmpty()) {
+            throw new ValidationException("nickname is required");
+        }
+        PersistenceExceptions.runDatabase("set group member info", () -> retryExecutor.execute(CFG, () -> {
+            try (SqlSession session = MyBatisPlusFactory.openSession()) {
+                GroupMemberMapper mapper = session.getMapper(GroupMemberMapper.class);
+                GroupMemberEntity member = getMemberInSession(mapper, groupId, userId);
+                if (member == null) {
+                    throw new ForbiddenException("not a group member");
+                }
+                member.setNickname(normalizedNickname);
+                mapper.updateById(member);
+                session.commit();
+            }
+            return null;
+        }));
+
+        sync.recordChange(groupId, "member", userId, "update");
     }
 
     private static final long FAR_FUTURE = 253402300799999L; // 9999-12-31 毫秒

@@ -120,7 +120,8 @@ final class DispatcherFactory {
                         dependencies.business().conversationManager(),
                         systemMessagePublishUseCase),
                 Operation.GROUP_CREATE, Operation.GROUP_JOIN, Operation.GROUP_QUIT, Operation.GROUP_KICK,
-                Operation.GROUP_DISBAND, Operation.GROUP_INFO_UPDATE, Operation.GROUP_INFO,
+                Operation.GROUP_DISBAND, Operation.GROUP_INFO_UPDATE, Operation.GROUP_OWNER_TRANSFER,
+                Operation.GROUP_MEMBER_ROLE_SET, Operation.GROUP_MEMBER_INFO_UPDATE, Operation.GROUP_INFO,
                 Operation.GROUP_LIST, Operation.GROUP_SEARCH, Operation.GROUP_MEMBERS, Operation.GROUP_MUTE_ALL,
                 Operation.GROUP_APPLY_LIST, Operation.GROUP_APPLY_UNHANDLED_COUNT, Operation.GROUP_APPLY_APPROVE);
         dispatcher.registerHandlers(new ConversationHandler(

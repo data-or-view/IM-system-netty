@@ -12,6 +12,7 @@ export function CallDialog() {
     rejectCall,
     cancelCall,
     hangupCall,
+    endGroupCall,
     toggleMute,
     toggleCamera,
   } = useCall();
@@ -47,6 +48,7 @@ export function CallDialog() {
               onReject={rejectCall}
               onCancel={cancelCall}
               onHangup={hangupCall}
+              onEndGroupCall={endGroupCall}
               onToggleMute={toggleMute}
               onToggleCamera={toggleCamera}
             />
@@ -121,19 +123,32 @@ function GroupStage({ call, title }: { call: CallState; title: string }) {
   const localRef = useRef<HTMLVideoElement | null>(null);
   useAttachTrack(call.localVideoTrack, localRef);
   const tiles = call.remoteMedias.slice(0, 8);
+  const overflow = Math.max(0, call.remoteMedias.length - tiles.length);
+  const duration = useCallDuration(call.startedAt, call.phase === "connected" || call.phase === "reconnecting");
 
   return (
     <div className="min-h-[560px] bg-black px-5 pb-36 pt-6">
       <div className="mb-4 flex items-center justify-between text-white/80">
         <div>
           <div className="text-lg font-semibold text-white">{title}</div>
-          <div className="text-xs text-white/55">{tiles.length + 1} 人正在通话</div>
+          <div className="text-xs text-white/55">
+            {call.participantCount ?? tiles.length + 1} 人正在通话 · {duration}
+          </div>
         </div>
       </div>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         <LocalTile call={call} videoRef={localRef} />
         {tiles.map((media) => <RemoteTile key={media.participantId} media={media} />)}
+        {overflow > 0 && <OverflowTile count={overflow} />}
       </div>
+    </div>
+  );
+}
+
+function OverflowTile({ count }: { count: number }) {
+  return (
+    <div className="relative flex aspect-video items-center justify-center rounded-2xl border border-white/10 bg-zinc-900 text-sm text-white/70">
+      还有 {count} 人
     </div>
   );
 }
@@ -229,6 +244,7 @@ function CallActions({
   onReject,
   onCancel,
   onHangup,
+  onEndGroupCall,
   onToggleMute,
   onToggleCamera,
 }: {
@@ -237,6 +253,7 @@ function CallActions({
   onReject: () => Promise<void>;
   onCancel: () => Promise<void>;
   onHangup: () => Promise<void>;
+  onEndGroupCall: () => Promise<void>;
   onToggleMute: () => Promise<void>;
   onToggleCamera: () => Promise<void>;
 }) {
@@ -276,6 +293,11 @@ function CallActions({
       <RoundButton label={call.mode === "group" ? "退出" : "挂断"} tone="danger" onClick={() => void onHangup()}>
         <PhoneOff className="h-6 w-6" />
       </RoundButton>
+      {call.mode === "group" && call.group?.canEnd && (
+        <RoundButton label="结束会议" tone="danger" onClick={() => void onEndGroupCall()}>
+          <PhoneOff className="h-6 w-6" />
+        </RoundButton>
+      )}
     </div>
   );
 }

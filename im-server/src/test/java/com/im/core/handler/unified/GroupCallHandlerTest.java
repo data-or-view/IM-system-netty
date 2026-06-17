@@ -5,6 +5,7 @@ import com.im.api.ICallManager;
 import com.im.api.IGroupManager;
 import com.im.api.Operation;
 import com.im.api.RoomInformation;
+import com.im.core.call.GroupCallParticipant;
 import com.im.core.call.GroupCallSession;
 import com.im.core.call.GroupCallManager;
 import com.im.core.call.GroupCallStateStore;
@@ -34,6 +35,10 @@ class GroupCallHandlerTest {
         assertEquals("video", response.get("callType"));
         assertEquals("u1", response.get("initiatorUserId"));
         assertEquals(1, response.get("participantCount"));
+        assertTrue(response.containsKey("updatedAt"));
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> participants = (List<Map<String, Object>>) response.get("participants");
+        assertEquals("u1", participants.get(0).get("userId"));
     }
 
     @Test
@@ -50,6 +55,19 @@ class GroupCallHandlerTest {
         assertTrue(response.get("token").toString().startsWith("token-u2-"));
         assertEquals("ws://livekit.test", response.get("sfuEndpoint"));
         assertEquals(2, response.get("participantCount"));
+    }
+
+    @Test
+    void activeReturnsExplicitInactivePayload() {
+        GroupCallHandler handler = new GroupCallHandler(manager());
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> response = (Map<String, Object>) handler.handle(
+                request(Operation.GROUP_CALL_ACTIVE, Map.of("groupId", "g1"), "u1"));
+
+        assertEquals(false, response.get("active"));
+        assertEquals(true, response.get("ended"));
+        assertEquals("g1", response.get("groupId"));
     }
 
     private static GroupCallManager manager() {
@@ -90,14 +108,18 @@ class GroupCallHandlerTest {
         @Override
         public GroupCallSession addParticipant(String groupId, String userId) {
             participants.add(userId);
-            session = session.withParticipantCount(participants.size());
+            session = session.withParticipants(participants.stream()
+                    .map(user -> new GroupCallParticipant(user, System.currentTimeMillis()))
+                    .toList());
             return session;
         }
 
         @Override
         public GroupCallSession removeParticipant(String groupId, String userId) {
             participants.remove(userId);
-            session = session.withParticipantCount(participants.size());
+            session = session.withParticipants(participants.stream()
+                    .map(user -> new GroupCallParticipant(user, System.currentTimeMillis()))
+                    .toList());
             return session;
         }
 

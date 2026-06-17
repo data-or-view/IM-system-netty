@@ -185,13 +185,20 @@ export interface GroupCallSession {
   initiatorUserId?: string;
   sfuEndpoint?: string;
   startedAt?: number;
+  updatedAt?: number;
   participantCount?: number;
+  participants?: GroupCallParticipant[];
 }
 
 export interface GroupCallJoinResult extends GroupCallSession {
   token: string;
   sfuEndpoint: string;
   roomId: string;
+}
+
+export interface GroupCallParticipant {
+  userId: string;
+  joinedAt: number;
 }
 
 export interface VoiceContent {

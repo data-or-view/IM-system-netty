@@ -32,6 +32,7 @@ import {
 import {
   SignalingAction,
   type CallSignalEvent,
+  type GroupCallParticipant,
   type SignalingActionName,
 } from "im-sdk";
 import { toast } from "sonner";
@@ -53,6 +54,7 @@ export type GroupCallTarget = {
   groupId: string;
   name?: string;
   faceUrl?: string;
+  canEnd?: boolean;
 };
 
 export type RemoteMedia = {
@@ -77,6 +79,9 @@ export type CallState = {
   remoteAudioTrack?: RemoteAudioTrack;
   remoteVideoTrack?: RemoteVideoTrack;
   remoteMedias: RemoteMedia[];
+  initiatorUserId?: string;
+  participantCount?: number;
+  participants?: GroupCallParticipant[];
   endReason?: string;
 };
 
@@ -92,6 +97,7 @@ type StartGroupCallInput = {
 
 type JoinGroupCallInput = {
   group: GroupCallTarget;
+  mediaPermissionChecked?: boolean;
 };
 
 type CallContextValue = {
@@ -103,6 +109,7 @@ type CallContextValue = {
   rejectCall: () => Promise<void>;
   cancelCall: () => Promise<void>;
   hangupCall: () => Promise<void>;
+  endGroupCall: () => Promise<void>;
   toggleMute: () => Promise<void>;
   toggleCamera: () => Promise<void>;
 };
@@ -344,21 +351,29 @@ export function CallProvider({ children }: { children: ReactNode }) {
     }
   }, [connectRoom, resetCall]);
 
-  const joinGroupCall = useCallback(async ({ group }: JoinGroupCallInput) => {
+  const joinGroupCall = useCallback(async ({ group, mediaPermissionChecked = false }: JoinGroupCallInput) => {
     if (!group.groupId || callRef.current.phase !== "idle") return;
-    setCall({
-      phase: "connectingMedia",
-      mode: "group",
-      callType: "video",
-      group,
-      muted: false,
-      cameraOff: false,
-      remoteMedias: [],
-    });
     try {
+      if (!mediaPermissionChecked) {
+        await ensureMediaPermission("video");
+      }
       const ack = await im.group.joinCall(group.groupId);
       const callType = ack.callType ?? "video";
       liveKitUrlRef.current = ack.sfuEndpoint || liveKitUrlRef.current;
+      setCall({
+        phase: "connectingMedia",
+        mode: "group",
+        callType,
+        group,
+        muted: false,
+        cameraOff: callType !== "video",
+        remoteMedias: [],
+        roomId: ack.roomId,
+        startedAt: ack.startedAt ?? Date.now(),
+        initiatorUserId: ack.initiatorUserId,
+        participantCount: ack.participantCount,
+        participants: ack.participants,
+      });
       await connectRoom(liveKitUrlRef.current, ack.token, callType);
       setCall((prev) => ({
         ...prev,
@@ -368,6 +383,9 @@ export function CallProvider({ children }: { children: ReactNode }) {
         group,
         roomId: ack.roomId,
         startedAt: ack.startedAt ?? Date.now(),
+        initiatorUserId: ack.initiatorUserId,
+        participantCount: ack.participantCount,
+        participants: ack.participants,
         cameraOff: callType !== "video",
       }));
     } catch (err) {
@@ -380,8 +398,9 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const startGroupCall = useCallback(async ({ group, callType = "video" }: StartGroupCallInput) => {
     if (!group.groupId || callRef.current.phase !== "idle") return;
     try {
+      await ensureMediaPermission(callType);
       await im.group.startCall(group.groupId, callType);
-      await joinGroupCall({ group });
+      await joinGroupCall({ group, mediaPermissionChecked: true });
     } catch (err) {
       console.error("start group call failed:", err);
       toast(callErrorText(err, "发起群视频失败"));
@@ -414,6 +433,19 @@ export function CallProvider({ children }: { children: ReactNode }) {
       await im.message.sendCallSignal(current.peer.userId, SignalingAction.REJECT, current.roomId).catch(() => undefined);
     }
     await resetCall();
+  }, [resetCall]);
+
+  const endGroupCall = useCallback(async () => {
+    const current = callRef.current;
+    if (current.mode !== "group" || !current.group?.groupId) return;
+    setCall((prev) => prev.phase === "idle" ? prev : { ...prev, phase: "ending" });
+    try {
+      await im.group.endCall(current.group.groupId);
+      await resetCall();
+    } catch (err) {
+      toast(callErrorText(err, "结束群视频失败"));
+      setCall((prev) => prev.phase === "ending" ? { ...prev, phase: "connected" } : prev);
+    }
   }, [resetCall]);
 
   const cancelCall = useCallback(async () => {
@@ -536,9 +568,10 @@ export function CallProvider({ children }: { children: ReactNode }) {
     rejectCall,
     cancelCall,
     hangupCall,
+    endGroupCall,
     toggleMute,
     toggleCamera,
-  }), [acceptCall, call, cancelCall, hangupCall, joinGroupCall, rejectCall, startCall, startGroupCall, toggleCamera, toggleMute]);
+  }), [acceptCall, call, cancelCall, endGroupCall, hangupCall, joinGroupCall, rejectCall, startCall, startGroupCall, toggleCamera, toggleMute]);
 
   return <CallContext.Provider value={value}>{children}</CallContext.Provider>;
 }

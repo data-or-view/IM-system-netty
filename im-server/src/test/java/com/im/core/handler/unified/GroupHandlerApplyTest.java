@@ -8,6 +8,7 @@ import com.im.api.GroupDisbandResult;
 import com.im.api.GroupInformation;
 import com.im.api.GroupJoinResult;
 import com.im.api.GroupMemberInformation;
+import com.im.api.GroupMemberRole;
 import com.im.api.IConversationManager;
 import com.im.api.IGroupManager;
 import com.im.api.IncrementalSyncResult;
@@ -204,6 +205,85 @@ class GroupHandlerApplyTest {
         assertThrows(NotFoundException.class, () -> handler.handle(request));
     }
 
+    @Test
+    void ownerTransferDelegatesAndPublishesRoleMessage() {
+        RecordingGroupManager manager = new RecordingGroupManager();
+        RecordingGroupSystemMessagePublisher publisher = new RecordingGroupSystemMessagePublisher();
+        GroupHandler handler = new GroupHandler(manager, null, publisher);
+        ApiRequest request = request(Operation.GROUP_OWNER_TRANSFER,
+                Map.of("groupId", "grp_1", "targetUserId", "alice"), "owner");
+
+        handler.handle(request);
+
+        assertEquals("grp_1", manager.transferGroupId);
+        assertEquals("owner", manager.transferOldOwnerId);
+        assertEquals("alice", manager.transferNewOwnerId);
+        assertEquals(1, publisher.ownerTransferredCalls);
+        assertEquals("grp_1", publisher.groupId);
+        assertEquals("owner", publisher.operatorId);
+        assertEquals("alice", publisher.userId);
+    }
+
+    @Test
+    void memberRoleSetAcceptsAdminRoleAndPublishesRoleMessage() {
+        RecordingGroupManager manager = new RecordingGroupManager();
+        RecordingGroupSystemMessagePublisher publisher = new RecordingGroupSystemMessagePublisher();
+        GroupHandler handler = new GroupHandler(manager, null, publisher);
+        ApiRequest request = request(Operation.GROUP_MEMBER_ROLE_SET,
+                Map.of("groupId", "grp_1", "targetUserId", "alice", "roleLevel", "ADMIN"), "owner");
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> response = (Map<String, Object>) handler.handle(request);
+
+        assertEquals("ADMIN", response.get("roleLevel"));
+        assertEquals("grp_1", manager.roleSetGroupId);
+        assertEquals("owner", manager.roleSetOperatorId);
+        assertEquals("alice", manager.roleSetTargetUserId);
+        assertEquals(GroupMemberRole.ADMIN.getCode(), manager.roleSetRoleLevel);
+        assertEquals(1, publisher.roleChangedCalls);
+        assertEquals(GroupMemberRole.ADMIN, publisher.roleLevel);
+    }
+
+    @Test
+    void memberRoleSetRejectsOwnerRole() {
+        RecordingGroupManager manager = new RecordingGroupManager();
+        GroupHandler handler = new GroupHandler(manager);
+        ApiRequest request = request(Operation.GROUP_MEMBER_ROLE_SET,
+                Map.of("groupId", "grp_1", "targetUserId", "alice", "roleLevel", "OWNER"), "owner");
+
+        assertThrows(com.im.common.exception.ValidationException.class, () -> handler.handle(request));
+        assertEquals(0, manager.roleSetRoleLevel);
+    }
+
+    @Test
+    void memberInfoUpdateDelegatesCurrentUserNickname() {
+        RecordingGroupManager manager = new RecordingGroupManager();
+        GroupHandler handler = new GroupHandler(manager);
+        ApiRequest request = request(Operation.GROUP_MEMBER_INFO_UPDATE,
+                Map.of("groupId", "grp_1", "nickname", "群内小王"), "alice");
+
+        handler.handle(request);
+
+        assertEquals("grp_1", manager.memberInfoGroupId);
+        assertEquals("alice", manager.memberInfoUserId);
+        assertEquals("群内小王", manager.memberInfoNickname);
+    }
+
+    @Test
+    void updatingGroupInfoPublishesInfoUpdatedMessage() {
+        RecordingGroupManager manager = new RecordingGroupManager();
+        RecordingGroupSystemMessagePublisher publisher = new RecordingGroupSystemMessagePublisher();
+        GroupHandler handler = new GroupHandler(manager, null, publisher);
+        ApiRequest request = request(Operation.GROUP_INFO_UPDATE,
+                Map.of("groupId", "grp_1", "groupName", "新群名"), "admin");
+
+        handler.handle(request);
+
+        assertEquals(1, publisher.groupInfoUpdatedCalls);
+        assertEquals("grp_1", publisher.groupId);
+        assertEquals("admin", publisher.operatorId);
+    }
+
     private static ApiRequest request(Operation operation, Map<String, Object> params, String userId) {
         ApiRequest request = new ApiRequest(operation, params, Map.of(), null, null);
         request.setAttribute("_uid", userId);
@@ -226,6 +306,16 @@ class GroupHandlerApplyTest {
         boolean quitResult = true;
         GroupDisbandResult disbandResult = new GroupDisbandResult("grp_1", "owner", "grp_1", List.of());
         RuntimeException disbandFailure;
+        String transferGroupId;
+        String transferOldOwnerId;
+        String transferNewOwnerId;
+        String roleSetGroupId;
+        String roleSetOperatorId;
+        String roleSetTargetUserId;
+        int roleSetRoleLevel;
+        String memberInfoGroupId;
+        String memberInfoUserId;
+        String memberInfoNickname;
 
         @Override public void createGroup(String groupId, String ownerId, String groupName, String faceUrl, List<String> members, int groupType, int needVerification) {
             createdGroupId = groupId;
@@ -239,9 +329,23 @@ class GroupHandlerApplyTest {
         @Override public void addMembers(String groupId, List<String> userIds) {}
         @Override public void kickMember(String groupId, String operatorId, String targetUserId) {}
         @Override public boolean quitGroup(String groupId, String userId) { return quitResult; }
-        @Override public void transferOwner(String groupId, String oldOwnerId, String newOwnerId) {}
-        @Override public void setMemberRole(String groupId, String operatorId, String targetUserId, int roleLevel) {}
+        @Override public void transferOwner(String groupId, String oldOwnerId, String newOwnerId) {
+            transferGroupId = groupId;
+            transferOldOwnerId = oldOwnerId;
+            transferNewOwnerId = newOwnerId;
+        }
+        @Override public void setMemberRole(String groupId, String operatorId, String targetUserId, int roleLevel) {
+            roleSetGroupId = groupId;
+            roleSetOperatorId = operatorId;
+            roleSetTargetUserId = targetUserId;
+            roleSetRoleLevel = roleLevel;
+        }
         @Override public void muteMember(String groupId, String targetUserId, long muteEndTime) {}
+        @Override public void setMemberInfo(String groupId, String userId, String ex) {
+            memberInfoGroupId = groupId;
+            memberInfoUserId = userId;
+            memberInfoNickname = ex;
+        }
         @Override public GroupJoinResult joinGroup(String groupId, String userId, String reqMsg) { return joinResult; }
 
         @Override
@@ -278,9 +382,13 @@ class GroupHandlerApplyTest {
     private static class RecordingGroupSystemMessagePublisher implements GroupSystemMessagePublisher {
         int memberJoinedCalls;
         int memberLeftCalls;
+        int groupInfoUpdatedCalls;
+        int roleChangedCalls;
+        int ownerTransferredCalls;
         String groupId;
         String userId;
         String operatorId;
+        GroupMemberRole roleLevel;
 
         @Override
         public void memberJoined(String groupId, String userId, String operatorId) {
@@ -296,6 +404,30 @@ class GroupHandlerApplyTest {
             this.groupId = groupId;
             this.userId = userId;
             this.operatorId = operatorId;
+        }
+
+        @Override
+        public void groupInfoUpdated(String groupId, String operatorId) {
+            groupInfoUpdatedCalls++;
+            this.groupId = groupId;
+            this.operatorId = operatorId;
+        }
+
+        @Override
+        public void roleChanged(String groupId, String targetUserId, String operatorId, GroupMemberRole roleLevel) {
+            roleChangedCalls++;
+            this.groupId = groupId;
+            this.userId = targetUserId;
+            this.operatorId = operatorId;
+            this.roleLevel = roleLevel;
+        }
+
+        @Override
+        public void ownerTransferred(String groupId, String oldOwnerId, String newOwnerId) {
+            ownerTransferredCalls++;
+            this.groupId = groupId;
+            this.operatorId = oldOwnerId;
+            this.userId = newOwnerId;
         }
     }
 

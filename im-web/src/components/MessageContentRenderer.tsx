@@ -9,7 +9,7 @@ import { FileText, MapPin, Mic, Package, Phone, Quote, Video } from "lucide-reac
 import type { Message } from "@/store/store";
 
 type Props = {
-  message: Pick<Message, "contentType" | "content">;
+  message: Pick<Message, "contentType" | "content" | "conversationId">;
 };
 
 export function MessageContentRenderer({ message }: Props) {
@@ -35,7 +35,7 @@ export function MessageContentRenderer({ message }: Props) {
     case MessageContentType.SYSTEM:
       return <SystemBlock text={systemText(parsed.content.systemType, parsed.content.message || parsed.raw)} />;
     case MessageContentType.SIGNAL:
-      return <InfoBlock icon={<Phone className="h-4 w-4" />} {...signalDisplay(parsed.content)} />;
+      return <InfoBlock icon={<Phone className="h-4 w-4" />} {...signalDisplay(parsed.content, message.conversationId?.startsWith("group_"))} />;
     case MessageContentType.CUSTOM:
       return <InfoBlock icon={<Package className="h-4 w-4" />} title={parsed.content.description || "自定义消息"} detail={parsed.content.data} />;
     case MessageContentType.REVOKED:
@@ -214,22 +214,22 @@ function formatDuration(duration?: number): string {
   return minute > 0 ? `${minute}:${second.toString().padStart(2, "0")}` : `${second}s`;
 }
 
-function signalDisplay(content: Extract<ParsedMessageContent, { type: typeof MessageContentType.SIGNAL }>["content"]): { title: string; detail?: string } {
+function signalDisplay(content: Extract<ParsedMessageContent, { type: typeof MessageContentType.SIGNAL }>["content"], isGroup?: boolean): { title: string; detail?: string } {
   const signal = normalizeSignalingContent(content);
-  const callType = signal?.callType === "video" ? "视频通话" : "语音通话";
+  const callType = isGroup ? "群视频会议" : signal?.callType === "video" ? "视频通话" : "语音通话";
   if (!signal) return { title: "音视频通话" };
   switch (signal.action) {
     case SignalingAction.CALLING:
     case SignalingAction.INVITE:
-      return { title: callType, detail: "正在呼叫" };
+      return { title: callType, detail: isGroup ? "已发起" : "正在呼叫" };
     case SignalingAction.ACCEPT:
-      return { title: callType, detail: "已接听" };
+      return { title: callType, detail: isGroup ? "有成员加入" : "已接听" };
     case SignalingAction.REJECT:
       return { title: callType, detail: signal.reason === "busy" ? "对方忙线" : "已拒绝" };
     case SignalingAction.CANCEL:
-      return { title: callType, detail: "已取消" };
+      return { title: callType, detail: isGroup ? "有成员离开" : "已取消" };
     case SignalingAction.HANGUP:
-      return { title: callType, detail: signal.duration && signal.duration > 0 ? `通话 ${formatDuration(signal.duration)}` : "已结束" };
+      return { title: callType, detail: signal.duration && signal.duration > 0 ? `通话 ${formatDuration(signal.duration)}` : isGroup ? "会议已结束" : "已结束" };
     case SignalingAction.TIMEOUT:
       return { title: callType, detail: "未接听" };
     default:

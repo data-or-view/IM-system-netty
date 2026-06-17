@@ -41,14 +41,24 @@ public class GroupCallHandler implements RequestHandler {
                 publishGroupSignal(req, userId, groupId, SignalingAction.CALLING, session);
                 yield toMap(session);
             }
-            case "group.call.join" -> toMap(groupCallManager.join(userId, groupId));
-            case "group.call.leave" -> toMap(groupCallManager.leave(userId, groupId));
+            case "group.call.join" -> {
+                GroupCallJoinResult result = groupCallManager.join(userId, groupId);
+                publishGroupSignal(req, userId, groupId, SignalingAction.ACCEPT, result.session());
+                yield toMap(result);
+            }
+            case "group.call.leave" -> {
+                GroupCallSession session = groupCallManager.leave(userId, groupId);
+                publishGroupSignal(req, userId, groupId,
+                        session != null && session.ended() ? SignalingAction.HANGUP : SignalingAction.CANCEL,
+                        session);
+                yield toMap(session, groupId);
+            }
             case "group.call.end" -> {
                 GroupCallSession session = groupCallManager.end(userId, groupId);
                 publishGroupSignal(req, userId, groupId, SignalingAction.HANGUP, session);
-                yield toMap(session);
+                yield toMap(session, groupId);
             }
-            case "group.call.active" -> toMap(groupCallManager.active(userId, groupId));
+            case "group.call.active" -> toMap(groupCallManager.active(userId, groupId), groupId);
             default -> throw new ValidationException("unsupported group call operation: " + req.operation());
         };
     }
@@ -64,16 +74,24 @@ public class GroupCallHandler implements RequestHandler {
     }
 
     private static Map<String, Object> toMap(GroupCallJoinResult result) {
-        Map<String, Object> body = toMap(result.session());
+        Map<String, Object> body = toMap(result.session(), null);
         body.put("token", result.token());
         body.put("sfuEndpoint", result.sfuEndpoint());
         return body;
     }
 
     private static Map<String, Object> toMap(GroupCallSession session) {
+        return toMap(session, null);
+    }
+
+    private static Map<String, Object> toMap(GroupCallSession session, String fallbackGroupId) {
         Map<String, Object> body = new LinkedHashMap<>();
         if (session == null) {
             body.put("active", false);
+            body.put("ended", true);
+            if (fallbackGroupId != null) {
+                body.put("groupId", fallbackGroupId);
+            }
             return body;
         }
         body.put("active", !session.ended());
@@ -84,7 +102,11 @@ public class GroupCallHandler implements RequestHandler {
         body.put("initiatorUserId", session.initiatorUserId());
         body.put("sfuEndpoint", session.sfuEndpoint());
         body.put("startedAt", session.startedAt());
+        body.put("updatedAt", session.updatedAt());
         body.put("participantCount", session.participantCount());
+        body.put("participants", session.participants().stream()
+                .map(participant -> Map.of("userId", participant.userId(), "joinedAt", participant.joinedAt()))
+                .toList());
         return body;
     }
 }

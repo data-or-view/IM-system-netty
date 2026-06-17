@@ -17,7 +17,7 @@ import com.wzg.idempotency.persistence.DataRecord;
  *         <li>抛出位置：{@link com.wzg.idempotency.persistence.BasePersistenceStore#saveInProgress}</li>
  *         <li>抛出位置：{@link com.wzg.idempotency.persistence.RedisPersistenceStore#putRecord}</li>
  *         <li>抛出位置：{@link com.wzg.idempotency.persistence.RedissonPersistenceStore#putRecord}</li>
- *         <li>抛出位置：{@link com.wzg.idempotency.persistence.InMemoryPersistenceStore#putRecord}</li>
+ *         <li>测试替身存储也必须遵循同样的异常语义</li>
  *       </ul>
  *   </li>
  * </ul>

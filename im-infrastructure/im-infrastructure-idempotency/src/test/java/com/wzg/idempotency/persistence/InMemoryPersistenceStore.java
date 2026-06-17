@@ -4,14 +4,9 @@ import com.wzg.idempotency.exception.IdempotencyItemAlreadyExistsException;
 import com.wzg.idempotency.exception.IdempotencyItemNotFoundException;
 
 import java.time.Instant;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * In-memory implementation of PersistenceStore for testing and development purposes.
- * This is the default implementation.
- */
 public class InMemoryPersistenceStore extends BasePersistenceStore {
     private final Map<String, DataRecord> data = new ConcurrentHashMap<>();
 
@@ -28,7 +23,6 @@ public class InMemoryPersistenceStore extends BasePersistenceStore {
     public void putRecord(DataRecord dr, Instant now) throws IdempotencyItemAlreadyExistsException {
         if (data.containsKey(dr.getIdempotencyKey())) {
             DataRecord existing = data.get(dr.getIdempotencyKey());
-            // Check if expired
             if (!existing.isExpired(now)) {
                 throw new IdempotencyItemAlreadyExistsException("Record already exists", null, existing);
             }

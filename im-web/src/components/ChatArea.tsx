@@ -11,29 +11,37 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
-import { MessageCircle, Send, Paperclip, MoreHorizontal, Undo2, Info, Phone, Video } from "lucide-react";
+import { MessageCircle, Send, Paperclip, MoreHorizontal, Undo2, Info, Phone, Video, PhoneOff } from "lucide-react";
 import { toast } from "sonner";
 import { im } from "@/sdk/im-sdk";
 import { MessageContentRenderer } from "@/components/MessageContentRenderer";
 import SystemMessagePanel from "@/components/SystemMessagePanel";
-import { ConversationType, MessageContentType, createClientMsgId, getErrorText, type GroupCallSession, type OutgoingMessageContentTypeValue, type SendMessageAck } from "im-sdk";
+import { ConversationType, MessageContentType, GroupMemberRole, createClientMsgId, getErrorText, groupMemberRoleRank, type GroupCallSession, type OutgoingMessageContentTypeValue, type SendMessageAck } from "im-sdk";
 import { useCall } from "@/components/call/CallProvider";
 import { messageRenderKey, toOptimisticMessage } from "@/lib/messages";
 
 export default function ChatArea() {
-  const { state, fetchConversations, dispatch } = useStore();
+  const { state, fetchConversations, fetchGroupMembers, dispatch } = useStore();
   const [input, setInput] = useState("");
   const [uploading, setUploading] = useState(false);
   const [activeGroupCall, setActiveGroupCall] = useState<GroupCallSession | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const navigate = useNavigate();
-  const { startCall, startGroupCall, joinGroupCall } = useCall();
+  const { startCall, startGroupCall, joinGroupCall, endGroupCall } = useCall();
 
   const conv = state.conversations.find(
     (c) => c.conversationId === state.activeConversationId
   );
   const isSystemConversation = state.activeConversationId === SYSTEM_CONVERSATION_ID;
   const messages = conv ? state.messages[conv.conversationId] || [] : [];
+  const groupMembers = conv?.groupId ? state.groupMembers[conv.groupId] || [] : [];
+  const currentGroupMember = groupMembers.find((member) => member.userId === state.userId);
+  const canEndActiveGroupCall = Boolean(
+    activeGroupCall && (
+      activeGroupCall.initiatorUserId === state.userId ||
+      groupMemberRoleRank(currentGroupMember?.roleLevel) >= groupMemberRoleRank(GroupMemberRole.ADMIN)
+    ),
+  );
 
   // Load history when conversation changes
   useEffect(() => {
@@ -76,6 +84,7 @@ export default function ChatArea() {
     }
     const loadActiveGroupCall = async () => {
       try {
+        await fetchGroupMembers(conv.groupId!);
         const active = await im.group.activeCall(conv.groupId!);
         if (!cancelled) setActiveGroupCall(active.active ? active : null);
       } catch {
@@ -86,7 +95,16 @@ export default function ChatArea() {
     return () => {
       cancelled = true;
     };
-  }, [conv?.conversationType, conv?.groupId]);
+  }, [conv?.conversationType, conv?.groupId, fetchGroupMembers]);
+
+  const refreshActiveGroupCall = useCallback(async (groupId: string) => {
+    try {
+      const active = await im.group.activeCall(groupId);
+      setActiveGroupCall(active.active ? active : null);
+    } catch {
+      setActiveGroupCall(null);
+    }
+  }, []);
 
   useEffect(() => {
     if (conv?.conversationType !== ConversationType.GROUP || !conv.groupId) return;
@@ -94,18 +112,13 @@ export default function ChatArea() {
     if (!hasGroupSignal) return;
     let cancelled = false;
     const refresh = async () => {
-      try {
-        const active = await im.group.activeCall(conv.groupId!);
-        if (!cancelled) setActiveGroupCall(active.active ? active : null);
-      } catch {
-        if (!cancelled) setActiveGroupCall(null);
-      }
+      if (!cancelled) await refreshActiveGroupCall(conv.groupId!);
     };
     void refresh();
     return () => {
       cancelled = true;
     };
-  }, [conv?.conversationType, conv?.groupId, messages]);
+  }, [conv?.conversationType, conv?.groupId, messages, refreshActiveGroupCall]);
 
   const appendSentMessage = useCallback((
     ack: SendMessageAck,
@@ -257,12 +270,12 @@ export default function ChatArea() {
         groupId: conv.groupId,
         name: conv.showName,
         faceUrl: conv.faceUrl,
+        canEnd: true,
       },
     }).then(async () => {
-      const active = await im.group.activeCall(conv.groupId!);
-      setActiveGroupCall(active.active ? active : null);
+      await refreshActiveGroupCall(conv.groupId!);
     });
-  }, [conv, startGroupCall]);
+  }, [conv, refreshActiveGroupCall, startGroupCall]);
 
   const handleJoinGroupCall = useCallback(() => {
     if (!conv?.groupId || conv.conversationType !== ConversationType.GROUP) return;
@@ -271,12 +284,17 @@ export default function ChatArea() {
         groupId: conv.groupId,
         name: conv.showName,
         faceUrl: conv.faceUrl,
+        canEnd: canEndActiveGroupCall,
       },
     }).then(async () => {
-      const active = await im.group.activeCall(conv.groupId!);
-      setActiveGroupCall(active.active ? active : null);
+      await refreshActiveGroupCall(conv.groupId!);
     });
-  }, [conv, joinGroupCall]);
+  }, [canEndActiveGroupCall, conv, joinGroupCall, refreshActiveGroupCall]);
+
+  const handleEndGroupCall = useCallback(() => {
+    if (!conv?.groupId || conv.conversationType !== ConversationType.GROUP) return;
+    void endGroupCall().then(() => refreshActiveGroupCall(conv.groupId!));
+  }, [conv, endGroupCall, refreshActiveGroupCall]);
 
   // Empty state
   if (!state.activeConversationId) {
@@ -369,14 +387,32 @@ export default function ChatArea() {
       </div>
 
       {conv?.conversationType === ConversationType.GROUP && activeGroupCall && (
-        <div className="border-b bg-emerald-50 px-4 py-2 text-sm text-emerald-900">
-          <div className="flex items-center justify-between gap-3">
-            <span>
-              群视频进行中，{activeGroupCall.participantCount ?? 1} 人正在通话
-            </span>
-            <Button size="sm" className="h-7 bg-emerald-600 hover:bg-emerald-700" onClick={handleJoinGroupCall}>
-              加入
-            </Button>
+        <div className="border-b bg-emerald-50 px-4 py-2 text-sm text-emerald-950">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="font-medium">
+                群视频进行中 · {activeGroupCall.participantCount ?? activeGroupCall.participants?.length ?? 1} 人
+              </div>
+              <div className="mt-0.5 truncate text-xs text-emerald-800/75">
+                发起人 {displayGroupCallUser(activeGroupCall.initiatorUserId, groupMembers)} · {formatGroupCallStartedAt(activeGroupCall.startedAt)}
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              {canEndActiveGroupCall && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-8 border-red-200 bg-white text-red-700 hover:bg-red-50"
+                  onClick={handleEndGroupCall}
+                >
+                  <PhoneOff className="h-3.5 w-3.5" />
+                  结束
+                </Button>
+              )}
+              <Button size="sm" className="h-8 bg-emerald-600 hover:bg-emerald-700" onClick={handleJoinGroupCall}>
+                加入
+              </Button>
+            </div>
           </div>
         </div>
       )}
@@ -510,4 +546,16 @@ function formatMsgTime(ts: number): string {
   if (!Number.isFinite(ts)) return "--:--";
   const d = new Date(ts);
   return `${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`;
+}
+
+function formatGroupCallStartedAt(ts?: number): string {
+  if (!ts) return "刚刚开始";
+  const d = new Date(ts);
+  return `${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")} 开始`;
+}
+
+function displayGroupCallUser(userId: string | undefined, members: Array<{ userId: string; nickname?: string }>): string {
+  if (!userId) return "未知";
+  const member = members.find((item) => item.userId === userId);
+  return member?.nickname || userId;
 }

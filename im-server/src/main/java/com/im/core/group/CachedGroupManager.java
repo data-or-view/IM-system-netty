@@ -107,6 +107,7 @@ public class CachedGroupManager implements IGroupManager {
     @Override
     public void setMemberRole(String groupId, String operatorId, String targetUserId, int roleLevel) {
         delegate.setMemberRole(groupId, operatorId, targetUserId, roleLevel);
+        invalidateGroupCaches(groupId);
     }
 
     @Override
@@ -157,6 +158,7 @@ public class CachedGroupManager implements IGroupManager {
     @Override
     public void setMemberInfo(String groupId, String userId, String ex) {
         delegate.setMemberInfo(groupId, userId, ex);
+        invalidateGroupCaches(groupId);
     }
 
     @Override
