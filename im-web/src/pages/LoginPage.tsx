@@ -18,6 +18,10 @@ export default function LoginPage({ onLogin, onRegister, connecting, statusMsg }
   const [mode, setMode] = useState<"login" | "register">("login");
 
   const isLogin = mode === "login";
+  const canSubmit = isLogin ? Boolean(userId.trim()) : Boolean(password.trim());
+  const helperText = isLogin
+    ? "密码可为空，用于兼容未设置密码的测试账号。"
+    : "密码必填；昵称可为空，未填写时使用服务器生成的用户 ID。";
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -81,7 +85,7 @@ export default function LoginPage({ onLogin, onRegister, connecting, statusMsg }
             />
           ) : (
             <Input
-              placeholder="昵称（可选）"
+              placeholder="昵称，可选"
               value={nickname}
               onChange={(e) => setNickname(e.target.value)}
               disabled={connecting}
@@ -91,9 +95,10 @@ export default function LoginPage({ onLogin, onRegister, connecting, statusMsg }
           {!isLogin && (
             <Input
               type="password"
-              placeholder="密码"
+              placeholder="密码，必填"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              required
               disabled={connecting}
             />
           )}
@@ -101,12 +106,14 @@ export default function LoginPage({ onLogin, onRegister, connecting, statusMsg }
           {isLogin && (
             <Input
               type="password"
-              placeholder="密码（可选）"
+              placeholder="密码，可选"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               disabled={connecting}
             />
           )}
+
+          <p className="text-xs leading-5 text-slate-500">{helperText}</p>
 
           {/* 状态信息 */}
           {statusMsg && (
@@ -116,7 +123,7 @@ export default function LoginPage({ onLogin, onRegister, connecting, statusMsg }
           <Button
             type="submit"
             className="w-full"
-            disabled={(isLogin ? !userId.trim() : !password.trim()) || connecting}
+            disabled={!canSubmit || connecting}
           >
             {connecting && <Loader2 className="h-4 w-4 animate-spin" />}
             {connecting ? "处理中..." : isLogin ? "登录" : "注册"}

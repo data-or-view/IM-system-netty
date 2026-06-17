@@ -1,4 +1,4 @@
-import { IMHttpError, IMProtocolError, IMServerError, type FileUploadResult } from "../types.js";
+import { IMHttpError, IMProtocolError, IMServerError, IMTimeoutError, type FileUploadResult } from "../types.js";
 
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
@@ -7,6 +7,7 @@ export interface HttpTransportOptions {
   getToken?: () => string | null;
   fetchImpl?: FetchLike;
   requestIdFactory?: () => string;
+  requestTimeout?: number;
 }
 
 interface HttpEnvelope<T> {
@@ -22,12 +23,14 @@ export class HttpTransport {
   private readonly getToken: () => string | null;
   private readonly fetchImpl: FetchLike;
   private readonly requestIdFactory: () => string;
+  private readonly requestTimeout: number;
 
   constructor(opts: HttpTransportOptions) {
     this.baseUrl = opts.baseUrl.replace(/\/+$/, "");
     this.getToken = opts.getToken ?? (() => null);
     this.fetchImpl = opts.fetchImpl ?? ((input, init) => globalThis.fetch(input, init));
     this.requestIdFactory = opts.requestIdFactory ?? defaultRequestId;
+    this.requestTimeout = opts.requestTimeout ?? 30_000;
   }
 
   get<T>(path: string, query: Record<string, unknown> = {}): Promise<T> {
@@ -88,7 +91,7 @@ export class HttpTransport {
   }
 
   private async putObject(url: string, body: UploadBody, signedHeaders: Record<string, string> = {}): Promise<Response> {
-    const response = await this.fetchImpl(url, {
+    const response = await this.fetchWithTimeout(url, {
       method: "PUT",
       headers: signedHeaders,
       body: this.toRequestBody(body),
@@ -104,7 +107,7 @@ export class HttpTransport {
       ...(init.headers as Record<string, string> | undefined),
       "X-Request-Id": this.requestIdFactory(),
     };
-    const resp = await this.fetchImpl(`${this.baseUrl}${path}`, { ...init, headers });
+    const resp = await this.fetchWithTimeout(`${this.baseUrl}${path}`, { ...init, headers });
     let payload: unknown;
     try {
       payload = await resp.json();
@@ -140,6 +143,25 @@ export class HttpTransport {
   private authHeader(): Record<string, string> {
     const token = this.getToken();
     return token ? { Authorization: token.startsWith("Bearer ") ? token : `Bearer ${token}` } : {};
+  }
+
+  private async fetchWithTimeout(input: string, init: RequestInit): Promise<Response> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.requestTimeout);
+    try {
+      return await this.fetchImpl(input, { ...init, signal: controller.signal });
+    } catch (err) {
+      if (this.isAbortError(err)) {
+        throw new IMTimeoutError(-1, "HTTP request timeout", input);
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  private isAbortError(err: unknown): boolean {
+    return err instanceof DOMException && err.name === "AbortError";
   }
 
   private toArrayBuffer(bytes: Uint8Array): ArrayBuffer {

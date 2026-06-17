@@ -5,8 +5,8 @@ declare const process: { cwd: () => string };
 
 const root = process.cwd();
 const DEV_WEB_PORT = 39073;
-const DEV_WS_TARGET = "ws://127.0.0.1:8083";
-const DEV_HTTP_TARGET = "http://127.0.0.1:8084";
+const DEV_WS_TARGET = "ws://127.0.0.1:8084";
+const DEV_HTTP_TARGET = "http://127.0.0.1:8089";
 
 export default defineConfig({
   plugins: [react()],

@@ -349,6 +349,21 @@ test("HttpTransport rejects non-envelope HTTP responses at the protocol boundary
   );
 });
 
+test("HttpTransport times out hanging HTTP requests", async () => {
+  const http = new HttpTransport({
+    baseUrl: "http://im.test",
+    requestTimeout: 20,
+    fetchImpl: (_input, init) => new Promise((_resolve, reject) => {
+      init.signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+    }),
+  });
+
+  await assert.rejects(
+    () => http.get("/api/user/info", { userId: "u1" }),
+    (err) => err instanceof IMTimeoutError && err.message === "HTTP request timeout",
+  );
+});
+
 
 test("friend receivedApplyList uses received apply endpoint with pending filter", async () => {
   const { http, calls } = createHttpCapture({ applies: [{ fromUserId: "alice", toUserId: "bob", handleResult: 0 }] });

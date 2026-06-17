@@ -101,6 +101,7 @@ export class IMSDK {
       baseUrl: opts.httpUrl,
       getToken: this.getToken,
       requestIdFactory: opts.requestIdFactory,
+      requestTimeout: opts.requestTimeout,
     }) : undefined;
 
     this.file = new FileAPI(this.httpTransport);
