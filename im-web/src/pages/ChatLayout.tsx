@@ -7,8 +7,8 @@ import { useStore } from "@/store/store";
 export default function ChatLayout() {
   const { logout } = useStore();
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-slate-100 text-slate-950">
-      <div className="flex h-full w-full flex-col overflow-hidden border border-slate-200 bg-background shadow-sm md:flex-row">
+    <div className="flex h-screen w-screen overflow-hidden bg-[var(--app-bg)] p-0 text-[var(--text-strong)] md:p-3">
+      <div className="flex h-full w-full flex-col overflow-hidden border border-slate-200 bg-background shadow-sm shadow-slate-950/[0.04] md:flex-row md:rounded-md">
         <Sidebar />
         <main className="min-h-0 min-w-0 flex-1">
           <Outlet />

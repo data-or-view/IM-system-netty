@@ -6,6 +6,7 @@ import { im } from "@/sdk/im-sdk";
 import LoginPage from "@/pages/LoginPage";
 import { CallProvider } from "@/components/call/CallProvider";
 import RouteErrorBoundary from "@/components/RouteErrorBoundary";
+import { LoadingState } from "@/components/design-system";
 
 const ChatLayout = lazy(() => import("@/pages/ChatLayout"));
 const ChatArea = lazy(() => import("@/components/ChatArea"));
@@ -16,11 +17,7 @@ const CallDialog = lazy(() => import("@/components/call/CallDialog").then((mod) 
 
 function PageFallback() {
   return (
-    <div className="flex h-full min-h-[320px] items-center justify-center bg-slate-50">
-      <div className="rounded-md border bg-white px-4 py-3 text-sm text-muted-foreground shadow-sm">
-        加载中...
-      </div>
-    </div>
+    <LoadingState text="正在加载工作台" />
   );
 }
 
@@ -122,8 +119,8 @@ function AuthGate() {
 
   if (checkingAuth) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100">
-        <div className="rounded-xl border bg-card px-6 py-5 text-center shadow-lg">
+      <div className="flex min-h-screen items-center justify-center bg-[var(--app-bg)] px-4">
+        <div className="rounded-md border border-slate-200 bg-white px-6 py-5 text-center shadow-sm">
           <div className="text-sm font-medium">正在校验登录状态...</div>
           <div className="mt-1 text-xs text-muted-foreground">如果后端数据已重置，会自动回到登录页</div>
         </div>

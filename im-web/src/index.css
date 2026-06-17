@@ -4,6 +4,16 @@
 
 @layer base {
   :root {
+    --app-bg: #f6f8fb;
+    --surface: #ffffff;
+    --surface-subtle: #f8fafc;
+    --text-strong: #101828;
+    --text-muted: #667085;
+    --brand-ink: #111827;
+    --signal-online: #16a34a;
+    --signal-info: #2563eb;
+    --signal-danger: #dc2626;
+    --signal-warning: #d97706;
     --background: 0 0% 100%;
     --foreground: 240 10% 3.9%;
     --card: 0 0% 100%;
@@ -54,7 +64,7 @@
     @apply border-border;
   }
   body {
-    @apply bg-slate-100 text-foreground antialiased;
+    @apply bg-[var(--app-bg)] text-foreground antialiased;
   }
 
   ::selection {

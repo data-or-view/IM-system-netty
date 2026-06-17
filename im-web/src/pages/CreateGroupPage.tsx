@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 import { im } from "@/sdk/im-sdk";
 import { GroupJoinVerification, GroupType, getErrorText } from "im-sdk";
 import { AppPage, Surface } from "@/components/AppPage";
+import { StateBadge } from "@/components/design-system";
 
 export default function CreateGroupPage() {
   const navigate = useNavigate();
@@ -63,7 +64,7 @@ export default function CreateGroupPage() {
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-5 py-5">
           <Surface className="p-4">
             <div className="mb-3 flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-md bg-slate-900 text-white">
+              <div className="flex h-10 w-10 items-center justify-center rounded-md bg-[var(--brand-ink)] text-white">
                 <Users className="h-5 w-5" />
               </div>
               <div>
@@ -94,14 +95,7 @@ export default function CreateGroupPage() {
                 </span>
               </span>
             </span>
-            <span
-              className={cn(
-                "shrink-0 rounded-full px-2.5 py-1 text-xs font-medium",
-                needVerification ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500"
-              )}
-            >
-              {needVerification ? "已开启" : "已关闭"}
-            </span>
+            <StateBadge tone={needVerification ? "warning" : "online"}>{needVerification ? "已开启" : "已关闭"}</StateBadge>
           </button>
 
           <Surface>
@@ -141,7 +135,7 @@ export default function CreateGroupPage() {
                       </div>
                       <span className={cn(
                         "flex h-6 w-6 items-center justify-center rounded-full border text-xs",
-                        selected ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-transparent"
+                        selected ? "border-[var(--brand-ink)] bg-[var(--brand-ink)] text-white" : "border-slate-200 bg-white text-transparent"
                       )}>
                         <Check className="h-3.5 w-3.5" />
                       </span>

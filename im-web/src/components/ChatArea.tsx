@@ -11,11 +11,12 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
-import { AlertCircle, MessageCircle, Send, Paperclip, MoreHorizontal, Undo2, Info, Phone, Video, PhoneOff } from "lucide-react";
+import { MessageCircle, Send, Paperclip, MoreHorizontal, Undo2, Info, Phone, Video, PhoneOff } from "lucide-react";
 import { toast } from "sonner";
 import { im } from "@/sdk/im-sdk";
 import { MessageContentRenderer } from "@/components/MessageContentRenderer";
 import SystemMessagePanel from "@/components/SystemMessagePanel";
+import { EmptyState, MessageStatusIcon, PageHeader, SignalRail, StateBadge, StatusDot } from "@/components/design-system";
 import { ConversationType, MessageContentType, GroupMemberRole, createClientMsgId, getErrorText, groupMemberRoleRank, type GroupCallSession, type OutgoingMessageContentTypeValue, type SendMessageAck } from "im-sdk";
 import { useCall } from "@/components/call/CallProvider";
 import { messageRenderKey, toLocalFailedMessage, toLocalPendingMessage, toOptimisticMessage } from "@/lib/messages";
@@ -69,7 +70,7 @@ export default function ChatArea() {
           }
         }
       } catch {
-        // silent — history loading is best-effort
+        // History loading is best-effort; push sync will still converge later.
       }
     };
     loadHistory();
@@ -308,21 +309,15 @@ export default function ChatArea() {
     void endGroupCall().then(() => refreshActiveGroupCall(conv.groupId!));
   }, [conv, endGroupCall, refreshActiveGroupCall]);
 
-  // Empty state
   if (!state.activeConversationId) {
     return (
-      <div className="flex h-full flex-1 items-center justify-center bg-slate-50">
-        <div className="max-w-sm px-6 text-center">
-          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-md bg-white text-slate-500 shadow-sm ring-1 ring-slate-200">
-            <MessageCircle className="h-5 w-5" />
-          </div>
-          <h2 className="text-base font-semibold text-slate-700">
-            选择一个会话开始聊天
-          </h2>
-          <p className="mt-2 text-sm leading-6 text-muted-foreground">
-            从左侧选择好友或群组
-          </p>
-        </div>
+      <div className="flex h-full flex-1 items-center justify-center bg-[var(--app-bg)] px-6">
+        <EmptyState
+          icon={<MessageCircle className="h-4 w-4" />}
+          title="选择一个会话开始"
+          description="消息、系统通知和通话记录会沿着同一条信号轨道显示。"
+          className="max-w-sm"
+        />
       </div>
     );
   }
@@ -332,78 +327,81 @@ export default function ChatArea() {
   }
 
   return (
-    <div className="flex h-full flex-1 flex-col bg-slate-50">
-      <div className="flex items-center gap-3 border-b border-slate-200 bg-white/95 px-5 py-3 shadow-sm">
-        <button
-          onClick={handleHeaderClick}
-          className="flex min-w-0 flex-1 items-center gap-3 rounded-md text-left transition-colors hover:text-slate-700"
-        >
-          <Avatar className="h-10 w-10 border border-white shadow-sm">
+    <div className="flex h-full flex-1 flex-col bg-[var(--app-bg)]">
+      <PageHeader
+        icon={(
+          <Avatar className="h-8 w-8">
             <AvatarImage src={conv?.faceUrl} />
-            <AvatarFallback className="bg-slate-100 text-slate-700">
+            <AvatarFallback className="bg-white text-xs text-slate-700">
               {(conv?.showName || "?").charAt(0).toUpperCase()}
             </AvatarFallback>
           </Avatar>
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-semibold">{conv?.showName}</div>
-            <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-              {conv?.conversationType === ConversationType.GROUP ? "群聊" : "单聊"}
-            </div>
-          </div>
-        </button>
-        {conv?.conversationType !== ConversationType.GROUP && conv?.userId && (
-          <div className="flex items-center gap-1">
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="h-9 w-9 rounded-md"
-              title="语音通话"
-              onClick={() => handleStartCall("voice")}
-            >
-              <Phone className="h-4 w-4" />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="h-9 w-9 rounded-md"
-              title="视频通话"
-              onClick={() => handleStartCall("video")}
-            >
-              <Video className="h-4 w-4" />
-            </Button>
-          </div>
         )}
-        {conv?.conversationType === ConversationType.GROUP && conv?.groupId && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="h-9 w-9 rounded-md"
-            title={activeGroupCall ? "加入群视频" : "发起群视频"}
-            onClick={activeGroupCall ? handleJoinGroupCall : handleStartGroupCall}
-          >
-            <Video className="h-4 w-4" />
-          </Button>
+        title={conv?.showName || "会话"}
+        description={(
+          <span className="inline-flex items-center gap-1.5">
+            <StatusDot tone={conv?.conversationType === ConversationType.GROUP ? "info" : "online"} />
+            {conv?.conversationType === ConversationType.GROUP ? "群聊信号" : "单聊信号"}
+          </span>
         )}
-        <button
-          type="button"
-          onClick={handleHeaderClick}
-          className="flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-slate-100 hover:text-foreground"
-          title="查看资料"
-        >
-          <Info className="h-4 w-4" />
-        </button>
-      </div>
+        actions={(
+          <>
+            {conv?.conversationType !== ConversationType.GROUP && conv?.userId && (
+              <div className="flex items-center gap-1">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-9 w-9 rounded-md"
+                  title="语音通话"
+                  onClick={() => handleStartCall("voice")}
+                >
+                  <Phone className="h-4 w-4" />
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-9 w-9 rounded-md"
+                  title="视频通话"
+                  onClick={() => handleStartCall("video")}
+                >
+                  <Video className="h-4 w-4" />
+                </Button>
+              </div>
+            )}
+            {conv?.conversationType === ConversationType.GROUP && conv?.groupId && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-9 w-9 rounded-md"
+                title={activeGroupCall ? "加入群视频" : "发起群视频"}
+                onClick={activeGroupCall ? handleJoinGroupCall : handleStartGroupCall}
+              >
+                <Video className="h-4 w-4" />
+              </Button>
+            )}
+            <button
+              type="button"
+              onClick={handleHeaderClick}
+              className="flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-slate-100 hover:text-foreground"
+              title="查看资料"
+            >
+              <Info className="h-4 w-4" />
+            </button>
+          </>
+        )}
+      />
 
       {conv?.conversationType === ConversationType.GROUP && activeGroupCall && (
-        <div className="border-b bg-emerald-50 px-4 py-2 text-sm text-emerald-950">
+        <div className="border-b border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-950">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0">
-              <div className="font-medium">
-                群视频进行中 · {activeGroupCall.participantCount ?? activeGroupCall.participants?.length ?? 1} 人
+              <div className="flex items-center gap-2 font-medium">
+                <StatusDot tone="online" pulse />
+                群视频进行中
+                <StateBadge tone="online">{activeGroupCall.participantCount ?? activeGroupCall.participants?.length ?? 1} 人</StateBadge>
               </div>
               <div className="mt-0.5 truncate text-xs text-emerald-800/75">
                 发起人 {displayGroupCallUser(activeGroupCall.initiatorUserId, groupMembers)} · {formatGroupCallStartedAt(activeGroupCall.startedAt)}
@@ -429,13 +427,14 @@ export default function ChatArea() {
         </div>
       )}
 
-      {/* Messages */}
       <ScrollArea className="flex-1 px-5 py-4">
         {messages.length === 0 && (
           <div className="flex h-full min-h-[360px] items-center justify-center">
-            <div className="rounded-md border border-dashed bg-white/70 px-5 py-4 text-center text-sm text-muted-foreground">
-              暂无消息，发送第一条消息吧
-            </div>
+            <EmptyState
+              icon={<MessageCircle className="h-4 w-4" />}
+              title="这条信号轨道还没有消息"
+              description="发送第一条消息，或等待对方、系统通知和通话记录进入这里。"
+            />
           </div>
         )}
 
@@ -446,7 +445,7 @@ export default function ChatArea() {
             if (isRevoked) {
               return (
                 <div key={msg.messageId} className="flex justify-center">
-                  <span className="rounded bg-muted px-3 py-1 text-xs text-muted-foreground">
+                  <span className="rounded-md border border-slate-200 bg-white px-3 py-1 text-xs text-[var(--text-muted)] shadow-sm">
                     {isMine ? "你" : msg.senderNickname || msg.senderUserId} 撤回了一条消息
                   </span>
                 </div>
@@ -457,6 +456,7 @@ export default function ChatArea() {
                 key={messageRenderKey(msg)}
                 className={`flex ${isMine ? "justify-end" : "justify-start"}`}
               >
+                {!isMine && <SignalRail tone="muted" />}
                 <div className="group flex max-w-[78%] flex-col">
                   <div className="flex items-end gap-2">
                     {!isMine && (
@@ -469,9 +469,11 @@ export default function ChatArea() {
                     )}
                     <div
                       className={`rounded-md px-3 py-2 text-sm shadow-sm ${
-                        isMine
-                          ? "bg-slate-900 text-white"
-                          : "border border-slate-200 bg-white text-slate-900"
+                        msg.status === -1
+                          ? "border border-red-200 bg-red-50 text-red-950"
+                          : isMine
+                            ? "bg-[var(--brand-ink)] text-white"
+                            : "border border-slate-200 bg-white text-[var(--text-strong)]"
                       }`}
                     >
                       {!isMine && (
@@ -482,20 +484,15 @@ export default function ChatArea() {
                       <MessageContentRenderer message={msg} />
                       <div
                         className={`mt-1 text-[10px] ${
-                          isMine ? "text-white/60" : "text-muted-foreground"
+                          isMine && msg.status !== -1 ? "text-white/60" : "text-muted-foreground"
                         }`}
                       >
                         {formatMsgTime(msg.createTime)}
                         {isMine && (msg.status === -1 ? " 发送失败" : msg.status === 0 ? " 发送中..." : msg.status === 1 ? " ✓" : " ✓✓")}
                       </div>
                     </div>
-                    {isMine && msg.status === -1 && (
-                      <span title={msg.errorText || "发送失败"} className="mb-2 text-red-500">
-                        <AlertCircle className="h-4 w-4 fill-red-500/10" />
-                      </span>
-                    )}
+                    {isMine && <MessageStatusIcon status={msg.status} errorText={msg.errorText} />}
 
-                    {/* Revoke button (own messages only) */}
                     {isMine && (
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
@@ -523,9 +520,8 @@ export default function ChatArea() {
         </div>
       </ScrollArea>
 
-      {/* Input */}
       <div className="border-t border-slate-200 bg-white/95 px-5 py-3">
-        <div className="mx-auto flex max-w-4xl items-center gap-2">
+        <div className="mx-auto flex max-w-4xl items-center gap-2 rounded-md border border-slate-200 bg-[var(--surface-subtle)] p-1.5">
           <input
             ref={fileInputRef}
             type="file"
@@ -536,7 +532,7 @@ export default function ChatArea() {
             }}
           />
           <button
-            className="flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground hover:bg-slate-100 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground hover:bg-white hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
             disabled={!conv || uploading}
             onClick={() => fileInputRef.current?.click()}
             title={uploading ? "正在上传文件" : "发送文件"}
@@ -548,9 +544,9 @@ export default function ChatArea() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            className="h-10 flex-1 border-slate-200 bg-slate-50"
+            className="h-10 flex-1 border-0 bg-white shadow-sm focus-visible:ring-1 focus-visible:ring-slate-300"
           />
-          <Button size="icon" className="h-10 w-10 rounded-md bg-slate-900 hover:bg-slate-800" onClick={handleSend} disabled={!input.trim()}>
+          <Button size="icon" className="h-10 w-10 rounded-md bg-[var(--brand-ink)] hover:bg-slate-800" onClick={handleSend} disabled={!input.trim()}>
             <Send className="h-4 w-4" />
           </Button>
         </div>

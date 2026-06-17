@@ -67,27 +67,29 @@ public class DbMessageStore implements IMessageStore {
 
     @Override
     public List<Message> pullBySequence(String conversationId, long startSeq, long endSeq, int limit) {
+        // 拉历史消息是高频入口，必须给服务端兜底限流，避免客户端传超大 limit 拖垮 DB。
         int actualLimit = (limit <= 0) ? 50 : Math.min(limit, 200);
 
         return PersistenceExceptions.runDatabase("pull messages by sequence", () -> {
             try (SqlSession session = MyBatisPlusFactory.openSession()) {
-            MessageMapper mapper = session.getMapper(MessageMapper.class);
-            List<MessageEntity> entities;
+                MessageMapper mapper = session.getMapper(MessageMapper.class);
+                List<MessageEntity> entities;
 
-            if (startSeq <= 0 && (endSeq <= 0 || endSeq >= Long.MAX_VALUE)) {
-                // 拉取最近的 N 条
-                entities = mapper.selectRecent(conversationId, actualLimit);
-            } else {
-                long from = Math.max(startSeq, 1);
-                long to = (endSeq <= 0) ? Long.MAX_VALUE : endSeq;
-                entities = mapper.selectBySeqRange(conversationId, from, to);
-            }
+                if (startSeq <= 0 && (endSeq <= 0 || endSeq >= Long.MAX_VALUE)) {
+                    // 首屏进入会话时通常不知道 seq 边界，此时按“最近 N 条”拉取，避免空会话误判为无历史。
+                    entities = mapper.selectRecent(conversationId, actualLimit);
+                } else {
+                    // 增量同步和向上翻页都走 seq 区间；seq 从 1 开始，防止 0 被当成有效业务序号。
+                    long from = Math.max(startSeq, 1);
+                    long to = (endSeq <= 0) ? Long.MAX_VALUE : endSeq;
+                    entities = mapper.selectBySeqRange(conversationId, from, to);
+                }
 
-            List<Message> result = new ArrayList<>(Math.min(entities.size(), actualLimit));
-            for (int i = 0; i < Math.min(entities.size(), actualLimit); i++) {
-                result.add(toMessage(entities.get(i)));
-            }
-            return result;
+                List<Message> result = new ArrayList<>(Math.min(entities.size(), actualLimit));
+                for (int i = 0; i < Math.min(entities.size(), actualLimit); i++) {
+                    result.add(toMessage(entities.get(i)));
+                }
+                return result;
             }
         });
     }

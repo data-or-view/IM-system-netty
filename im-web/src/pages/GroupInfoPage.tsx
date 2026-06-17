@@ -20,6 +20,7 @@ import { toast } from "sonner";
 import { im } from "@/sdk/im-sdk";
 import { GroupJoinVerification, GroupMemberRole, getErrorText, groupMemberRoleRank, type GroupJoinVerificationValue, type GroupMemberRoleValue } from "im-sdk";
 import { AppPage, Surface } from "@/components/AppPage";
+import { LoadingState, StateBadge } from "@/components/design-system";
 
 function roleLabel(role: GroupMemberRoleValue): { text: string; className: string } | null {
   if (role === GroupMemberRole.OWNER) return { text: "群主", className: "text-red-500 bg-red-50 border-red-200" };
@@ -240,11 +241,7 @@ export default function GroupInfoPage() {
   };
 
   if (loading) {
-    return (
-      <div className="flex flex-1 items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-slate-500" />
-      </div>
-    );
+    return <LoadingState text="正在读取群资料" />;
   }
 
   if (loadError) {
@@ -271,27 +268,30 @@ export default function GroupInfoPage() {
       <ScrollArea className="h-full">
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-5 py-5">
           <Surface className="overflow-hidden">
-            <div className="bg-slate-900 px-5 py-5 text-white">
+            <div className="border-b border-slate-200 bg-[var(--surface-subtle)] px-5 py-5">
               <div className="flex items-center gap-4">
-                <Avatar className="h-16 w-16 border border-white/20 shadow-xl">
+                <Avatar className="h-16 w-16 border border-white shadow-xl shadow-slate-950/10">
                   <AvatarImage src={groupInfo.faceUrl} alt={groupInfo.groupName} />
-                  <AvatarFallback className="bg-white/10 text-xl font-semibold text-white">
+                  <AvatarFallback className="bg-[var(--brand-ink)] text-xl font-semibold text-white">
                     {groupInfo.groupName.charAt(0).toUpperCase()}
                   </AvatarFallback>
                 </Avatar>
                 <div className="min-w-0">
-                  <h2 className="truncate text-lg font-semibold">{groupInfo.groupName}</h2>
-                  <p className="mt-1 truncate text-sm text-white/65">ID: {groupInfo.groupId}</p>
-                  <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-white/10 px-2.5 py-1 text-xs text-white/80">
+                  <h2 className="truncate text-lg font-semibold text-[var(--text-strong)]">{groupInfo.groupName}</h2>
+                  <p className="mt-1 truncate text-sm text-[var(--text-muted)]">ID: {groupInfo.groupId}</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <StateBadge tone="info">
                     <Users className="h-3.5 w-3.5" />
                     {groupInfo.memberCount || members.length} 人
+                    </StateBadge>
+                    <StateBadge tone={isAdmin ? "warning" : "muted"}>{roleText(currentUserRole)}</StateBadge>
                   </div>
                 </div>
                 {canEditGroupInfo && (
                   <Button
                     variant="secondary"
                     size="sm"
-                    className="ml-auto shrink-0 bg-white/10 text-white hover:bg-white/20"
+                    className="ml-auto shrink-0"
                     onClick={() => setInfoEditOpen(true)}
                   >
                     <Pencil className="h-3.5 w-3.5" />
@@ -582,7 +582,7 @@ function joinPolicyText(policy?: string): string {
 
 function InfoItem({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-md bg-slate-50 px-3 py-2">
+    <div className="rounded-md border border-slate-100 bg-[var(--surface-subtle)] px-3 py-2">
       <div className="text-xs text-slate-500">{label}</div>
       <div className="mt-1 truncate text-sm font-medium text-slate-900">{value}</div>
     </div>

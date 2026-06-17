@@ -6,6 +6,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { im } from "@/sdk/im-sdk";
 import { useStore } from "@/store/store";
 import { cn } from "@/lib/utils";
+import { EmptyState, PageHeader, StateBadge, StatusDot } from "@/components/design-system";
 
 export default function SystemMessagePanel() {
   const { state, refreshSystemMessages } = useStore();
@@ -41,20 +42,13 @@ export default function SystemMessagePanel() {
   }, [reload]);
 
   return (
-    <div className="flex h-full flex-1 flex-col bg-slate-50">
-      <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-white/95 px-5 py-3 shadow-sm">
-        <div className="flex min-w-0 items-center gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-slate-900 text-white shadow-sm">
-            <Bell className="h-5 w-5" />
-          </div>
-          <div className="min-w-0">
-            <div className="truncate text-sm font-semibold">系统通知</div>
-            <div className="text-xs text-muted-foreground">
-              {unreadCount > 0 ? `${unreadCount} 条未读消息` : "暂无未读消息"}
-            </div>
-          </div>
-        </div>
-        <div className="flex shrink-0 gap-2">
+    <div className="flex h-full flex-1 flex-col bg-[var(--app-bg)]">
+      <PageHeader
+        icon={<Bell className="h-5 w-5" />}
+        title="系统通知"
+        description={unreadCount > 0 ? `${unreadCount} 条未读消息` : "暂无未读消息"}
+        actions={(
+          <>
           <Button variant="outline" size="sm" className="h-9" onClick={() => void reload()} disabled={loading}>
             <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} />
             刷新
@@ -63,19 +57,18 @@ export default function SystemMessagePanel() {
             <Check className="h-3.5 w-3.5" />
             全部已读
           </Button>
-        </div>
-      </div>
+          </>
+        )}
+      />
 
       <ScrollArea className="flex-1">
         {messages.length === 0 ? (
-          <div className="flex h-full min-h-[360px] flex-col items-center justify-center px-6 text-center">
-            <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-md bg-white text-slate-500 shadow-sm ring-1 ring-slate-200">
-              <Inbox className="h-5 w-5" />
-            </div>
-            <div className="text-sm font-medium">暂无系统通知</div>
-            <div className="mt-1 max-w-sm text-xs leading-5 text-muted-foreground">
-              平台通知、业务提醒和账号消息会以卡片形式显示在这里。
-            </div>
+          <div className="flex h-full min-h-[360px] items-center justify-center px-6">
+            <EmptyState
+              icon={<Inbox className="h-4 w-4" />}
+              title="暂无系统通知"
+              description="平台通知、业务提醒和账号消息会以卡片形式显示在这里。"
+            />
           </div>
         ) : (
           <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 px-5 py-5">
@@ -104,7 +97,7 @@ function SystemMessageCard({
   const isGroupDisbanded = message.contentType === "group_disbanded";
   return (
     <article className={cn(
-      "rounded-md border border-slate-200 bg-white p-4 shadow-sm",
+      "rounded-md border border-slate-200 bg-white p-4 shadow-sm shadow-slate-950/[0.03]",
       isGroupDisbanded && "border-amber-200 bg-amber-50/60",
     )}>
       <div className="mb-3 flex items-start justify-between gap-3">
@@ -116,7 +109,7 @@ function SystemMessageCard({
           )}
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              {unread && <span className="h-2 w-2 shrink-0 rounded-full bg-primary" />}
+              {unread && <StatusDot tone="info" />}
               <h3 className="truncate text-sm font-semibold">{message.title}</h3>
             </div>
             <div className="mt-1 text-xs text-muted-foreground">
@@ -124,11 +117,7 @@ function SystemMessageCard({
             </div>
           </div>
         </div>
-        {unread && (
-          <Button variant="ghost" size="sm" className="h-7 shrink-0 px-2 text-xs" onClick={onRead}>
-            标记已读
-          </Button>
-        )}
+        {unread && <button className="shrink-0" onClick={onRead}><StateBadge tone="info">标记已读</StateBadge></button>}
       </div>
       {message.summary && (
         <p className="mb-3 text-sm leading-6 text-muted-foreground">{message.summary}</p>

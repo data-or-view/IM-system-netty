@@ -17,6 +17,7 @@ import { toast } from "sonner";
 import { im } from "@/sdk/im-sdk";
 import { getErrorText, type UserInfo } from "im-sdk";
 import { AppPage, Surface } from "@/components/AppPage";
+import { LoadingState, StateBadge, StatusDot } from "@/components/design-system";
 
 export default function UserProfilePage() {
   const { userId } = useParams<{ userId: string }>();
@@ -74,11 +75,7 @@ export default function UserProfilePage() {
   }, [avatarPreview]);
 
   if (loading) {
-    return (
-      <div className="flex flex-1 items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-slate-500" />
-      </div>
-    );
+    return <LoadingState text="正在读取用户资料" />;
   }
 
   if (!profile || !userId) {
@@ -229,19 +226,22 @@ export default function UserProfilePage() {
     <AppPage title="用户信息" description={profile.nickname || userId} onBack={() => navigate(-1)}>
       <div className="mx-auto flex h-full w-full max-w-3xl flex-col gap-4 px-5 py-5">
         <Surface className="overflow-hidden">
-          <div className="bg-slate-900 px-5 py-5 text-white">
+          <div className="border-b border-slate-200 bg-[var(--surface-subtle)] px-5 py-5">
             <div className="flex items-center gap-4">
-              <Avatar className="h-20 w-20 border border-white/20 shadow-xl">
+              <Avatar className="h-20 w-20 border border-white shadow-xl shadow-slate-950/10">
                 {profile.faceUrl && <AvatarImage src={profile.faceUrl} alt={profile.nickname || userId} />}
-                <AvatarFallback className="bg-white/10 text-2xl font-semibold text-white">
+                <AvatarFallback className="bg-[var(--brand-ink)] text-2xl font-semibold text-white">
                   {(profile.nickname || userId).charAt(0).toUpperCase()}
                 </AvatarFallback>
               </Avatar>
               <div className="min-w-0">
-                <h2 className="truncate text-xl font-semibold">{profile.nickname || userId}</h2>
-                <p className="mt-1 truncate text-sm text-white/65">ID: {userId}</p>
+                <h2 className="truncate text-xl font-semibold text-[var(--text-strong)]">{profile.nickname || userId}</h2>
+                <p className="mt-1 truncate text-sm text-[var(--text-muted)]">ID: {userId}</p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {isSelf ? <StateBadge tone="info">我的账号</StateBadge> : isFriend ? <StateBadge tone="online"><StatusDot tone="online" /> 好友</StateBadge> : <StateBadge>未添加</StateBadge>}
+                </div>
                 {profile.appMangerLevel !== undefined && profile.appMangerLevel !== "NORMAL" && (
-                  <span className="mt-2 inline-flex items-center gap-1 rounded-full bg-amber-400/15 px-2.5 py-1 text-xs text-amber-100 ring-1 ring-amber-300/30">
+                  <span className="mt-2 inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs text-amber-700">
                     <Shield className="h-3 w-3" />
                     平台管理员
                   </span>
@@ -322,7 +322,7 @@ export default function UserProfilePage() {
 
 function InfoItem({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-md bg-slate-50 px-3 py-2">
+    <div className="rounded-md border border-slate-100 bg-[var(--surface-subtle)] px-3 py-2">
       <div className="text-xs text-slate-500">{label}</div>
       <div className="mt-1 truncate text-sm font-medium text-slate-900">{value}</div>
     </div>

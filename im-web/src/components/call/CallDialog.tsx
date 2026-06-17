@@ -31,7 +31,7 @@ export function CallDialog() {
         <DialogTitle className="sr-only">
           {call.mode === "group" ? "群视频" : call.callType === "video" ? "视频通话" : "语音通话"}
         </DialogTitle>
-        <div className="relative min-h-[560px] bg-[radial-gradient(circle_at_top,#14532d_0%,#18181b_42%,#050505_100%)]">
+        <div className="relative min-h-[560px] bg-[radial-gradient(circle_at_top,#1d4ed8_0%,#111827_42%,#050505_100%)]">
           {call.mode === "group" ? (
             <GroupStage call={call} title={title} />
           ) : call.callType === "video" && call.phase === "connected" ? (
@@ -68,7 +68,7 @@ function VoiceStage({ call, peerName }: { call: CallState; peerName: string }) {
         <div className="absolute inset-0 animate-ping rounded-full bg-emerald-400/20" />
         <Avatar className="relative h-28 w-28 border border-white/20 shadow-2xl">
           <AvatarImage src={call.peer?.faceUrl} />
-          <AvatarFallback className="bg-emerald-500 text-4xl font-semibold text-white">
+          <AvatarFallback className="bg-[var(--signal-info)] text-4xl font-semibold text-white">
             {peerName.charAt(0).toUpperCase()}
           </AvatarFallback>
         </Avatar>
@@ -106,7 +106,7 @@ function VideoStage({ call, peerName }: { call: CallState; peerName: string }) {
       )}
 
       {call.callType === "video" && (
-        <div className="absolute right-4 top-4 h-36 w-24 overflow-hidden rounded-2xl border border-white/20 bg-zinc-900 shadow-2xl">
+        <div className="absolute right-4 top-4 h-36 w-24 overflow-hidden rounded-md border border-white/20 bg-zinc-900 shadow-2xl">
           {call.localVideoTrack && !call.cameraOff ? (
             <video ref={localRef} autoPlay muted playsInline className="h-full w-full object-cover" />
           ) : (
@@ -147,7 +147,7 @@ function GroupStage({ call, title }: { call: CallState; title: string }) {
 
 function OverflowTile({ count }: { count: number }) {
   return (
-    <div className="relative flex aspect-video items-center justify-center rounded-2xl border border-white/10 bg-zinc-900 text-sm text-white/70">
+    <div className="relative flex aspect-video items-center justify-center rounded-md border border-white/10 bg-zinc-900 text-sm text-white/70">
       还有 {count} 人
     </div>
   );
@@ -155,7 +155,7 @@ function OverflowTile({ count }: { count: number }) {
 
 function LocalTile({ call, videoRef }: { call: CallState; videoRef: React.RefObject<HTMLVideoElement> }) {
   return (
-    <div className="relative aspect-video overflow-hidden rounded-2xl border border-white/10 bg-zinc-900">
+    <div className="relative aspect-video overflow-hidden rounded-md border border-white/10 bg-zinc-900">
       {call.localVideoTrack && !call.cameraOff ? (
         <video ref={videoRef} autoPlay muted playsInline className="h-full w-full object-cover" />
       ) : (
@@ -170,7 +170,7 @@ function RemoteTile({ media }: { media: RemoteMedia }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   useAttachTrack(media.videoTrack, videoRef);
   return (
-    <div className="relative aspect-video overflow-hidden rounded-2xl border border-white/10 bg-zinc-900">
+    <div className="relative aspect-video overflow-hidden rounded-md border border-white/10 bg-zinc-900">
       {media.videoTrack ? (
         <video ref={videoRef} autoPlay playsInline className="h-full w-full object-cover" />
       ) : (
@@ -185,8 +185,8 @@ function RemoteTile({ media }: { media: RemoteMedia }) {
 
 function TileFallback({ name, description }: { name: string; description?: string }) {
   return (
-    <div className="flex h-full w-full flex-col items-center justify-center bg-[radial-gradient(circle_at_top,#064e3b,#18181b)] px-3 text-center">
-      <div className="flex h-14 w-14 items-center justify-center rounded-full bg-emerald-500 text-xl font-semibold text-white">
+    <div className="flex h-full w-full flex-col items-center justify-center bg-[radial-gradient(circle_at_top,#1d4ed8,#18181b)] px-3 text-center">
+      <div className="flex h-14 w-14 items-center justify-center rounded-full bg-[var(--signal-info)] text-xl font-semibold text-white">
         {name.charAt(0).toUpperCase()}
       </div>
       {description && <div className="mt-2 text-xs text-white/55">{description}</div>}
