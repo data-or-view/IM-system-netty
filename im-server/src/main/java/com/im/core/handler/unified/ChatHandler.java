@@ -99,7 +99,7 @@ public class ChatHandler implements RequestHandler {
         // 构建携带有 room 信息的 INVITE 消息，转发给被叫
         SignalingContent inviteContent = new SignalingContent(
                 SignalingAction.CALLING, normalizeCallType(signal.getCallType()), room.getRoomId(), room.getCalleeToken(),
-                signal.getSdp(), null, 0);
+                room.getSfuEndpoint(), signal.getSdp(), null, 0);
 
         sendMessageUseCase.execute(params, callerId, calleeId, null, inviteContent);
 

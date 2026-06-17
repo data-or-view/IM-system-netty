@@ -407,6 +407,25 @@ function groupInfoFromConversation(list: Conversation[]): GroupInfo[] {
     }));
 }
 
+function compactText(value?: string | null): string | undefined {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === "undefined" || trimmed === "null") return undefined;
+  return trimmed;
+}
+
+function normalizeConversation(conversation: Conversation): Conversation {
+  const showName = compactText(conversation.showName)
+    ?? compactText(conversation.groupName)
+    ?? compactText(conversation.userId)
+    ?? compactText(conversation.groupId)
+    ?? (conversation.conversationType === ConversationType.GROUP ? "未命名群聊" : "未知用户");
+  const groupName = conversation.conversationType === ConversationType.GROUP
+    ? compactText(conversation.groupName) ?? showName
+    : conversation.groupName;
+  return { ...conversation, showName, groupName };
+}
+
 // ========== Provider ==========
 
 export function StoreProvider({ children }: { children: ReactNode }) {
@@ -414,7 +433,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const fetchConversations = useCallback(async () => {
     try {
-      const list = (await im.conversation.list()) as unknown as Conversation[];
+      const list = ((await im.conversation.list()) as unknown as Conversation[]).map(normalizeConversation);
       dispatch({ type: "SET_CONVERSATIONS", list });
     } catch (err) {
       console.error("fetchConversations failed:", err);
@@ -445,7 +464,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       console.error("fetchMyGroups failed:", err);
       try {
-        const conversations = (await im.conversation.list()) as unknown as Conversation[];
+        const conversations = ((await im.conversation.list()) as unknown as Conversation[]).map(normalizeConversation);
         dispatch({ type: "SET_MY_GROUPS", list: groupInfoFromConversation(conversations) });
       } catch (fallbackErr) {
         console.error("fetchMyGroups fallback failed:", fallbackErr);
@@ -492,8 +511,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const hydrateAfterAuth = useCallback(async () => {
+  const fetchUserProfile = useCallback(async (userId: string) => {
+    try {
+      const info = userId === (localStorage.getItem(AUTH_USER_ID_KEY) || state.userId)
+        ? await im.user.me()
+        : await im.user.info(userId);
+      dispatch({ type: "SET_USER_PROFILE", userId, info: info as unknown as UserInfo });
+    } catch (err) {
+      console.error("fetchUserProfile failed:", err);
+    }
+  }, [state.userId]);
+
+  const hydrateAfterAuth = useCallback(async (currentUserId = state.userId) => {
     await Promise.all([
+      currentUserId ? fetchUserProfile(currentUserId) : Promise.resolve(),
       fetchConversations(),
       fetchFriends(),
       fetchMyGroups(),
@@ -501,7 +532,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       fetchUnhandledGroupApplyCount(),
       refreshSystemMessages(),
     ]);
-  }, [fetchConversations, fetchFriends, fetchMyGroups, fetchUnhandledApplyCount, fetchUnhandledGroupApplyCount, refreshSystemMessages]);
+  }, [fetchConversations, fetchFriends, fetchMyGroups, fetchUnhandledApplyCount, fetchUnhandledGroupApplyCount, fetchUserProfile, refreshSystemMessages, state.userId]);
 
   // ── SDK 事件监听 ──
   useEffect(() => {
@@ -613,7 +644,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const tokens = await im.login(userId, password);
     persistTokens(tokens);
     dispatch({ type: "SET_AUTH", userId, token: tokens.token ?? "", refreshToken: tokens.refreshToken });
-    await hydrateAfterAuth();
+    await hydrateAfterAuth(userId);
   }, [hydrateAfterAuth]);
 
   const register = useCallback(async (params: { password?: string; nickname?: string; faceUrl?: string }) => {
@@ -737,15 +768,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       dispatch({ type: "SET_GROUP_INFO", groupId, info: info as unknown as GroupInfo });
     } catch (err) {
       console.error("fetchGroupInfo failed:", err);
-    }
-  }, []);
-
-  const fetchUserProfile = useCallback(async (userId: string) => {
-    try {
-      const info = await im.user.info(userId);
-      dispatch({ type: "SET_USER_PROFILE", userId, info: info as unknown as UserInfo });
-    } catch (err) {
-      console.error("fetchUserProfile failed:", err);
     }
   }, []);
 

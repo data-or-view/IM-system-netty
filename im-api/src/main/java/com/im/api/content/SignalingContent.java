@@ -31,6 +31,8 @@ public class SignalingContent implements IMessageContent {
     private String roomId;
     /** SFU room token */
     private String token;
+    /** SFU endpoint */
+    private String sfuEndpoint;
     /** SDP offer/answer（JSON string） */
     private String sdp;
     /** ICE candidate（JSON string） */
@@ -58,6 +60,12 @@ public class SignalingContent implements IMessageContent {
         this.callType = callType;
     }
 
+    public SignalingContent(SignalingAction action, String callType, String roomId, String token,
+                            String sfuEndpoint, String sdp, String ice, int duration) {
+        this(action, callType, roomId, token, sdp, ice, duration);
+        this.sfuEndpoint = sfuEndpoint;
+    }
+
     public SignalingContent(SignalingAction action, String roomId, String token) {
         this(action, roomId, token, null, null, 0);
     }
@@ -78,6 +86,7 @@ public class SignalingContent implements IMessageContent {
     public String getCallType() { return callType; }
     public String getRoomId() { return roomId; }
     public String getToken() { return token; }
+    public String getSfuEndpoint() { return sfuEndpoint; }
     public String getSdp() { return sdp; }
     public String getIce() { return ice; }
     public int getDuration() { return duration; }
@@ -86,6 +95,7 @@ public class SignalingContent implements IMessageContent {
     public void setCallType(String callType) { this.callType = callType; }
     public void setRoomId(String roomId) { this.roomId = roomId; }
     public void setToken(String token) { this.token = token; }
+    public void setSfuEndpoint(String sfuEndpoint) { this.sfuEndpoint = sfuEndpoint; }
     public void setSdp(String sdp) { this.sdp = sdp; }
     public void setIce(String ice) { this.ice = ice; }
     public void setDuration(int duration) { this.duration = duration; }

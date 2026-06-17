@@ -45,6 +45,8 @@ export default function Sidebar() {
   const [searchGroupOpen, setSearchGroupOpen] = useState(false);
   const [friendRequestOpen, setFriendRequestOpen] = useState(false);
   const [groupRequestOpen, setGroupRequestOpen] = useState(false);
+  const currentUser = state.userId ? state.userProfileCache[state.userId] : undefined;
+  const currentDisplayName = displayText(currentUser?.nickname) ?? displayText(state.userId) ?? "未登录";
 
   return (
     <TooltipProvider>
@@ -56,14 +58,14 @@ export default function Sidebar() {
               onClick={() => state.userId && navigate(`/chat/user/${state.userId}`)}
             >
               <Avatar className="h-10 w-10 border border-white shadow-sm">
-                <AvatarImage src={state.userId ? state.userProfileCache[state.userId]?.faceUrl : undefined} />
+                <AvatarImage src={currentUser?.faceUrl} />
                 <AvatarFallback className="bg-slate-900 text-white">
-                  <User className="h-4 w-4" />
+                  {state.userId ? fallbackName(currentDisplayName) : <User className="h-4 w-4" />}
                 </AvatarFallback>
               </Avatar>
               <div className="min-w-0">
                 <div className="truncate text-sm font-semibold">
-                  {state.userId ? state.userProfileCache[state.userId]?.nickname || state.userId : "未登录"}
+                  {currentDisplayName}
                 </div>
                 <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
                   <span className={cn("h-1.5 w-1.5 rounded-full", state.connected ? "bg-emerald-500" : "bg-slate-300")} />
@@ -370,8 +372,9 @@ function ConversationItem({ conv }: { conv: Conversation }) {
   const { state, dispatch } = useStore();
   const navigate = useNavigate();
   const isActive = state.activeConversationId === conv.conversationId;
+  const title = conversationTitle(conv);
   const subtitle = formatMessagePreview(conv.latestMsg)
-    || (conv.conversationType === ConversationType.GROUP ? `[群聊] ${conv.groupName || conv.showName}` : "暂无消息");
+    || (conv.conversationType === ConversationType.GROUP ? `[群聊] ${title}` : "暂无消息");
 
   return (
     <button
@@ -386,11 +389,11 @@ function ConversationItem({ conv }: { conv: Conversation }) {
     >
       <Avatar className="h-10 w-10 border border-white shadow-sm">
         <AvatarImage src={conv.faceUrl} />
-        <AvatarFallback>{fallbackName(conv.showName)}</AvatarFallback>
+        <AvatarFallback>{fallbackName(title)}</AvatarFallback>
       </Avatar>
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
-          <span className="truncate text-sm font-medium">{conv.showName}</span>
+          <span className="truncate text-sm font-medium">{title}</span>
           {conv.latestMsgSendTime && (
             <span className="shrink-0 text-xs text-muted-foreground">{formatTime(conv.latestMsgSendTime)}</span>
           )}
@@ -495,8 +498,8 @@ function GroupItem({ group }: { group: GroupInfo }) {
       ownerUserId: state.userId || "",
       conversationType: ConversationType.GROUP,
       groupId: group.groupId,
-      groupName: group.groupName,
-      showName: group.groupName,
+      groupName: groupTitle(group),
+      showName: groupTitle(group),
       faceUrl: group.faceUrl,
       latestMsg: "",
       latestMsgSendTime: 0,
@@ -513,10 +516,10 @@ function GroupItem({ group }: { group: GroupInfo }) {
     <button onClick={openChat} className="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left transition-colors hover:bg-white">
       <Avatar className="h-9 w-9 border border-white shadow-sm">
         <AvatarImage src={group.faceUrl} />
-        <AvatarFallback>{fallbackName(group.groupName)}</AvatarFallback>
+        <AvatarFallback>{fallbackName(groupTitle(group))}</AvatarFallback>
       </Avatar>
       <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-medium">{group.groupName}</div>
+        <div className="truncate text-sm font-medium">{groupTitle(group)}</div>
         <div className="truncate text-xs text-muted-foreground">
           ID: {group.groupId}{group.memberCount ? ` · ${group.memberCount} 人` : ""}
         </div>
@@ -526,7 +529,26 @@ function GroupItem({ group }: { group: GroupInfo }) {
 }
 
 function fallbackName(name?: string): string {
-  return (name || "?").charAt(0).toUpperCase();
+  return (displayText(name) || "?").charAt(0).toUpperCase();
+}
+
+function displayText(value?: string | null): string | undefined {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === "undefined" || trimmed === "null") return undefined;
+  return trimmed;
+}
+
+function conversationTitle(conv: Conversation): string {
+  return displayText(conv.showName)
+    ?? displayText(conv.groupName)
+    ?? displayText(conv.userId)
+    ?? displayText(conv.groupId)
+    ?? (conv.conversationType === ConversationType.GROUP ? "未命名群聊" : "未知用户");
+}
+
+function groupTitle(group: GroupInfo): string {
+  return displayText(group.groupName) ?? displayText(group.groupId) ?? "未命名群聊";
 }
 
 function formatMessagePreview(content?: string): string {

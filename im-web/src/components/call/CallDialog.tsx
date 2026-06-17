@@ -102,9 +102,14 @@ function VideoStage({ call, peerName }: { call: CallState; peerName: string }) {
         </div>
       )}
 
-      {call.localVideoTrack && !call.cameraOff && (
+      {call.callType === "video" && (
         <div className="absolute right-4 top-4 h-36 w-24 overflow-hidden rounded-2xl border border-white/20 bg-zinc-900 shadow-2xl">
-          <video ref={localRef} autoPlay muted playsInline className="h-full w-full object-cover" />
+          {call.localVideoTrack && !call.cameraOff ? (
+            <video ref={localRef} autoPlay muted playsInline className="h-full w-full object-cover" />
+          ) : (
+            <TileFallback name="我" />
+          )}
+          <div className="absolute bottom-1.5 left-1.5 rounded-full bg-black/55 px-2 py-0.5 text-[10px]">我</div>
         </div>
       )}
     </div>

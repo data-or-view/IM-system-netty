@@ -2,8 +2,8 @@
  * IM SDK 集成 —— 创建并导出 SDK 单例供 im-web 使用。
  *
  * 本地开发默认连接后端 Netty 服务：
- * - WebSocket: ws://127.0.0.1:8084/ws
- * - HTTP: http://127.0.0.1:8089
+ * - WebSocket: ws://127.0.0.1:8083/ws
+ * - HTTP: http://127.0.0.1:8084
  *
  * 可通过 Vite 环境变量覆盖：VITE_WS_URL / VITE_HTTP_URL。
  */

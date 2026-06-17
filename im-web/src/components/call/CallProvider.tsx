@@ -452,6 +452,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
     if (signal.action === SignalingAction.CALLING) {
       if (!signal.roomId || !signal.token) return;
       incomingTokenRef.current = signal.token;
+      liveKitUrlRef.current = signal.sfuEndpoint || liveKitUrlRef.current;
       setCall((prev) => {
         if (prev.phase !== "idle") return prev;
         return {

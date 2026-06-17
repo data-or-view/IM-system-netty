@@ -112,6 +112,7 @@ export interface SignalingContent {
   _room?: string;
   token?: string;
   _token?: string;
+  sfuEndpoint?: string;
   sdp?: string;
   _sdp?: string;
   ice?: string;
@@ -160,6 +161,7 @@ export interface NormalizedSignalingContent {
   callType?: "voice" | "video";
   roomId?: string;
   token?: string;
+  sfuEndpoint?: string;
   sdp?: string;
   ice?: string;
   duration?: number;
@@ -309,6 +311,7 @@ export function normalizeSignalingContent(content: SignalingContent): Normalized
     callType: content.callType === "video" ? "video" : content.callType === "voice" ? "voice" : undefined,
     roomId: content.roomId ?? content._room,
     token: content.token ?? content._token,
+    sfuEndpoint: content.sfuEndpoint,
     sdp: content.sdp ?? content._sdp,
     ice: content.ice ?? content._ice,
     duration: content.duration,
