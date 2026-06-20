@@ -21,6 +21,7 @@ import static io.netty.handler.codec.http.HttpHeaderValues.APPLICATION_JSON;
 public class JsonResponse {
 
     private static final ObjectMapper MAPPER = ObjectMapperProvider.get();
+    private static volatile boolean exposeErrorDetail = false;
     private static final String CORS_ALLOW_METHODS = "GET, POST, PUT, DELETE, OPTIONS";
     private static final String CORS_ALLOW_HEADERS = String.join(", ",
             ImHeaders.CONTENT_TYPE,
@@ -74,13 +75,18 @@ public class JsonResponse {
     public static void imError(ChannelHandlerContext ctx, ImErrorCode imCode, String detail,
                                String requestId, String requestOrigin) {
         HttpResponseStatus httpStatus = toHttpStatus(imCode);
-        String msg = detail != null ? detail : imCode.getMessage();
+        String safeMessage = safeMessage(imCode);
+        String responseDetail = exposeErrorDetail ? detail : null;
         try {
-            String json = MAPPER.writeValueAsString(ApiBody.error(imCode.getCode(), imCode.getMessage(), detail, requestId));
+            String json = MAPPER.writeValueAsString(ApiBody.error(imCode.getCode(), safeMessage, responseDetail, requestId));
             writeRaw(ctx, httpStatus, json, requestId, requestOrigin);
         } catch (Exception e) {
-            writeRaw(ctx, httpStatus, "{\"code\":" + imCode.getCode() + ",\"msg\":\"" + msg + "\"}", requestId, requestOrigin);
+            writeRaw(ctx, httpStatus, "{\"code\":" + imCode.getCode() + ",\"msg\":\"" + safeMessage + "\"}", requestId, requestOrigin);
         }
+    }
+
+    public static void configureErrorDetail(boolean exposeDetail) {
+        exposeErrorDetail = exposeDetail;
     }
 
     public static void badRequest(ChannelHandlerContext ctx, String message) {
@@ -160,6 +166,21 @@ public class JsonResponse {
 
     public static ObjectMapper mapper() {
         return MAPPER;
+    }
+
+    private static String safeMessage(ImErrorCode code) {
+        return switch (code) {
+            case BAD_REQUEST, INVALID_MESSAGE -> "请求参数不正确";
+            case UNAUTHORIZED -> "登录状态已失效，请重新登录";
+            case FORBIDDEN -> "没有权限执行该操作";
+            case NOT_FOUND -> "资源不存在或已被删除";
+            case CONFLICT, DUPLICATE_MESSAGE -> "请求冲突，请刷新后重试";
+            case RATE_LIMITED -> "操作太频繁，请稍后再试";
+            case MESSAGE_TOO_LARGE -> "内容过大，请调整后重试";
+            case USER_OFFLINE -> "对方当前不在线";
+            case MQ_UNAVAILABLE -> "消息服务暂不可用，请稍后再试";
+            default -> "服务暂时不可用，请稍后再试";
+        };
     }
 
     private record ApiBody(int code, String msg, Object data, String detail, String requestId) {

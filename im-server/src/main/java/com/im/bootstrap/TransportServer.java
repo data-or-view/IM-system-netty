@@ -4,6 +4,7 @@ import com.im.api.ISessionManager;
 import com.im.common.lifecycle.Lifecycle;
 import com.im.common.util.IMExecutors;
 import com.im.config.Config;
+import com.im.bootstrap.http.JsonResponse;
 import com.im.core.dispatcher.ApiDispatcher;
 import com.im.core.handler.ConnectionEventHandler;
 import io.netty.channel.Channel;
@@ -125,6 +126,7 @@ final class TransportServer implements Lifecycle {
         if (!config.getBoolean("im.http.enabled", true)) {
             return;
         }
+        JsonResponse.configureErrorDetail(config.getBoolean("im.http.error-detail-enabled", false));
         httpChannel = HttpServerBootstrap.start(bossGroup, workerGroup,
                 config.getInt("im.http.port", 8082), useEpoll,
                 config.getString("im.http.cors.allowed-origins").orElse("http://127.0.0.1:39073,http://localhost:39073"),

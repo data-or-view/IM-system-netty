@@ -49,6 +49,7 @@ public final class SchemaInitializer {
     private static final List<String> TABLE_NAMES = List.of(
             "im_users",
             "im_blacklist",
+            "im_refresh_tokens",
             "im_friends",
             "im_friend_requests",
             "im_groups",

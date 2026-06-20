@@ -103,7 +103,10 @@ final class DispatcherFactory {
                                                  ConversationAccessChecker conversationAccessChecker,
                                                  SendMessageUseCase sendMessageUseCase,
                                                  SystemMessagePublishUseCase systemMessagePublishUseCase) {
-        dispatcher.registerHandlers(new UserHandler(dependencies.business().userManager(), registerUseCase),
+        dispatcher.registerHandlers(new UserHandler(
+                        dependencies.business().userManager(),
+                        dependencies.business().friendManager(),
+                        registerUseCase),
                 Operation.USER_REGISTER, Operation.USER_ME, Operation.USER_INFO,
                 Operation.USER_SEARCH, Operation.USER_UPDATE);
         dispatcher.registerHandlers(new FriendHandler(

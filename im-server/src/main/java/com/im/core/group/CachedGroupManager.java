@@ -16,9 +16,10 @@ import java.util.Optional;
 import java.util.Set;
 
 /**
- * 群资料缓存装饰器。
+ * 群资料和群成员缓存装饰器。
  *
- * <p>当前只缓存群基本资料；成员关系、禁言、角色等权限判断保持实时查询。</p>
+ * <p>权限判断仍保持实时查询；展示型成员列表和群成员 ID 列表使用 Redis 缓存。
+ * 成员变更、角色变更、群昵称、禁言等会影响展示或 fanout 的操作会主动失效。</p>
  */
 public class CachedGroupManager implements IGroupManager {
 
@@ -113,6 +114,7 @@ public class CachedGroupManager implements IGroupManager {
     @Override
     public void muteMember(String groupId, String targetUserId, long muteEndTime) {
         delegate.muteMember(groupId, targetUserId, muteEndTime);
+        invalidateMemberListCache(groupId);
     }
 
     @Override
@@ -148,6 +150,7 @@ public class CachedGroupManager implements IGroupManager {
     @Override
     public void muteGroupAll(String groupId, String operatorId, boolean mute) {
         delegate.muteGroupAll(groupId, operatorId, mute);
+        invalidateMemberListCache(groupId);
     }
 
     @Override
@@ -255,6 +258,12 @@ public class CachedGroupManager implements IGroupManager {
         }
         if (memberIdsCache != null) {
             memberIdsCache.invalidate(groupId);
+        }
+    }
+
+    private void invalidateMemberListCache(String groupId) {
+        if (memberListCache != null) {
+            memberListCache.invalidate(groupId);
         }
     }
 }

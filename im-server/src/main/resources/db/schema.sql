@@ -83,6 +83,22 @@ CREATE TABLE IF NOT EXISTS im_blacklist (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='黑名单表';
 
 -- ============================================================
+-- 4.1 Refresh Token 注册表
+-- 只保存 refresh token 的 jti 和哈希，支持吊销与轮换
+-- ============================================================
+CREATE TABLE IF NOT EXISTS im_refresh_tokens (
+    token_id          VARCHAR(64)  NOT NULL PRIMARY KEY COMMENT 'Refresh token jti',
+    user_id           VARCHAR(64)  NOT NULL COMMENT '用户ID',
+    token_hash        VARCHAR(128) NOT NULL COMMENT 'Refresh token SHA-256 哈希',
+    app_manger_level  TINYINT      NOT NULL DEFAULT 0 COMMENT '签发时管理员级别',
+    issued_at         BIGINT       NOT NULL DEFAULT 0 COMMENT '签发时间(毫秒)',
+    expires_at        BIGINT       NOT NULL DEFAULT 0 COMMENT '过期时间(毫秒)',
+    revoked_at        BIGINT       NOT NULL DEFAULT 0 COMMENT '吊销时间(毫秒)，0=未吊销',
+    INDEX idx_refresh_user (user_id, revoked_at, expires_at),
+    INDEX idx_refresh_expires (expires_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Refresh Token 注册表';
+
+-- ============================================================
 -- 5. 群组表
 -- 对应 OpenIM: model.Group
 -- ============================================================

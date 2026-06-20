@@ -24,6 +24,7 @@ import com.im.common.util.IMExecutors;
 import com.im.config.Config;
 import com.im.api.IPasswordHasher;
 import com.im.api.IUserCredentialStore;
+import com.im.core.auth.DbRefreshTokenStore;
 import com.im.core.auth.JwtAuthenticator;
 import com.im.core.auth.Pbkdf2PasswordHasher;
 import com.im.core.call.CallStateManager;
@@ -33,7 +34,9 @@ import com.im.core.call.RedisGroupCallStateStore;
 import com.im.core.call.RedisSingleCallStateStore;
 import com.im.core.cache.RedisJsonCache;
 import com.im.core.cache.SafeCache;
+import com.im.core.conversation.CachedConversationManager;
 import com.im.core.conversation.DbConversationManager;
+import com.im.core.conversation.ConversationListSnapshot;
 import com.im.core.db.DatabaseConfiguration;
 import com.im.core.db.MyBatisPlusFactory;
 import com.im.core.db.SchemaInitializer;
@@ -183,9 +186,10 @@ final class ServerComponentsFactory {
     private static BusinessDependencies createBusiness(Config config,
                                                        RedisConfiguration redisConfig,
                                                        IRouteTable routeTable) {
-        JwtAuthenticator authenticator = new JwtAuthenticator(
-                config.getString("im.token.secret", "im-system-dev-secret-change-in-production"));
         RetryExecutor retryExecutor = new FailsafeRetryExecutor();
+        JwtAuthenticator authenticator = new JwtAuthenticator(
+                config.getString("im.token.secret", "im-system-dev-secret-change-in-production"),
+                new DbRefreshTokenStore(retryExecutor));
         IGroupManager groupManager = new CachedGroupManager(
                 new DbGroupManager(retryExecutor),
                 new SafeCache<>(new RedisJsonCache<>(
@@ -212,7 +216,24 @@ final class ServerComponentsFactory {
                         "cache:group:member-ids:",
                         java.time.Duration.ofSeconds(config.getLong("im.cache.group-member-ids-ttl-seconds", 30))),
                         "group-member-ids"));
-        IConversationManager conversationManager = new DbConversationManager(retryExecutor);
+        IConversationManager conversationManager = new CachedConversationManager(
+                new DbConversationManager(retryExecutor),
+                new SafeCache<>(new RedisJsonCache<>(
+                        redisConfig,
+                        key -> key,
+                        new JacksonSerializer<>(),
+                        ConversationListSnapshot.class,
+                        "cache:conversation:list:",
+                        java.time.Duration.ofSeconds(config.getLong("im.cache.conversation-list-ttl-seconds", 30))),
+                        "conversation-list"),
+                new SafeCache<>(new RedisJsonCache<>(
+                        redisConfig,
+                        key -> key,
+                        new JacksonSerializer<>(),
+                        com.im.api.Conversation.class,
+                        "cache:conversation:item:",
+                        java.time.Duration.ofSeconds(config.getLong("im.cache.conversation-item-ttl-seconds", 30))),
+                        "conversation-item"));
         IFriendManager friendManager = new DbFriendManager(retryExecutor);
         DbUserManager dbUserManager = new DbUserManager(retryExecutor, routeTable);
         IUserManager userManager = new CachedUserManager(

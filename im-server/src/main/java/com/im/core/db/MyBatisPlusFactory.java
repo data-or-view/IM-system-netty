@@ -27,6 +27,7 @@ import com.im.core.db.mapper.MessageReadStateMapper;
 import com.im.core.db.mapper.MessageSendFailureMapper;
 import com.im.core.db.mapper.MessageVisibilityMapper;
 import com.im.core.db.mapper.ObjectMapper;
+import com.im.core.db.mapper.RefreshTokenMapper;
 import com.im.core.db.mapper.SequenceMapper;
 import com.im.core.db.mapper.SeqUserMapper;
 import com.im.core.db.mapper.SyncChangeMapper;
@@ -185,6 +186,7 @@ public final class MyBatisPlusFactory {
         configuration.addMapper(SyncVersionMapper.class);
         configuration.addMapper(SyncChangeMapper.class);
         configuration.addMapper(ObjectMapper.class);
+        configuration.addMapper(RefreshTokenMapper.class);
         configuration.addMapper(SystemChannelMapper.class);
         configuration.addMapper(SystemMessageMapper.class);
         configuration.addMapper(SystemMessageInboxMapper.class);
