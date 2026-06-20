@@ -23,6 +23,8 @@ import com.im.api.GroupSystemMessagePublisher;
 import com.im.core.system.SystemMessagePublishUseCase;
 import com.im.api.SystemMessage;
 
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 
@@ -107,8 +109,45 @@ public class GroupHandler implements RequestHandler {
         if (members == null) members = List.of();
 
         groupManager.createGroup(groupId, ownerId, groupName, faceUrl, members, groupType, needVerification);
+        List<String> allMemberIds = normalizeInitialMemberIds(ownerId, members);
+        if (conversationManager != null) {
+            conversationManager.createGroupConversations(allMemberIds, groupId, ConversationIds.group(groupId));
+        }
+        groupSystemMessagePublisher.groupCreated(groupId, ownerId, allMemberIds);
+        publishGroupCreatedMessage(groupId, groupName, ownerId, allMemberIds);
         GroupInformation info = groupManager.getGroupInformation(groupId);
         return info != null ? info : Map.of("groupId", groupId, "status", "OK");
+    }
+
+    private static List<String> normalizeInitialMemberIds(String ownerId, List<String> members) {
+        LinkedHashSet<String> ids = new LinkedHashSet<>();
+        if (ownerId != null && !ownerId.isBlank()) {
+            ids.add(ownerId);
+        }
+        for (String memberId : members != null ? members : List.<String>of()) {
+            if (memberId != null && !memberId.isBlank()) {
+                ids.add(memberId);
+            }
+        }
+        return new ArrayList<>(ids);
+    }
+
+    private void publishGroupCreatedMessage(String groupId, String groupName, String ownerId, List<String> allMemberIds) {
+        if (systemMessagePublishUseCase == null) return;
+        List<String> invitedMemberIds = allMemberIds.stream()
+                .filter(memberId -> !memberId.equals(ownerId))
+                .toList();
+        if (invitedMemberIds.isEmpty()) return;
+
+        SystemMessage message = new SystemMessage();
+        message.setChannelId("group");
+        message.setTitle("你已加入群聊");
+        String displayName = groupName != null && !groupName.isBlank() ? groupName : groupId;
+        message.setSummary(ownerId + " 邀请你加入「" + displayName + "」");
+        message.setContent(ownerId + " 邀请你加入群聊「" + displayName + "」");
+        message.setContentType("group_invited");
+        message.setSenderId(ownerId);
+        systemMessagePublishUseCase.publishToUsers(message, invitedMemberIds);
     }
 
     private Object handleJoin(ApiRequest req) {

@@ -133,6 +133,34 @@ class GroupHandlerApplyTest {
     }
 
     @Test
+    void creatingGroupCreatesConversationsAndNotifiesInvitedMembers() {
+        RecordingGroupManager manager = new RecordingGroupManager();
+        RecordingGroupSystemMessagePublisher publisher = new RecordingGroupSystemMessagePublisher();
+        RecordingConversationManager conversationManager = new RecordingConversationManager();
+        RecordingSystemMessageStore systemMessageStore = new RecordingSystemMessageStore();
+        GroupHandler handler = new GroupHandler(manager, null, publisher, conversationManager,
+                new SystemMessagePublishUseCase(systemMessageStore, null));
+        ApiRequest request = request(Operation.GROUP_CREATE,
+                Map.of("groupName", "研发群", "members", List.of("alice", "bob", "owner")), "owner");
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> response = (Map<String, Object>) handler.handle(request);
+        String groupId = (String) response.get("groupId");
+
+        assertEquals(groupId, conversationManager.createdGroupId);
+        assertEquals("group_" + groupId, conversationManager.createdConversationId);
+        assertEquals(List.of("owner", "alice", "bob"), conversationManager.createdMemberIds);
+        assertEquals(1, publisher.groupCreatedCalls);
+        assertEquals(groupId, publisher.groupId);
+        assertEquals("owner", publisher.operatorId);
+        assertEquals(List.of("owner", "alice", "bob"), publisher.groupCreatedMemberIds);
+        assertEquals("group", systemMessageStore.channelId);
+        assertEquals("你已加入群聊", systemMessageStore.title);
+        assertEquals("owner 邀请你加入群聊「研发群」", systemMessageStore.content);
+        assertEquals(List.of("alice", "bob"), systemMessageStore.inboxUserIds);
+    }
+
+    @Test
     void quittingGroupPublishesLeftMessageAndRemovesOwnConversation() {
         RecordingGroupManager manager = new RecordingGroupManager();
         manager.quitResult = true;
@@ -385,10 +413,12 @@ class GroupHandlerApplyTest {
         int groupInfoUpdatedCalls;
         int roleChangedCalls;
         int ownerTransferredCalls;
+        int groupCreatedCalls;
         String groupId;
         String userId;
         String operatorId;
         GroupMemberRole roleLevel;
+        List<String> groupCreatedMemberIds = List.of();
 
         @Override
         public void memberJoined(String groupId, String userId, String operatorId) {
@@ -396,6 +426,14 @@ class GroupHandlerApplyTest {
             this.groupId = groupId;
             this.userId = userId;
             this.operatorId = operatorId;
+        }
+
+        @Override
+        public void groupCreated(String groupId, String ownerId, List<String> memberIds) {
+            groupCreatedCalls++;
+            this.groupId = groupId;
+            this.operatorId = ownerId;
+            this.groupCreatedMemberIds = memberIds;
         }
 
         @Override
@@ -435,6 +473,9 @@ class GroupHandlerApplyTest {
         String deletedOwnerUserId;
         String deletedConversationId;
         List<String> deletedConversations = new java.util.ArrayList<>();
+        String createdGroupId;
+        String createdConversationId;
+        List<String> createdMemberIds = List.of();
 
         @Override public List<Conversation> getConversations(String ownerUserId) { return List.of(); }
         @Override public Conversation getConversation(String ownerUserId, String conversationId) { return null; }
@@ -443,6 +484,13 @@ class GroupHandlerApplyTest {
         @Override public void setPinned(String ownerUserId, String conversationId, boolean pinned) {}
         @Override public void setRecvMsgOpt(String ownerUserId, String conversationId, int recvMsgOpt) {}
         @Override public void setBurnDuration(String ownerUserId, String conversationId, int burnDuration) {}
+
+        @Override
+        public void createGroupConversations(List<String> memberIds, String groupId, String conversationId) {
+            createdMemberIds = List.copyOf(memberIds);
+            createdGroupId = groupId;
+            createdConversationId = conversationId;
+        }
 
         @Override
         public void deleteConversation(String ownerUserId, String conversationId) {

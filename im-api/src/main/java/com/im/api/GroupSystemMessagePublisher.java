@@ -8,6 +8,9 @@ public interface GroupSystemMessagePublisher {
 
     void memberJoined(String groupId, String userId, String operatorId);
 
+    default void groupCreated(String groupId, String ownerId, java.util.List<String> memberIds) {
+    }
+
     default void memberLeft(String groupId, String userId, String operatorId) {
     }
 

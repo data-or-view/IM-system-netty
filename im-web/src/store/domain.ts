@@ -303,6 +303,11 @@ function applyGroupApplyUpdated(state: DomainStateShape, apply: SDKGroupApply): 
 }
 
 function applySystemMessageReceived(state: DomainStateShape, message: SystemMessageSummary): DomainEventResult {
+  const refreshTasks = new Set<PushRefreshTask>(["systemUnreadCount"]);
+  if (isGroupMembershipSystemMessage(message)) {
+    refreshTasks.add("myGroups");
+    refreshTasks.add("conversations");
+  }
   return {
     state: {
       ...state,
@@ -313,8 +318,19 @@ function applySystemMessageReceived(state: DomainStateShape, message: SystemMess
         ...state.systemMessages.filter((item) => item.messageId !== message.messageId),
       ],
     },
-    refreshTasks: ["systemUnreadCount"],
+    refreshTasks: Array.from(refreshTasks),
   };
+}
+
+function isGroupMembershipSystemMessage(message: SystemMessageSummary): boolean {
+  const channelId = message.channelId?.toLowerCase();
+  const text = `${message.title || ""} ${message.summary || ""}`.toLowerCase();
+  return channelId === "group" && (
+    text.includes("group_invited")
+    || text.includes("group_created")
+    || text.includes("group_member_joined")
+    || message.title === "你已加入群聊"
+  );
 }
 
 function sameMessage(left: Message, right: Message): boolean {

@@ -5,9 +5,12 @@ import com.im.api.GroupMemberRole;
 import com.im.api.content.SystemContent;
 import com.im.core.usecase.SendMessageUseCase;
 
+import java.util.List;
+
 public class DefaultGroupSystemMessagePublisher implements GroupSystemMessagePublisher {
 
     public static final String SYSTEM_USER_ID = "im-system";
+    public static final String GROUP_CREATED = "group_created";
     public static final String MEMBER_JOINED = "group_member_joined";
     public static final String MEMBER_LEFT = "group_member_left";
     public static final String GROUP_INFO_UPDATED = "group_info_updated";
@@ -28,6 +31,16 @@ public class DefaultGroupSystemMessagePublisher implements GroupSystemMessagePub
         // System messages must travel through the same message pipeline as normal
         // group chat so history, unread counts, and online push stay consistent.
         sendMessageUseCase.publishGroupSystem(SYSTEM_USER_ID, groupId, new SystemContent(MEMBER_JOINED, message));
+    }
+
+    @Override
+    public void groupCreated(String groupId, String ownerId, List<String> memberIds) {
+        if (sendMessageUseCase == null || groupId == null || ownerId == null) return;
+        int invitedCount = Math.max(0, memberIds != null ? memberIds.size() - 1 : 0);
+        String message = invitedCount > 0
+                ? ownerId + " created the group and invited " + invitedCount + " members"
+                : ownerId + " created the group";
+        sendMessageUseCase.publishGroupSystem(SYSTEM_USER_ID, groupId, new SystemContent(GROUP_CREATED, message));
     }
 
     @Override

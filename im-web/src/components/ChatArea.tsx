@@ -13,7 +13,7 @@ import {
 import { MessageCircle, Send, Paperclip, MoreHorizontal, Undo2, Info, Phone, Video, PhoneOff } from "lucide-react";
 import { toast } from "sonner";
 import { im } from "@/sdk/im-sdk";
-import { MessageContentRenderer } from "@/components/MessageContentRenderer";
+import { MessageContentRenderer, compactSystemMessageText, isCompactSystemMessage } from "@/components/MessageContentRenderer";
 import SystemMessagePanel from "@/components/SystemMessagePanel";
 import { EmptyState, MessageStatusIcon, PageHeader, StateBadge, StatusDot } from "@/components/design-system";
 import {
@@ -461,7 +461,7 @@ export default function ChatArea() {
               )}
               <Button
                 size="sm"
-                className="h-8 bg-blue-600 hover:bg-blue-700"
+                className="h-8 bg-blue-600 text-white shadow-sm hover:bg-blue-700 hover:text-white disabled:bg-blue-400 disabled:text-white"
                 onClick={handleJoinGroupCall}
                 disabled={groupCallBusy}
               >
@@ -488,6 +488,7 @@ export default function ChatArea() {
           {messages.map((msg) => {
             const isMine = msg.senderUserId === state.userId;
             const isRevoked = msg.contentType === 101 || msg.content === "消息已撤回";
+            const isCompactSystem = isCompactSystemMessage(msg);
 
             if (isRevoked) {
               return (
@@ -495,6 +496,16 @@ export default function ChatArea() {
                   <span className="rounded-full border border-slate-200 bg-white/70 px-4 py-1 text-xs text-slate-400 shadow-sm backdrop-blur-sm">
                     {isMine ? "你" : msg.senderNickname || msg.senderUserId} 撤回了一条消息
                   </span>
+                </div>
+              );
+            }
+
+            if (isCompactSystem) {
+              return (
+                <div key={messageRenderKey(msg)} className="flex justify-center py-2">
+                  <div className="line-clamp-2 max-w-[min(78%,40rem)] break-words rounded-full bg-slate-200/70 px-3 py-1 text-center text-[11px] leading-5 text-slate-500">
+                    {compactSystemMessageText(msg)}
+                  </div>
                 </div>
               );
             }

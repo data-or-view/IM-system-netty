@@ -7,7 +7,11 @@ import {
   type FriendInfo,
   type GroupInfo,
 } from "@/store/store";
-import { ConversationType } from "im-sdk";
+import {
+  ConversationType,
+  SignalingAction,
+  normalizeSignalingContent,
+} from "im-sdk";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -74,7 +78,7 @@ export default function Sidebar() {
         {/* ─────────────────────────────────────────
             Desktop icon rail  (64 px, dark navy)
         ───────────────────────────────────────── */}
-        <div className="hidden md:flex md:w-16 md:flex-col md:items-center md:bg-[#1a1c2a] md:pb-5 md:pt-5">
+        <div className="hidden md:flex md:w-16 md:min-w-16 md:max-w-16 md:shrink-0 md:grow-0 md:flex-col md:items-center md:bg-[#1a1c2a] md:pb-5 md:pt-5">
 
           {/* User avatar with online indicator */}
           <Tooltip>
@@ -103,7 +107,7 @@ export default function Sidebar() {
           </Tooltip>
 
           {/* Nav tabs */}
-          <div className="flex flex-col gap-1">
+          <div className="flex w-11 flex-col gap-1">
             <RailTab
               icon={<MessageCircle className="h-5 w-5" />}
               label="消息"
@@ -130,7 +134,7 @@ export default function Sidebar() {
           <div className="flex-1" />
 
           {/* Bottom action icons */}
-          <div className="flex flex-col gap-1">
+          <div className="flex w-11 flex-col items-center gap-1">
             <RailAction
               icon={<UserPlus className="h-[18px] w-[18px]" />}
               label="添加好友"
@@ -202,7 +206,7 @@ export default function Sidebar() {
         {/* ─────────────────────────────────────────
             Content panel (white, scrollable list)
         ───────────────────────────────────────── */}
-        <div className="flex min-h-0 flex-1 flex-col bg-white">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-white">
           {/* Section label — desktop only */}
           <div className="hidden border-b border-slate-100 px-4 py-3 md:block">
             <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-400">
@@ -256,7 +260,7 @@ function RailTab({
         <button
           onClick={onClick}
           className={cn(
-            "relative flex h-11 w-11 flex-col items-center justify-center rounded-xl transition-all duration-150",
+            "relative flex h-11 w-11 items-center justify-center rounded-xl transition-colors duration-150",
             active
               ? "bg-white/[0.13] text-white"
               : "text-white/40 hover:bg-white/[0.07] hover:text-white/70"
@@ -264,7 +268,7 @@ function RailTab({
         >
           {icon}
           {active && (
-            <span className="mt-1 h-[3px] w-[3px] rounded-full bg-blue-400" />
+            <span className="absolute bottom-1.5 h-[3px] w-[3px] rounded-full bg-blue-400" />
           )}
           {(badge ?? 0) > 0 && (
             <span className="absolute right-1 top-1 flex h-[15px] min-w-[15px] items-center justify-center rounded-full bg-red-500 px-0.5 text-[9px] font-bold leading-none text-white">
@@ -341,8 +345,8 @@ function ChatList() {
   const { state } = useStore();
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <ScrollArea className="flex-1">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <ScrollArea className="min-w-0 flex-1">
         <div className="space-y-px px-2 py-2">
           <SystemConversationItem />
           {state.conversations.map((conv) => (
@@ -364,7 +368,7 @@ function FriendList({
   const { state, fetchUnhandledApplyCount } = useStore();
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {/* Action bar */}
       <div className="flex gap-2 border-b border-slate-100 px-3 py-2.5">
         <button
@@ -390,7 +394,7 @@ function FriendList({
         </button>
       </div>
 
-      <ScrollArea className="flex-1">
+      <ScrollArea className="min-w-0 flex-1">
         {state.friends.length === 0 ? (
           <div className="px-3 pt-2">
             <EmptyState title="暂无好友" description="搜索用户 ID 发起好友申请。" />
@@ -419,7 +423,7 @@ function GroupList({
   const { state, fetchUnhandledGroupApplyCount } = useStore();
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {/* Action bar */}
       <div className="flex gap-2 border-b border-slate-100 px-3 py-2.5">
         <button
@@ -452,7 +456,7 @@ function GroupList({
         </button>
       </div>
 
-      <ScrollArea className="flex-1">
+      <ScrollArea className="min-w-0 flex-1">
         {state.myGroups.length === 0 ? (
           <div className="px-3 pt-2">
             <EmptyState title="暂无群组" description="创建或搜索群组加入群聊。" />
@@ -523,7 +527,7 @@ function ConversationItem({ conv }: { conv: Conversation }) {
   const isActive = state.activeConversationId === conv.conversationId;
   const title = conversationTitle(conv);
   const subtitle =
-    formatMessagePreview(conv.latestMsg) ||
+    formatMessagePreview(conv.latestMsg, conv.conversationType) ||
     (conv.conversationType === ConversationType.GROUP ? `群聊` : "暂无消息");
 
   return (
@@ -545,15 +549,15 @@ function ConversationItem({ conv }: { conv: Conversation }) {
           {fallbackName(title)}
         </AvatarFallback>
       </Avatar>
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 overflow-hidden">
         <div className="flex items-baseline justify-between gap-2">
-          <span className="truncate text-sm font-semibold text-slate-800">{title}</span>
+          <span className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-800">{title}</span>
           {conv.latestMsgSendTime && (
             <span className="shrink-0 text-[11px] text-slate-400">{formatTime(conv.latestMsgSendTime)}</span>
           )}
         </div>
         <div className="flex items-center justify-between gap-2">
-          <span className="truncate text-xs text-slate-500">{subtitle}</span>
+          <span className="min-w-0 flex-1 truncate text-xs text-slate-500">{subtitle}</span>
           {conv.unreadCount > 0 && <UnreadBadge count={conv.unreadCount} />}
         </div>
       </div>
@@ -699,16 +703,68 @@ function groupTitle(group: GroupInfo): string {
   return displayText(group.groupName) ?? displayText(group.groupId) ?? "未命名群聊";
 }
 
-function formatMessagePreview(content?: string): string {
+function formatMessagePreview(content?: string, conversationType?: number | string): string {
   if (!content) return "";
   try {
-    const parsed = JSON.parse(content) as { text?: unknown; fileName?: unknown };
+    const parsed = JSON.parse(content) as Record<string, unknown>;
     if (typeof parsed.text === "string") return parsed.text;
     if (typeof parsed.fileName === "string") return `[文件] ${parsed.fileName}`;
+    if (typeof parsed.systemType === "string") return formatSystemPreview(parsed);
+    if (typeof parsed.action === "string" || typeof parsed.action === "number" || typeof parsed.roomId === "string") {
+      return formatSignalPreview(parsed, conversationType === ConversationType.GROUP);
+    }
+    if (typeof parsed.description === "string") return parsed.description;
   } catch {
     return content;
   }
   return content;
+}
+
+function formatSystemPreview(content: Record<string, unknown>): string {
+  const message = typeof content.message === "string" ? content.message.trim() : "";
+  if (content.systemType === "group_role_changed" && message) {
+    const match = message.match(/^(.+?) changed (.+?) to (admin|member)$/i);
+    if (match) return match[3].toLowerCase() === "admin" ? "群管理员已更新" : "群管理员已取消";
+  }
+  if (content.systemType === "group_info_updated") return "群资料已更新";
+  if (content.systemType === "group_created") return "群聊已创建";
+  if (message) return message;
+  switch (content.systemType) {
+    case "group_created":
+      return "群聊已创建";
+    case "group_member_joined":
+      return "有成员加入群聊";
+    case "group_member_left":
+      return "有成员离开群聊";
+    case "group_info_updated":
+      return "群资料已更新";
+    case "group_role_changed":
+      return "群成员权限已变更";
+    default:
+      return "系统消息";
+  }
+}
+
+function formatSignalPreview(content: unknown, isGroup: boolean): string {
+  const signal = normalizeSignalingContent(content as never);
+  const title = isGroup ? "群视频会议" : signal?.callType === "video" ? "视频通话" : "语音通话";
+  switch (signal?.action) {
+    case SignalingAction.INVITE:
+    case SignalingAction.CALLING:
+      return `${title}已发起`;
+    case SignalingAction.ACCEPT:
+      return isGroup ? "有成员加入群视频" : `${title}已接听`;
+    case SignalingAction.CANCEL:
+      return isGroup ? "有成员离开群视频" : `${title}已取消`;
+    case SignalingAction.HANGUP:
+      return isGroup ? "群视频已结束" : `${title}已结束`;
+    case SignalingAction.REJECT:
+      return `${title}已拒绝`;
+    case SignalingAction.TIMEOUT:
+      return `${title}未接听`;
+    default:
+      return title;
+  }
 }
 
 function formatTime(ts: number): string {
