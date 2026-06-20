@@ -120,13 +120,32 @@ function SystemMessageCard({
         {unread && <button className="shrink-0" onClick={onRead}><StateBadge tone="info">标记已读</StateBadge></button>}
       </div>
       {message.summary && (
-        <p className="mb-3 text-sm leading-6 text-muted-foreground">{message.summary}</p>
+        <p className="mb-3 break-words text-sm leading-6 text-muted-foreground">{cleanSystemText(message.summary)}</p>
       )}
       <div className="whitespace-pre-wrap rounded-md border border-slate-100 bg-slate-50 px-3 py-2 text-sm leading-6">
-        {message.content || "打开详情后会显示完整内容"}
+        {cleanSystemText(message.content || message.summary || "打开详情后会显示完整内容")}
       </div>
     </article>
   );
+}
+
+function cleanSystemText(text?: string): string {
+  const value = text?.trim();
+  if (!value) return "";
+  if (!looksLikeJson(value)) return value;
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>;
+    if (typeof parsed.message === "string") return parsed.message;
+    if (typeof parsed.summary === "string") return parsed.summary;
+    if (typeof parsed.title === "string") return parsed.title;
+  } catch {
+    return "系统通知内容暂无法直接展示";
+  }
+  return "系统通知内容暂无法直接展示";
+}
+
+function looksLikeJson(value: string): boolean {
+  return (value.startsWith("{") && value.endsWith("}")) || (value.startsWith("[") && value.endsWith("]"));
 }
 
 function formatTime(ts?: number): string {

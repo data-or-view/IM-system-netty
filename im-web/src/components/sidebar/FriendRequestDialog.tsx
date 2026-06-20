@@ -8,6 +8,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Check, Inbox, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 import { DialogBody, EmptyState, ResultRow } from "./DialogParts";
+import { getErrorText } from "im-sdk";
 
 interface Props {
   open: boolean;
@@ -35,6 +36,7 @@ export default function FriendRequestDialog({ open, onOpenChange }: Props) {
       setApplies(list as unknown as ApplyItem[]);
     } catch (err) {
       console.error("load friend applies failed:", err);
+      toast(`加载好友申请失败：${getErrorText(err)}`);
     } finally {
       setLoading(false);
     }
@@ -57,8 +59,8 @@ export default function FriendRequestDialog({ open, onOpenChange }: Props) {
       await approveFriend(fromUserId, agreed);
       setApplies((prev) => prev.filter((a) => a.fromUserId !== fromUserId));
       toast(agreed ? "已同意好友申请" : "已拒绝好友申请");
-    } catch {
-      toast("操作失败");
+    } catch (err) {
+      toast(`操作失败：${getErrorText(err)}`);
     } finally {
       setProcessing((prev) => ({ ...prev, [fromUserId]: false }));
     }

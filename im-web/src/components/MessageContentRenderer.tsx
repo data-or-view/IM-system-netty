@@ -37,11 +37,11 @@ export function MessageContentRenderer({ message }: Props) {
     case MessageContentType.SIGNAL:
       return <InfoBlock icon={<Phone className="h-4 w-4" />} {...signalDisplay(parsed.content, message.conversationId?.startsWith("group_"))} />;
     case MessageContentType.CUSTOM:
-      return <InfoBlock icon={<Package className="h-4 w-4" />} title={parsed.content.description || "自定义消息"} detail={parsed.content.data} />;
+      return <InfoBlock icon={<Package className="h-4 w-4" />} title={parsed.content.description || "自定义消息"} detail={customMessageDetail(parsed.content.data)} />;
     case MessageContentType.REVOKED:
       return <SystemBlock text={parsed.content.text || "消息已撤回"} />;
     default:
-      return <UnsupportedBlock parsed={parsed} />;
+      return <UnsupportedBlock />;
   }
 }
 
@@ -78,7 +78,7 @@ function QuoteBlock({ parsed }: { parsed: Extract<ParsedMessageContent, { type: 
 function ImageBlock({ parsed }: { parsed: Extract<ParsedMessageContent, { type: typeof MessageContentType.IMAGE }> }) {
   const picture = parsed.content.snapshotPicture || parsed.content.bigPicture || parsed.content.sourcePicture;
   const target = parsed.content.sourcePicture?.url || picture?.url;
-  if (!picture?.url) return <UnsupportedBlock parsed={parsed} />;
+  if (!picture?.url) return <UnsupportedBlock />;
 
   return (
     <a href={target} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-lg border bg-background/40">
@@ -236,13 +236,18 @@ function InfoBlock({ icon, title, detail }: { icon: React.ReactNode; title: stri
   );
 }
 
-function UnsupportedBlock({ parsed }: { parsed: Extract<ParsedMessageContent, { type: "unknown" }> | ParsedMessageContent }) {
+function UnsupportedBlock() {
   return (
     <div className="rounded-md border border-dashed bg-background/30 px-3 py-2 text-xs opacity-75">
-      暂不支持的消息类型
-      {"contentType" in parsed && parsed.contentType ? `：${parsed.contentType}` : ""}
+      当前版本暂不支持这类消息
     </div>
   );
+}
+
+function customMessageDetail(data: unknown): string | undefined {
+  if (typeof data === "string") return data.length > 80 ? `${data.slice(0, 80)}...` : data;
+  if (data == null) return undefined;
+  return "包含自定义内容";
 }
 
 function formatBytes(size?: number): string {

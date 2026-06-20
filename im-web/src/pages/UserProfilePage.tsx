@@ -48,9 +48,9 @@ export default function UserProfilePage() {
         dispatch({ type: "SET_USER_PROFILE", userId, info: info as unknown as UserInfo });
         setFriendshipChecked(true);
       })
-      .catch(() => {
+      .catch((err) => {
         if (cancelled) return;
-        toast("获取用户信息失败");
+        toast(`获取用户信息失败：${getErrorText(err)}`);
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -105,8 +105,8 @@ export default function UserProfilePage() {
       await removeFriend(userId);
       toast("已删除好友");
       navigate("/chat");
-    } catch {
-      toast("操作失败");
+    } catch (err) {
+      toast(`删除失败：${getErrorText(err)}`);
     }
   };
 
@@ -115,8 +115,8 @@ export default function UserProfilePage() {
       await im.friend.black(userId);
       toast("已拉黑");
       navigate("/chat");
-    } catch {
-      toast("操作失败");
+    } catch (err) {
+      toast(`拉黑失败：${getErrorText(err)}`);
     }
   };
 
