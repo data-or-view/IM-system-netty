@@ -117,6 +117,9 @@ public class DirectFileTransferUseCase {
         if (metadata == null) {
             throw new ImException(ImErrorCode.NOT_FOUND, "file not found");
         }
+        if (!metadata.userId().equals(userId)) {
+            throw new ImException(ImErrorCode.FORBIDDEN, "file does not belong to current user");
+        }
         String url = fileStorage.getUrl(metadata.bucket(), metadata.objectKey());
         return new FileDownloadSignResult(metadata.fileId(), metadata.fileName(), url,
                 metadata.fileSize(), metadata.contentType());

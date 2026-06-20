@@ -75,7 +75,8 @@ public interface MessageMapper extends BaseMapper<MessageEntity> {
 
     @Update("UPDATE im_messages SET revoke_user_id = #{revokerId}, revoke_role = #{role}, " +
             "revoke_nickname = #{nickname}, revoke_time = #{time}, status = 1 " +
-            "WHERE conversation_id = #{conversationId} AND seq = #{seq}")
+            "WHERE conversation_id = #{conversationId} AND seq = #{seq} AND status = 0 " +
+            "AND (send_id = #{revokerId} OR #{role} >= 100)")
     int revokeMessage(@Param("conversationId") String conversationId,
                       @Param("seq") long seq,
                       @Param("revokerId") String revokerId,

@@ -77,10 +77,10 @@ final class DispatcherFactory {
         SystemMessagePublishUseCase systemMessagePublishUseCase = new SystemMessagePublishUseCase(
                 dependencies.storage().systemMessageStore(),
                 dependencies.runtime().systemMessageNotifier());
-        RevokeUseCase revokeUseCase = new RevokeUseCase(
-                dependencies.storage().messageStore(), dependencies.business().groupManager());
         ConversationAccessChecker conversationAccessChecker = new ConversationAccessChecker(
                 dependencies.business().conversationManager(), dependencies.business().groupManager());
+        RevokeUseCase revokeUseCase = new RevokeUseCase(
+                dependencies.storage().messageStore(), dependencies.business().groupManager(), conversationAccessChecker);
 
         ApiDispatcher dispatcher = new ApiDispatcher();
         registerInterceptors(dispatcher, dependencies.business().authenticator());

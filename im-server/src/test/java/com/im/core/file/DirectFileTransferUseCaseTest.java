@@ -59,6 +59,21 @@ class DirectFileTransferUseCaseTest {
         assertFalse(sessions.byUploadId.containsKey(init.uploadId()));
     }
 
+    @Test
+    void downloadSignRequiresFileOwner() {
+        FakeStorage storage = new FakeStorage();
+        InMemoryUploadSessionStore sessions = new InMemoryUploadSessionStore();
+        InMemoryFileObjectMetadataStore metadata = new InMemoryFileObjectMetadataStore();
+        DirectFileTransferUseCase useCase = new DirectFileTransferUseCase(storage, sessions, metadata, "im-system", 900);
+        metadata.save(new FileObjectMetadata("file1", "owner", "im-system", "uploads/file1.txt",
+                "a.txt", 3, "text/plain", "", "minio", "file", 1));
+
+        com.im.common.exception.ImException ex = assertThrows(com.im.common.exception.ImException.class,
+                () -> useCase.signDownload("other", "file1"));
+
+        assertEquals(com.im.common.enums.ImErrorCode.FORBIDDEN, ex.getErrorCode());
+    }
+
     private static final class FakeStorage implements IFileStorageService {
         byte[] lastUploadedBytes = new byte[0];
 

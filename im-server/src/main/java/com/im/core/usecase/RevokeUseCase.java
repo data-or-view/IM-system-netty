@@ -1,8 +1,11 @@
 package com.im.core.usecase;
 
 import com.im.api.IGroupManager;
+import com.im.api.IConversationAccessChecker;
 import com.im.api.IMessageStore;
+import com.im.common.exception.ForbiddenException;
 import com.im.common.exception.NotFoundException;
+import com.im.common.validation.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -20,10 +23,17 @@ public class RevokeUseCase {
 
     private final IMessageStore messageStore;
     private final IGroupManager groupManager;
+    private final IConversationAccessChecker accessChecker;
 
     public RevokeUseCase(IMessageStore messageStore, IGroupManager groupManager) {
+        this(messageStore, groupManager, null);
+    }
+
+    public RevokeUseCase(IMessageStore messageStore, IGroupManager groupManager,
+                         IConversationAccessChecker accessChecker) {
         this.messageStore = messageStore;
         this.groupManager = groupManager;
+        this.accessChecker = accessChecker;
     }
 
     /**
@@ -36,9 +46,20 @@ public class RevokeUseCase {
      * @return 撤回结果，包含通知所需的接收方 ID 列表
      */
     public RevokeResult execute(String userId, String conversationId, long seq, String groupId) {
+        conversationId = Preconditions.requireText(conversationId, "conversationId");
+        if (accessChecker != null) {
+            accessChecker.requireReadable(userId, conversationId);
+        }
+        if (groupId != null && !conversationId.equals(com.im.api.ConversationIds.group(groupId))) {
+            throw new ForbiddenException("groupId does not match conversationId");
+        }
+
         // ① 角色判定：群主(200)/管理员(100) 可撤回任意消息，普通用户(0) 遵守时间窗口
         int role = 0;
         if (groupId != null) {
+            if (groupManager == null || !groupManager.isMember(groupId, userId)) {
+                throw new ForbiddenException("not a group member");
+            }
             String roleStr = groupManager.getRole(groupId, userId);
             if ("owner".equals(roleStr)) {
                 role = 200;
