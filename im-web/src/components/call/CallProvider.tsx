@@ -651,6 +651,15 @@ function callErrorText(err: unknown, fallback: string, sfuUrl?: string): string 
     }
     return `媒体服务连接失败（${sfuUrl ?? "unknown"}），请确认 LiveKit 已启动且地址可访问`;
   }
+  if (lower.includes("blocked by target user")) {
+    return "对方已将你拉黑，无法发起通话";
+  }
+  if (lower.includes("对方已删除你") || lower.includes("forbidden") || lower.includes("403")) {
+    return "当前关系不允许发起通话，请先确认好友或群成员状态";
+  }
+  if (lower.includes("not a group member")) {
+    return "你已不在该群聊中，无法加入群视频";
+  }
   if (lower.includes("not found") || lower.includes("not_active") || lower.includes("inactive")) {
     return "通话已结束或对方尚未接入";
   }

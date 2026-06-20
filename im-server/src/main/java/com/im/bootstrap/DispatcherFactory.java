@@ -2,6 +2,7 @@ package com.im.bootstrap;
 
 import com.im.api.IAuthenticator;
 import com.im.api.IFileStorageService;
+import com.im.api.IChatSendPolicy;
 import com.im.api.Operation;
 import com.im.config.Config;
 import com.im.core.access.ConversationAccessChecker;
@@ -85,7 +86,7 @@ final class DispatcherFactory {
         registerInterceptors(dispatcher, dependencies.business().authenticator());
         registerBusinessHandlers(dispatcher, dependencies, loginUseCase, registerUseCase,
                 conversationAccessChecker, sendMessageUseCase, systemMessagePublishUseCase);
-        registerMessagingHandlers(dispatcher, dependencies, sendMessageUseCase, revokeUseCase, conversationAccessChecker);
+        registerMessagingHandlers(dispatcher, dependencies, sendMessageUseCase, revokeUseCase, conversationAccessChecker, chatSendPolicy);
         registerFileHandlers(dispatcher, config, dependencies);
         return dispatcher;
     }
@@ -149,7 +150,8 @@ final class DispatcherFactory {
                                                   DispatcherDependencies dependencies,
                                                   SendMessageUseCase sendMessageUseCase,
                                                   RevokeUseCase revokeUseCase,
-                                                  ConversationAccessChecker conversationAccessChecker) {
+                                                  ConversationAccessChecker conversationAccessChecker,
+                                                  IChatSendPolicy chatSendPolicy) {
         dispatcher.registerHandlers(new MessageHandler(
                         dependencies.storage().messageStore(),
                         dependencies.storage().sequenceManager(),
@@ -157,7 +159,7 @@ final class DispatcherFactory {
                 Operation.CHAT_PULL, Operation.CHAT_SEQ, Operation.CHAT_SYNC, Operation.CHAT_SEARCH);
 
         ChatHandler chatHandler = new ChatHandler(
-                sendMessageUseCase, dependencies.call().callManager(), dependencies.call().callStateManager());
+                sendMessageUseCase, dependencies.call().callManager(), dependencies.call().callStateManager(), chatSendPolicy);
         dispatcher.registerHandler(Operation.CHAT_SEND, chatHandler);
         dispatcher.registerHandler(Operation.CHAT_SEND_GROUP, chatHandler);
         if (dependencies.call().groupCallManager() != null) {

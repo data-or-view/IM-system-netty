@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Camera, CameraOff, Mic, MicOff, Phone, PhoneOff, Video } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { useCall, type CallState, type RemoteMedia } from "./CallProvider";
 
 export function CallDialog() {
@@ -44,6 +44,9 @@ export function CallDialog() {
         <DialogTitle className="sr-only">
           {call.mode === "group" ? "群视频" : call.callType === "video" ? "视频通话" : "语音通话"}
         </DialogTitle>
+        <DialogDescription className="sr-only">
+          通话窗口，可接听、拒绝、挂断、切换麦克风和摄像头。
+        </DialogDescription>
         <div className="relative min-h-[560px] bg-[radial-gradient(circle_at_top,#1d4ed8_0%,#111827_42%,#050505_100%)]">
           {call.mode === "group" ? (
             <GroupStage call={call} title={title} />

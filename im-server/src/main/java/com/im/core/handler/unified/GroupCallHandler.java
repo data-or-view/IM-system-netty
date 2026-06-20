@@ -11,6 +11,7 @@ import com.im.core.call.GroupCallSession;
 import com.im.api.SignalingAction;
 import com.im.api.content.SignalingContent;
 import com.im.core.usecase.SendMessageUseCase;
+import com.im.common.id.IdGenerator;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -70,7 +71,9 @@ public class GroupCallHandler implements RequestHandler {
         // 不需要再为通话维护一条只服务在线用户的旁路通知链路。
         SignalingContent content = new SignalingContent(
                 action, session.callType(), session.roomId(), null, null, null, 0);
-        sendMessageUseCase.execute(req.params(), userId, null, groupId, content);
+        Map<String, Object> params = new LinkedHashMap<>(req.params());
+        params.putIfAbsent("clientMsgId", IdGenerator.messageId());
+        sendMessageUseCase.execute(params, userId, null, groupId, content);
     }
 
     private static Map<String, Object> toMap(GroupCallJoinResult result) {

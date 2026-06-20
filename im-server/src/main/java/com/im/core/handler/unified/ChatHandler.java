@@ -2,6 +2,7 @@ package com.im.core.handler.unified;
 
 import com.im.api.ApiRequest;
 import com.im.api.ICallManager;
+import com.im.api.IChatSendPolicy;
 import com.im.api.RequestPreconditions;
 import com.im.api.RequestHandler;
 import com.im.api.RoomInformation;
@@ -35,12 +36,19 @@ public class ChatHandler implements RequestHandler {
     private final SendMessageUseCase sendMessageUseCase;
     private final ICallManager callManager;
     private final CallStateManager callStateManager;
+    private final IChatSendPolicy sendPolicy;
 
     public ChatHandler(SendMessageUseCase sendMessageUseCase, ICallManager callManager,
                        CallStateManager callStateManager) {
+        this(sendMessageUseCase, callManager, callStateManager, null);
+    }
+
+    public ChatHandler(SendMessageUseCase sendMessageUseCase, ICallManager callManager,
+                       CallStateManager callStateManager, IChatSendPolicy sendPolicy) {
         this.sendMessageUseCase = sendMessageUseCase;
         this.callManager = callManager;
         this.callStateManager = callStateManager;
+        this.sendPolicy = sendPolicy;
     }
 
     @Override
@@ -95,6 +103,9 @@ public class ChatHandler implements RequestHandler {
      */
     private Object handleInvite(Map<String, Object> params, String callerId,
                                 String calleeId, SignalingContent signal) {
+        if (sendPolicy != null) {
+            sendPolicy.requireCanSendSingle(callerId, calleeId);
+        }
         if (callStateManager != null
                 && (callStateManager.getActiveByUser(callerId) != null
                 || callStateManager.getActiveByUser(calleeId) != null)) {

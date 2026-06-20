@@ -456,9 +456,18 @@ test("group call APIs preserve active state and participant summaries", async ()
   await groupApi.endCall("g1");
 
   assert.deepEqual(calls[0], { method: "GET", path: "/api/group/call/active", query: { groupId: "g1" } });
-  assert.deepEqual(calls[1], { method: "POST", path: "/api/group/call/join", body: { groupId: "g1" } });
-  assert.deepEqual(calls[2], { method: "POST", path: "/api/group/call/leave", body: { groupId: "g1" } });
-  assert.deepEqual(calls[3], { method: "POST", path: "/api/group/call/end", body: { groupId: "g1" } });
+  assert.equal(calls[1].method, "POST");
+  assert.equal(calls[1].path, "/api/group/call/join");
+  assert.equal(calls[1].body.groupId, "g1");
+  assert.match(calls[1].body.clientMsgId, /^c_[0-9a-z]+_[0-9a-z]{8}$/);
+  assert.equal(calls[2].method, "POST");
+  assert.equal(calls[2].path, "/api/group/call/leave");
+  assert.equal(calls[2].body.groupId, "g1");
+  assert.match(calls[2].body.clientMsgId, /^c_[0-9a-z]+_[0-9a-z]{8}$/);
+  assert.equal(calls[3].method, "POST");
+  assert.equal(calls[3].path, "/api/group/call/end");
+  assert.equal(calls[3].body.groupId, "g1");
+  assert.match(calls[3].body.clientMsgId, /^c_[0-9a-z]+_[0-9a-z]{8}$/);
 });
 
 test("system API uses system message HTTP endpoints", async () => {

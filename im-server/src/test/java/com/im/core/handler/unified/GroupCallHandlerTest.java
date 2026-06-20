@@ -2,15 +2,23 @@ package com.im.core.handler.unified;
 
 import com.im.api.ApiRequest;
 import com.im.api.ICallManager;
+import com.im.api.IChatSendPolicy;
 import com.im.api.IGroupManager;
+import com.im.api.IMessageQueue;
+import com.im.api.ISequenceManager;
+import com.im.api.Message;
+import com.im.api.MessageQueueTopics;
 import com.im.api.Operation;
 import com.im.api.RoomInformation;
+import com.im.core.handler.WebhookService;
 import com.im.core.call.GroupCallParticipant;
 import com.im.core.call.GroupCallSession;
 import com.im.core.call.GroupCallManager;
 import com.im.core.call.GroupCallStateStore;
+import com.im.core.usecase.SendMessageUseCase;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -68,6 +76,31 @@ class GroupCallHandlerTest {
         assertEquals(false, response.get("active"));
         assertEquals(true, response.get("ended"));
         assertEquals("g1", response.get("groupId"));
+    }
+
+    @Test
+    void joinPublishesGroupSignalWithGeneratedClientMsgId() {
+        GroupCallManager manager = manager();
+        new GroupCallHandler(manager).handle(request(Operation.GROUP_CALL_START,
+                Map.of("groupId", "g1", "callType", "video"), "u1"));
+        RecordingQueue queue = new RecordingQueue();
+        SendMessageUseCase sendMessage = new SendMessageUseCase(
+                queue,
+                new FixedSequenceManager(),
+                new WebhookService(null),
+                new AllowAllSendPolicy());
+        GroupCallHandler handler = new GroupCallHandler(manager, sendMessage);
+
+        handler.handle(request(Operation.GROUP_CALL_JOIN, Map.of("groupId", "g1"), "u2"));
+
+        assertEquals(2, queue.messages.size());
+        Message signal = queue.messages.get(0);
+        assertEquals(MessageQueueTopics.PERSIST, queue.topics.get(0));
+        assertTrue(signal.getMessageId().matches("[A-Za-z0-9._:-]{8,64}"));
+        assertEquals("u2", signal.getFromUserId());
+        assertEquals("g1", signal.getGroupId());
+        assertEquals("group_g1", signal.getConversationId());
+        assertTrue(new String(signal.getBody()).contains("ACCEPT"));
     }
 
     private static GroupCallManager manager() {
@@ -155,5 +188,42 @@ class GroupCallHandlerTest {
         @Override public Set<String> getJoinedGroups(String userId) { throw new UnsupportedOperationException(); }
         @Override public com.im.api.GroupInformation getGroupInformation(String groupId) { throw new UnsupportedOperationException(); }
         @Override public List<com.im.api.GroupInformation> searchGroups(String keyword, int limit) { throw new UnsupportedOperationException(); }
+    }
+
+    private static final class RecordingQueue implements IMessageQueue {
+        private final List<String> topics = new ArrayList<>();
+        private final List<Message> messages = new ArrayList<>();
+
+        @Override public void start() {}
+        @Override public void stop() {}
+
+        @Override
+        public void publishAsync(String topic, Message message) {
+            topics.add(topic);
+            messages.add(message);
+        }
+
+        @Override public void subscribe(String topic, MessageHandler handler) {}
+        @Override public void unsubscribe(String topic, MessageHandler handler) {}
+        @Override public boolean hasSubscribers(String topic) { return false; }
+    }
+
+    private static final class FixedSequenceManager implements ISequenceManager {
+        private long next = 1;
+
+        @Override
+        public long nextSequence(String conversationId) {
+            return next++;
+        }
+
+        @Override
+        public long getMaximumSequence(String conversationId) {
+            return next - 1;
+        }
+    }
+
+    private static final class AllowAllSendPolicy implements IChatSendPolicy {
+        @Override public void requireCanSendSingle(String fromUserId, String toUserId) {}
+        @Override public void requireCanSendGroup(String fromUserId, String groupId) {}
     }
 }

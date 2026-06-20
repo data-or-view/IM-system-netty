@@ -12,6 +12,7 @@ import {
   type GroupTypeValue,
 } from "../types.js";
 import { type HttpAPI, requireHttp } from "./http-api.js";
+import { createClientMsgId } from "../protocol/client-msg-id.js";
 
 const GROUP_TYPE_CODE: Record<GroupTypeValue, number> = {
   [GroupType.PRIVATE]: 0,
@@ -173,22 +174,23 @@ export class GroupAPI {
     return requireHttp(this.transport).post<GroupCallSession>("/api/group/call/start", {
       groupId,
       callType,
+      clientMsgId: createClientMsgId(),
     });
   }
 
   /** 加入当前群语音/视频，并获取 LiveKit token。 */
   joinCall(groupId: string): Promise<GroupCallJoinResult> {
-    return requireHttp(this.transport).post<GroupCallJoinResult>("/api/group/call/join", { groupId });
+    return requireHttp(this.transport).post<GroupCallJoinResult>("/api/group/call/join", { groupId, clientMsgId: createClientMsgId() });
   }
 
   /** 离开当前群语音/视频。 */
   leaveCall(groupId: string): Promise<GroupCallSession> {
-    return requireHttp(this.transport).post<GroupCallSession>("/api/group/call/leave", { groupId });
+    return requireHttp(this.transport).post<GroupCallSession>("/api/group/call/leave", { groupId, clientMsgId: createClientMsgId() });
   }
 
   /** 结束当前群语音/视频。 */
   endCall(groupId: string): Promise<GroupCallSession> {
-    return requireHttp(this.transport).post<GroupCallSession>("/api/group/call/end", { groupId });
+    return requireHttp(this.transport).post<GroupCallSession>("/api/group/call/end", { groupId, clientMsgId: createClientMsgId() });
   }
 
   /** 查询当前群是否有正在进行的语音/视频。 */

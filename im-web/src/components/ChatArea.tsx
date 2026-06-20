@@ -35,6 +35,7 @@ export default function ChatArea() {
   const { state, fetchConversations, fetchGroupMembers, dispatch } = useStore();
   const [input, setInput] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [groupCallBusy, setGroupCallBusy] = useState(false);
   const [activeGroupCall, setActiveGroupCall] = useState<GroupCallSession | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -295,17 +296,20 @@ export default function ChatArea() {
   );
 
   const handleStartGroupCall = useCallback(() => {
-    if (!conv?.groupId || conv.conversationType !== ConversationType.GROUP) return;
+    if (!conv?.groupId || conv.conversationType !== ConversationType.GROUP || groupCallBusy) return;
+    setGroupCallBusy(true);
     void startGroupCall({
       callType: "video",
       group: { groupId: conv.groupId, name: conv.showName, faceUrl: conv.faceUrl, canEnd: true },
-    }).then(async () => {
+    }).finally(async () => {
       await refreshActiveGroupCall(conv.groupId!);
+      setGroupCallBusy(false);
     });
-  }, [conv, refreshActiveGroupCall, startGroupCall]);
+  }, [conv, groupCallBusy, refreshActiveGroupCall, startGroupCall]);
 
   const handleJoinGroupCall = useCallback(() => {
-    if (!conv?.groupId || conv.conversationType !== ConversationType.GROUP) return;
+    if (!conv?.groupId || conv.conversationType !== ConversationType.GROUP || groupCallBusy) return;
+    setGroupCallBusy(true);
     void joinGroupCall({
       group: {
         groupId: conv.groupId,
@@ -313,15 +317,20 @@ export default function ChatArea() {
         faceUrl: conv.faceUrl,
         canEnd: canEndActiveGroupCall,
       },
-    }).then(async () => {
+    }).finally(async () => {
       await refreshActiveGroupCall(conv.groupId!);
+      setGroupCallBusy(false);
     });
-  }, [canEndActiveGroupCall, conv, joinGroupCall, refreshActiveGroupCall]);
+  }, [canEndActiveGroupCall, conv, groupCallBusy, joinGroupCall, refreshActiveGroupCall]);
 
   const handleEndGroupCall = useCallback(() => {
-    if (!conv?.groupId || conv.conversationType !== ConversationType.GROUP) return;
-    void endGroupCall().then(() => refreshActiveGroupCall(conv.groupId!));
-  }, [conv, endGroupCall, refreshActiveGroupCall]);
+    if (!conv?.groupId || conv.conversationType !== ConversationType.GROUP || groupCallBusy) return;
+    setGroupCallBusy(true);
+    void endGroupCall().finally(async () => {
+      await refreshActiveGroupCall(conv.groupId!);
+      setGroupCallBusy(false);
+    });
+  }, [conv, endGroupCall, groupCallBusy, refreshActiveGroupCall]);
 
   if (!state.activeConversationId) {
     return (
@@ -398,6 +407,7 @@ export default function ChatArea() {
                 className="h-9 w-9 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-700"
                 title={activeGroupCall ? "加入群视频" : "发起群视频"}
                 onClick={activeGroupCall ? handleJoinGroupCall : handleStartGroupCall}
+                disabled={groupCallBusy}
               >
                 <Video className="h-4 w-4" />
               </Button>
@@ -438,6 +448,7 @@ export default function ChatArea() {
                   variant="outline"
                   className="h-8 border-red-200 bg-white text-red-700 hover:bg-red-50"
                   onClick={handleEndGroupCall}
+                  disabled={groupCallBusy}
                 >
                   <PhoneOff className="h-3.5 w-3.5" />
                   结束
@@ -447,8 +458,9 @@ export default function ChatArea() {
                 size="sm"
                 className="h-8 bg-blue-600 hover:bg-blue-700"
                 onClick={handleJoinGroupCall}
+                disabled={groupCallBusy}
               >
-                加入
+                {groupCallBusy ? "处理中" : "加入"}
               </Button>
             </div>
           </div>
