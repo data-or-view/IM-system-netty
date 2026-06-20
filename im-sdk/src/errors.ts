@@ -70,17 +70,40 @@ export class IMConfigError extends IMError {
 
 export function getErrorText(err: unknown, fallback = "未知错误"): string {
   if (err instanceof IMError) {
-    return err.detail || err.message || fallback;
+    return localizeErrorMessage(err.detail || err.message, err.code, fallback);
   }
   if (err instanceof Error && err.message) {
-    return err.message;
+    return localizeErrorMessage(err.message, undefined, fallback);
   }
   if (typeof err === "object" && err !== null) {
     const maybe = err as { detail?: unknown; message?: unknown };
-    if (typeof maybe.detail === "string" && maybe.detail.trim()) return maybe.detail;
-    if (typeof maybe.message === "string" && maybe.message.trim()) return maybe.message;
+    if (typeof maybe.detail === "string" && maybe.detail.trim()) return localizeErrorMessage(maybe.detail, undefined, fallback);
+    if (typeof maybe.message === "string" && maybe.message.trim()) return localizeErrorMessage(maybe.message, undefined, fallback);
   }
   return fallback;
+}
+
+function localizeErrorMessage(message: string | undefined, code: number | undefined, fallback: string): string {
+  const text = message?.trim();
+  if (!text) return fallback;
+  const lower = text.toLowerCase();
+  if (code === 401 || lower.includes("missing token") || lower.includes("invalid token") || lower.includes("unauthorized")) {
+    return "登录状态已失效，请重新登录";
+  }
+  if (code === 403 || lower.includes("forbidden")) {
+    if (lower.includes("conversation not readable")) return "你暂无权限查看该会话，请刷新好友或群聊状态后重试";
+    if (lower.includes("not a group member")) return "你已不在该群聊中，无法继续操作";
+    if (lower.includes("file does not belong")) return "你没有权限下载该文件";
+    if (lower.includes("blocked by target user")) return "对方已将你拉黑，无法继续操作";
+    if (lower.includes("groupid does not match")) return "会话和群聊不匹配，无法完成操作";
+    if (lower.includes("admin permission required")) return "需要管理员权限";
+    return "你没有权限执行此操作";
+  }
+  if (code === 404 || lower.includes("not found")) {
+    return "资源不存在或已被删除";
+  }
+  if (lower.includes("对方已删除你")) return text;
+  return text;
 }
 
 export function toIMError(err: unknown, fallback = "Unknown SDK error"): IMError {

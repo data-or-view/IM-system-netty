@@ -39,6 +39,7 @@ export default function ChatArea() {
   const [activeGroupCall, setActiveGroupCall] = useState<GroupCallSession | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const historyErrorNotifiedRef = useRef<string | null>(null);
   const navigate = useNavigate();
   const { startCall, startGroupCall, joinGroupCall, endGroupCall } = useCall();
 
@@ -86,8 +87,12 @@ export default function ChatArea() {
             dispatch({ type: "ADD_MESSAGES", conversationId: conv.conversationId, msgs: mapped });
           }
         }
-      } catch {
-        // History loading is best-effort; push sync will still converge later.
+      } catch (err) {
+        console.warn("load history failed:", err);
+        if (historyErrorNotifiedRef.current !== conv.conversationId) {
+          historyErrorNotifiedRef.current = conv.conversationId;
+          toast(`历史消息加载失败：${getErrorText(err)}`);
+        }
       }
     };
     loadHistory();
@@ -268,8 +273,8 @@ export default function ChatArea() {
         });
         dispatch({ type: "REVOKE_MESSAGE", conversationId: msg.conversationId, seq: msg.seq });
         toast("已撤回");
-      } catch {
-        toast("撤回失败");
+      } catch (err) {
+        toast(`撤回失败：${getErrorText(err)}`);
       }
     },
     [dispatch]

@@ -422,7 +422,7 @@ function groupInfoFromConversation(list: Conversation[]): GroupInfo[] {
 }
 
 function singleConversationId(currentUserId: string, friendUserId: string): string {
-  return [currentUserId, friendUserId].sort().join("_");
+  return `single_${[currentUserId, friendUserId].sort().join("_")}`;
 }
 
 function groupConversationId(groupId: string): string {
