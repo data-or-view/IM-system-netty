@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { Activity, Loader2, MessageCircle, RadioTower } from "lucide-react";
+import { Loader2, MessageCircle } from "lucide-react";
 import { StatusDot } from "@/components/design-system";
 
 interface LoginPageProps {
@@ -38,117 +38,84 @@ export default function LoginPage({ onLogin, onRegister, connecting, statusMsg }
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-[var(--app-bg)] px-4">
-      <div className="grid w-full max-w-4xl overflow-hidden rounded-md border border-slate-200 bg-white shadow-xl shadow-slate-950/10 md:grid-cols-[0.95fr_1.05fr]">
-        <div className="relative overflow-hidden border-b border-slate-200 bg-[var(--brand-ink)] px-8 py-8 text-white md:border-b-0 md:border-r">
-          <div className="absolute inset-y-0 right-0 w-px bg-gradient-to-b from-transparent via-white/30 to-transparent" />
-          <div className="mb-8 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/70">
-            <StatusDot tone="online" pulse />
-            Signal Desk
-          </div>
-          <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-md border border-white/10 bg-white/10">
-            <RadioTower className="h-5 w-5" />
-          </div>
-          <h1 className="text-2xl font-semibold tracking-tight">IM System</h1>
-          <p className="mt-3 max-w-xs text-sm leading-6 text-white/65">
-            {isLogin ? "进入实时消息、群组和通话调度台。" : "创建账号后进入消息工作台。"}
-          </p>
-          <div className="mt-8 space-y-3 text-xs text-white/60">
-            <div className="flex items-center gap-2">
-              <Activity className="h-3.5 w-3.5 text-emerald-300" />
-              WebSocket 在线状态、历史消息和通话信令统一收敛
+      <div className="grid w-full max-w-4xl overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm md:grid-cols-[0.9fr_1.1fr]">
+        <div className="flex flex-col justify-between border-b border-slate-200 bg-slate-50 px-8 py-8 md:border-b-0 md:border-r">
+          <div>
+            <div className="mb-6 flex h-12 w-12 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm">
+              <MessageCircle className="h-6 w-6" />
             </div>
-            <div className="flex items-center gap-2">
-              <MessageCircle className="h-3.5 w-3.5 text-blue-300" />
-              登录后会回到你刚才访问的聊天页面
+            <h1 className="text-2xl font-semibold tracking-tight text-slate-950">IM System</h1>
+            <p className="mt-3 max-w-xs text-sm leading-6 text-slate-600">
+              面向开发和协作场景的实时聊天工具。登录后继续查看会话、好友和群组。
+            </p>
+          </div>
+          <div className="mt-10 space-y-2 rounded-md bg-white p-4 text-xs text-slate-600 ring-1 ring-slate-200">
+            <div className="flex items-center gap-2 font-medium text-slate-900">
+              <StatusDot tone={connecting ? "warning" : "online"} pulse={connecting} />
+              {connecting ? "正在连接服务" : "准备连接"}
             </div>
+            <p>登录成功后会自动回到你刚才访问的聊天页面。</p>
           </div>
         </div>
+
         <div className="p-7 md:p-8">
-        <div className="mb-5">
-          <div className="text-sm font-semibold text-[var(--text-strong)]">{isLogin ? "登录工作台" : "注册新账号"}</div>
-          <div className="mt-1 text-xs text-[var(--text-muted)]">
-            {isLogin ? "使用用户 ID 继续你的会话。" : "设置密码后由服务器生成用户 ID。"}
+          <div className="mb-5">
+            <div className="text-base font-semibold text-[var(--text-strong)]">{isLogin ? "登录" : "注册账号"}</div>
+            <div className="mt-1 text-xs text-[var(--text-muted)]">
+              {isLogin ? "使用用户 ID 继续聊天。" : "创建账号后进入聊天工作区。"}
+            </div>
           </div>
-        </div>
 
-        {/* 登录/注册切换 */}
-        <div className="mb-5 grid grid-cols-2 rounded-md border border-slate-200 bg-[var(--surface-subtle)] p-1">
-          <button
-            type="button"
-            onClick={() => setMode("login")}
-            className={cn(
-              "rounded-md px-3 py-2 text-sm font-medium transition-all",
-              isLogin ? "bg-white text-[var(--text-strong)] shadow-sm" : "text-slate-500 hover:text-slate-900"
+          <div className="mb-5 grid grid-cols-2 rounded-md bg-slate-100 p-1">
+            <button
+              type="button"
+              onClick={() => setMode("login")}
+              className={cn(
+                "rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                isLogin ? "bg-white text-blue-700 shadow-sm" : "text-slate-500 hover:text-slate-900"
+              )}
+            >
+              登录
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode("register")}
+              className={cn(
+                "rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                !isLogin ? "bg-white text-blue-700 shadow-sm" : "text-slate-500 hover:text-slate-900"
+              )}
+            >
+              注册
+            </button>
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {isLogin ? (
+              <Input placeholder="用户 ID" value={userId} onChange={(e) => setUserId(e.target.value)} disabled={connecting} />
+            ) : (
+              <Input placeholder="昵称，可选" value={nickname} onChange={(e) => setNickname(e.target.value)} disabled={connecting} />
             )}
-          >
-            登录
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode("register")}
-            className={cn(
-              "rounded-md px-3 py-2 text-sm font-medium transition-all",
-              !isLogin ? "bg-white text-[var(--text-strong)] shadow-sm" : "text-slate-500 hover:text-slate-900"
-            )}
-          >
-            注册
-          </button>
-        </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {isLogin ? (
-            <Input
-              placeholder="用户 ID"
-              value={userId}
-              onChange={(e) => setUserId(e.target.value)}
-              disabled={connecting}
-            />
-          ) : (
-            <Input
-              placeholder="昵称，可选"
-              value={nickname}
-              onChange={(e) => setNickname(e.target.value)}
-              disabled={connecting}
-            />
-          )}
-
-          {!isLogin && (
             <Input
               type="password"
-              placeholder="密码，必填"
+              placeholder={isLogin ? "密码，可选" : "密码，必填"}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              required
+              required={!isLogin}
               disabled={connecting}
             />
-          )}
 
-          {isLogin && (
-            <Input
-              type="password"
-              placeholder="密码，可选"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              disabled={connecting}
-            />
-          )}
+            <p className="text-xs leading-5 text-slate-500">{helperText}</p>
 
-          <p className="text-xs leading-5 text-slate-500">{helperText}</p>
+            {statusMsg && (
+              <p className="rounded-md bg-slate-50 px-3 py-2 text-center text-xs text-[var(--text-muted)] ring-1 ring-slate-200">{statusMsg}</p>
+            )}
 
-          {/* 状态信息 */}
-          {statusMsg && (
-            <p className="rounded-md border border-slate-200 bg-[var(--surface-subtle)] px-3 py-2 text-center text-xs text-[var(--text-muted)]">{statusMsg}</p>
-          )}
-
-          <Button
-            type="submit"
-            className="w-full bg-[var(--brand-ink)] hover:bg-slate-800"
-            disabled={!canSubmit || connecting}
-          >
-            {connecting && <Loader2 className="h-4 w-4 animate-spin" />}
-            {connecting ? "处理中..." : isLogin ? "登录" : "注册"}
-          </Button>
-        </form>
+            <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700" disabled={!canSubmit || connecting}>
+              {connecting && <Loader2 className="h-4 w-4 animate-spin" />}
+              {connecting ? "处理中..." : isLogin ? "登录" : "注册"}
+            </Button>
+          </form>
         </div>
       </div>
     </div>

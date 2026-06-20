@@ -25,19 +25,8 @@ export function StatusDot({
   );
 }
 
-export function SignalRail({ tone = "info" }: { tone?: "info" | "online" | "warning" | "danger" | "muted" }) {
-  return (
-    <span className="flex w-5 shrink-0 justify-center self-stretch" aria-hidden="true">
-      <span className={cn(
-        "mt-1 h-full w-px rounded-full",
-        tone === "info" && "bg-[var(--signal-info)]/25",
-        tone === "online" && "bg-[var(--signal-online)]/25",
-        tone === "warning" && "bg-[var(--signal-warning)]/30",
-        tone === "danger" && "bg-[var(--signal-danger)]/30",
-        tone === "muted" && "bg-slate-200",
-      )} />
-    </span>
-  );
+export function SignalRail() {
+  return null;
 }
 
 export function EmptyState({
@@ -52,11 +41,11 @@ export function EmptyState({
   className?: string;
 }) {
   return (
-    <div className={cn("flex flex-col items-center justify-center rounded-md border border-dashed border-slate-200 bg-white/80 px-5 py-8 text-center", className)}>
-      <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-md border border-slate-200 bg-[var(--surface-subtle)] text-slate-500">
-        {icon ?? <Inbox className="h-4 w-4" />}
+    <div className={cn("flex flex-col items-center justify-center px-6 py-10 text-center", className)}>
+      <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-slate-100 text-slate-400">
+        {icon ?? <Inbox className="h-5 w-5" />}
       </div>
-      <div className="text-sm font-semibold text-[var(--text-strong)]">{title}</div>
+      <div className="text-sm font-medium text-[var(--text-strong)]">{title}</div>
       <div className="mt-1 max-w-xs text-xs leading-5 text-[var(--text-muted)]">{description}</div>
     </div>
   );
@@ -74,19 +63,15 @@ export function PageHeader({
   actions?: ReactNode;
 }) {
   return (
-    <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-white/95 px-5 py-3 shadow-[0_1px_0_rgba(16,24,40,0.03)]">
+    <div className="flex h-14 items-center justify-between gap-3 border-b border-slate-200 bg-white px-5">
       <div className="flex min-w-0 items-center gap-3">
-        {icon && (
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-[var(--surface-subtle)] text-[var(--signal-info)]">
-            {icon}
-          </div>
-        )}
+        {icon && <div className="shrink-0">{icon}</div>}
         <div className="min-w-0">
           <div className="truncate text-sm font-semibold text-[var(--text-strong)]">{title}</div>
           {description && <div className="truncate text-xs text-[var(--text-muted)]">{description}</div>}
         </div>
       </div>
-      {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
+      {actions && <div className="flex shrink-0 items-center gap-1.5">{actions}</div>}
     </div>
   );
 }
@@ -100,8 +85,9 @@ export function MessageStatusIcon({
 }) {
   if (status === -1) {
     return (
-      <span title={errorText || "发送失败"} className="mb-2 text-[var(--signal-danger)]">
+      <span title={errorText || "发送失败"} className="mb-2 flex items-center gap-1 text-xs text-[var(--signal-danger)]">
         <AlertCircle className="h-4 w-4 fill-red-500/10" />
+        <span className="hidden sm:inline">发送失败</span>
       </span>
     );
   }
@@ -124,12 +110,12 @@ export function StateBadge({
 }) {
   return (
     <span className={cn(
-      "inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium",
-      tone === "online" && "border-emerald-200 bg-emerald-50 text-emerald-700",
-      tone === "info" && "border-blue-200 bg-blue-50 text-blue-700",
-      tone === "warning" && "border-amber-200 bg-amber-50 text-amber-700",
-      tone === "danger" && "border-red-200 bg-red-50 text-red-700",
-      tone === "muted" && "border-slate-200 bg-slate-50 text-slate-600",
+      "inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium",
+      tone === "online" && "bg-emerald-50 text-emerald-700",
+      tone === "info" && "bg-blue-50 text-blue-700",
+      tone === "warning" && "bg-amber-50 text-amber-700",
+      tone === "danger" && "bg-red-50 text-red-700",
+      tone === "muted" && "bg-slate-100 text-slate-600",
     )}>
       {children}
     </span>
@@ -139,7 +125,7 @@ export function StateBadge({
 export function LoadingState({ text = "加载中" }: { text?: string }) {
   return (
     <div className="flex flex-1 items-center justify-center bg-[var(--app-bg)]">
-      <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-4 py-3 text-sm text-[var(--text-muted)] shadow-sm">
+      <div className="flex items-center gap-2 rounded-md bg-white px-4 py-3 text-sm text-[var(--text-muted)] shadow-sm">
         <CircleDashed className="h-4 w-4 animate-spin" />
         {text}
       </div>

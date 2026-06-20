@@ -268,11 +268,11 @@ export default function GroupInfoPage() {
       <ScrollArea className="h-full">
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-5 py-5">
           <Surface className="overflow-hidden">
-            <div className="border-b border-slate-200 bg-[var(--surface-subtle)] px-5 py-5">
+            <div className="border-b border-slate-100 bg-white px-5 py-5">
               <div className="flex items-center gap-4">
-                <Avatar className="h-16 w-16 border border-white shadow-xl shadow-slate-950/10">
+                <Avatar className="h-16 w-16 border border-slate-200 shadow-sm">
                   <AvatarImage src={groupInfo.faceUrl} alt={groupInfo.groupName} />
-                  <AvatarFallback className="bg-[var(--brand-ink)] text-xl font-semibold text-white">
+                  <AvatarFallback className="bg-blue-100 text-xl font-semibold text-blue-700">
                     {groupInfo.groupName.charAt(0).toUpperCase()}
                   </AvatarFallback>
                 </Avatar>
@@ -450,7 +450,7 @@ export default function GroupInfoPage() {
           </Surface>
 
           <Surface className="p-4">
-            <div className="mb-3 text-sm font-semibold text-slate-900">群操作</div>
+            <div className="mb-3 text-sm font-semibold text-red-700">危险操作</div>
             <div className="space-y-2">
               {isOwner && (
                 <Button
@@ -582,7 +582,7 @@ function joinPolicyText(policy?: string): string {
 
 function InfoItem({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-md border border-slate-100 bg-[var(--surface-subtle)] px-3 py-2">
+    <div className="rounded-md bg-slate-50 px-3 py-2 ring-1 ring-slate-100">
       <div className="text-xs text-slate-500">{label}</div>
       <div className="mt-1 truncate text-sm font-medium text-slate-900">{value}</div>
     </div>

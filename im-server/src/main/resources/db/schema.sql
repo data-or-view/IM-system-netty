@@ -215,7 +215,7 @@ CREATE TABLE IF NOT EXISTS im_messages (
     status              TINYINT      NOT NULL DEFAULT 0  COMMENT '状态: 0=正常, 1=已撤回',
     -- 撤回信息
     revoke_user_id      VARCHAR(64)  NOT NULL DEFAULT '' COMMENT '撤回者ID（为空表示未撤回）',
-    revoke_role         TINYINT      NOT NULL DEFAULT 0  COMMENT '撤回者角色',
+    revoke_role         SMALLINT     NOT NULL DEFAULT 0  COMMENT '撤回者角色',
     revoke_nickname     VARCHAR(128) NOT NULL DEFAULT '' COMMENT '撤回者昵称',
     revoke_time         BIGINT       NOT NULL DEFAULT 0  COMMENT '撤回时间',
     -- @用户

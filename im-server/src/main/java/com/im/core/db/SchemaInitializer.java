@@ -158,12 +158,26 @@ public final class SchemaInitializer {
     private static void applyLightweightMigrations(Connection conn, Statement stmt) throws Exception {
         ensureColumn(conn, stmt, "im_users", "password_hash",
                 "ALTER TABLE im_users ADD COLUMN password_hash VARCHAR(255) NOT NULL DEFAULT '' AFTER global_recv_msg_opt");
+        ensureColumnType(conn, stmt, "im_messages", "revoke_role", "smallint",
+                "ALTER TABLE im_messages MODIFY COLUMN revoke_role SMALLINT NOT NULL DEFAULT 0 COMMENT '撤回者角色'");
     }
 
     private static void ensureColumn(Connection conn, Statement stmt, String table, String column, String ddl) throws Exception {
         if (tableExists(conn, table) && !columnExists(conn, table, column)) {
             stmt.execute(ddl);
             log.info("Schema migrated: added {}.{}", table, column);
+        }
+    }
+
+    private static void ensureColumnType(Connection conn, Statement stmt, String table, String column,
+                                         String expectedType, String ddl) throws Exception {
+        if (!tableExists(conn, table)) {
+            return;
+        }
+        String actualType = columnType(conn, table, column);
+        if (actualType != null && !expectedType.equalsIgnoreCase(actualType)) {
+            stmt.execute(ddl);
+            log.info("Schema migrated: changed {}.{} from {} to {}", table, column, actualType, expectedType);
         }
     }
 
@@ -179,6 +193,16 @@ public final class SchemaInitializer {
         try (ResultSet rs = meta.getColumns(null, null, table, column)) {
             return rs.next();
         }
+    }
+
+    private static String columnType(Connection conn, String table, String column) throws Exception {
+        DatabaseMetaData meta = conn.getMetaData();
+        try (ResultSet rs = meta.getColumns(null, null, table, column)) {
+            if (rs.next()) {
+                return rs.getString("TYPE_NAME").toLowerCase(Locale.ROOT);
+            }
+        }
+        return null;
     }
 
     private static Map<String, String> loadCreateTableSql() throws Exception {

@@ -87,7 +87,7 @@ export default function GroupRequestDialog({ open, onOpenChange }: Props) {
                   <div className="flex min-w-0 items-center gap-3">
                     <Avatar className="h-10 w-10 border border-white shadow-sm">
                       <AvatarImage src={apply.userFaceUrl} alt={apply.userNickname || apply.userId} />
-                      <AvatarFallback className="bg-slate-900 text-white">
+                      <AvatarFallback className="bg-blue-100 text-blue-700">
                         {(apply.userNickname || apply.userId || "?").charAt(0).toUpperCase()}
                       </AvatarFallback>
                     </Avatar>

@@ -99,7 +99,7 @@ export default function GroupSearchDialog({ open, onOpenChange }: Props) {
             <ResultRow key={g.groupId}>
               <div className="flex min-w-0 items-center gap-3">
                 <Avatar className="h-10 w-10 border border-white shadow-sm">
-                  <AvatarFallback className="bg-slate-900 text-sm font-semibold text-white">
+                  <AvatarFallback className="bg-blue-100 text-sm font-semibold text-blue-700">
                     {g.groupName.charAt(0).toUpperCase()}
                   </AvatarFallback>
                 </Avatar>

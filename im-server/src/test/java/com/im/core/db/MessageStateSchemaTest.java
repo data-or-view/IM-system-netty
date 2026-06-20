@@ -26,6 +26,15 @@ class MessageStateSchemaTest {
         assertNoLegacyColumns(readSchema());
     }
 
+
+    @Test
+    void revokeRoleCanStoreGroupOwnerRoleCode() throws Exception {
+        String schema = readSchema();
+
+        assertTrue(schema.contains("revoke_role         SMALLINT"),
+                "revoke_role must fit GroupMemberRole.OWNER code 200");
+    }
+
     @Test
     void schemaSqlDefinesSyncTablesWithComments() throws Exception {
         String schema = readSchema();

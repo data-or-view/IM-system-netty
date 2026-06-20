@@ -4,16 +4,16 @@
 
 @layer base {
   :root {
-    --app-bg: #f6f8fb;
+    --app-bg: #f7f8fa;
     --surface: #ffffff;
-    --surface-subtle: #f8fafc;
-    --text-strong: #101828;
-    --text-muted: #667085;
-    --brand-ink: #111827;
-    --signal-online: #16a34a;
+    --surface-subtle: #f3f4f6;
+    --text-strong: #111827;
+    --text-muted: #6b7280;
+    --brand-ink: #2563eb;
+    --signal-online: #22c55e;
     --signal-info: #2563eb;
-    --signal-danger: #dc2626;
-    --signal-warning: #d97706;
+    --signal-danger: #ef4444;
+    --signal-warning: #f59e0b;
     --background: 0 0% 100%;
     --foreground: 240 10% 3.9%;
     --card: 0 0% 100%;
@@ -68,6 +68,6 @@
   }
 
   ::selection {
-    @apply bg-slate-900 text-white;
+    @apply bg-blue-600 text-white;
   }
 }

@@ -226,11 +226,11 @@ export default function UserProfilePage() {
     <AppPage title="用户信息" description={profile.nickname || userId} onBack={() => navigate(-1)}>
       <div className="mx-auto flex h-full w-full max-w-3xl flex-col gap-4 px-5 py-5">
         <Surface className="overflow-hidden">
-          <div className="border-b border-slate-200 bg-[var(--surface-subtle)] px-5 py-5">
+          <div className="border-b border-slate-100 bg-white px-5 py-5">
             <div className="flex items-center gap-4">
-              <Avatar className="h-20 w-20 border border-white shadow-xl shadow-slate-950/10">
+              <Avatar className="h-20 w-20 border border-slate-200 shadow-sm">
                 {profile.faceUrl && <AvatarImage src={profile.faceUrl} alt={profile.nickname || userId} />}
-                <AvatarFallback className="bg-[var(--brand-ink)] text-2xl font-semibold text-white">
+                <AvatarFallback className="bg-blue-100 text-2xl font-semibold text-blue-700">
                   {(profile.nickname || userId).charAt(0).toUpperCase()}
                 </AvatarFallback>
               </Avatar>
@@ -257,7 +257,7 @@ export default function UserProfilePage() {
         </Surface>
 
         <Surface className="p-4">
-          <div className="mb-3 text-sm font-semibold text-slate-900">操作</div>
+          <div className="mb-3 text-sm font-semibold text-slate-900">{isSelf ? "账号操作" : isFriend ? "好友操作" : "添加好友"}</div>
           <div className="grid gap-2 sm:grid-cols-2">
             {renderActions()}
           </div>
@@ -322,7 +322,7 @@ export default function UserProfilePage() {
 
 function InfoItem({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-md border border-slate-100 bg-[var(--surface-subtle)] px-3 py-2">
+    <div className="rounded-md bg-slate-50 px-3 py-2 ring-1 ring-slate-100">
       <div className="text-xs text-slate-500">{label}</div>
       <div className="mt-1 truncate text-sm font-medium text-slate-900">{value}</div>
     </div>

@@ -64,7 +64,7 @@ export default function CreateGroupPage() {
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-5 py-5">
           <Surface className="p-4">
             <div className="mb-3 flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-md bg-[var(--brand-ink)] text-white">
+              <div className="flex h-10 w-10 items-center justify-center rounded-md bg-blue-100 text-blue-700">
                 <Users className="h-5 w-5" />
               </div>
               <div>
@@ -82,7 +82,7 @@ export default function CreateGroupPage() {
           <button
             type="button"
             onClick={() => setNeedVerification((prev) => !prev)}
-            className="flex w-full items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 text-left text-sm shadow-sm transition-colors hover:border-slate-300 hover:bg-slate-50"
+            className="flex w-full items-center justify-between gap-3 rounded-md bg-white px-4 py-3 text-left text-sm ring-1 ring-slate-200 transition-colors hover:border-slate-300 hover:bg-slate-50"
           >
             <span className="flex min-w-0 items-center gap-3">
               <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-emerald-50 text-emerald-700">
@@ -135,7 +135,7 @@ export default function CreateGroupPage() {
                       </div>
                       <span className={cn(
                         "flex h-6 w-6 items-center justify-center rounded-full border text-xs",
-                        selected ? "border-[var(--brand-ink)] bg-[var(--brand-ink)] text-white" : "border-slate-200 bg-white text-transparent"
+                        selected ? "border-[var(--brand-ink)] bg-blue-100 text-blue-700" : "border-slate-200 bg-white text-transparent"
                       )}>
                         <Check className="h-3.5 w-3.5" />
                       </span>
