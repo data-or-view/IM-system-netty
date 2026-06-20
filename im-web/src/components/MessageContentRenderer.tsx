@@ -7,6 +7,7 @@ import {
 } from "im-sdk";
 import { FileText, MapPin, Mic, Package, Phone, Quote, Video } from "lucide-react";
 import type { Message } from "@/store/store";
+import { localizeSystemMessage } from "@/lib/display-formatters";
 
 type Props = {
   message: Pick<Message, "contentType" | "content" | "conversationId">;
@@ -186,42 +187,6 @@ export function compactSystemMessageText(message: Pick<Message, "contentType" | 
   if (parsed.type === MessageContentType.REVOKED) return parsed.content.text || "消息已撤回";
   if (parsed.type !== MessageContentType.SYSTEM) return "";
   return systemText(parsed.content.systemType, localizeSystemMessage(parsed.content.systemType, parsed.content.message || parsed.raw));
-}
-
-function localizeSystemMessage(systemType?: string, message?: string): string | undefined {
-  if (!message) return undefined;
-  if (systemType === "group_role_changed") {
-    const match = message.match(/^(.+?) changed (.+?) to (admin|member)$/i);
-    if (match) {
-      const operator = match[1];
-      const target = match[2];
-      const role = match[3].toLowerCase() === "admin" ? "管理员" : "普通成员";
-      return `${operator} 将 ${target} 设为${role}`;
-    }
-  }
-  if (systemType === "group_info_updated") {
-    const match = message.match(/^(.+?) updated group information$/i);
-    return match ? `${match[1]} 更新了群资料` : "群资料已更新";
-  }
-  if (systemType === "group_created") {
-    const match = message.match(/^(.+?) created the group(?: and invited (\d+) members)?$/i);
-    if (match) {
-      return match[2] ? `${match[1]} 创建了群聊，并邀请 ${match[2]} 位成员` : `${match[1]} 创建了群聊`;
-    }
-  }
-  if (systemType === "group_member_joined") {
-    const joined = message.match(/^(.+?) joined the group$/i);
-    if (joined) return `${joined[1]} 加入了群聊`;
-    const approved = message.match(/^(.+?) approved (.+?) to join the group$/i);
-    if (approved) return `${approved[1]} 同意 ${approved[2]} 加入群聊`;
-  }
-  if (systemType === "group_member_left") {
-    const left = message.match(/^(.+?) left the group$/i);
-    if (left) return `${left[1]} 离开了群聊`;
-    const removed = message.match(/^(.+?) removed (.+?) from the group$/i);
-    if (removed) return `${removed[1]} 将 ${removed[2]} 移出群聊`;
-  }
-  return message;
 }
 
 function InfoBlock({ icon, title, detail }: { icon: React.ReactNode; title: string; detail?: string }) {

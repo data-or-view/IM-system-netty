@@ -7,6 +7,7 @@ import { im } from "@/sdk/im-sdk";
 import { useStore } from "@/store/store";
 import { cn } from "@/lib/utils";
 import { EmptyState, PageHeader, StateBadge, StatusDot } from "@/components/design-system";
+import { cleanSystemText } from "@/lib/display-formatters";
 
 export default function SystemMessagePanel() {
   const { state, refreshSystemMessages } = useStore();
@@ -127,25 +128,6 @@ function SystemMessageCard({
       </div>
     </article>
   );
-}
-
-function cleanSystemText(text?: string): string {
-  const value = text?.trim();
-  if (!value) return "";
-  if (!looksLikeJson(value)) return value;
-  try {
-    const parsed = JSON.parse(value) as Record<string, unknown>;
-    if (typeof parsed.message === "string") return parsed.message;
-    if (typeof parsed.summary === "string") return parsed.summary;
-    if (typeof parsed.title === "string") return parsed.title;
-  } catch {
-    return "系统通知内容暂无法直接展示";
-  }
-  return "系统通知内容暂无法直接展示";
-}
-
-function looksLikeJson(value: string): boolean {
-  return (value.startsWith("{") && value.endsWith("}")) || (value.startsWith("[") && value.endsWith("]"));
 }
 
 function formatTime(ts?: number): string {

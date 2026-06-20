@@ -7,6 +7,7 @@ import { Inbox, Users } from "lucide-react";
 import { toast } from "sonner";
 import { DialogBody, EmptyState, ResultRow, SearchBar } from "./DialogParts";
 import { GroupJoinVerification, getErrorText, type GroupJoinResultValue } from "im-sdk";
+import { shortId } from "@/lib/display-formatters";
 
 interface Props {
   open: boolean;
@@ -106,7 +107,7 @@ export default function GroupSearchDialog({ open, onOpenChange }: Props) {
                 <div className="min-w-0">
                   <div className="truncate text-sm font-semibold text-slate-900">{g.groupName}</div>
                   <div className="truncate text-xs text-slate-500">
-                    {g.memberCount || "?"} 人 · {joinPolicyText(g.needVerification)} · ID: {g.groupId}
+                    {g.memberCount || "?"} 人 · {joinPolicyText(g.needVerification)} · ID: <span title={g.groupId}>{shortId(g.groupId)}</span>
                   </div>
                 </div>
               </div>

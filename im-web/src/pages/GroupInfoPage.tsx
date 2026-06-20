@@ -21,6 +21,8 @@ import { im } from "@/sdk/im-sdk";
 import { GroupJoinVerification, GroupMemberRole, getErrorText, groupMemberRoleRank, type GroupJoinVerificationValue, type GroupMemberRoleValue } from "im-sdk";
 import { AppPage, Surface } from "@/components/AppPage";
 import { LoadingState, StateBadge } from "@/components/design-system";
+import { shortId } from "@/lib/display-formatters";
+import { ConfirmDialog, emptyConfirmDialog, type ConfirmDialogState } from "@/components/ConfirmDialog";
 
 function roleLabel(role: GroupMemberRoleValue): { text: string; className: string } | null {
   if (role === GroupMemberRole.OWNER) return { text: "群主", className: "text-red-500 bg-red-50 border-red-200" };
@@ -51,6 +53,7 @@ export default function GroupInfoPage() {
   const [nicknameEditOpen, setNicknameEditOpen] = useState(false);
   const [savingInfo, setSavingInfo] = useState(false);
   const [savingNickname, setSavingNickname] = useState(false);
+  const [confirm, setConfirm] = useState<ConfirmDialogState>(emptyConfirmDialog);
   const [infoForm, setInfoForm] = useState({
     groupName: "",
     faceUrl: "",
@@ -59,6 +62,10 @@ export default function GroupInfoPage() {
     needVerification: GroupJoinVerification.DIRECT as GroupJoinVerificationValue,
   });
   const [nickname, setNickname] = useState("");
+
+  const openConfirm = (next: Omit<ConfirmDialogState, "open">) => {
+    setConfirm({ ...next, open: true });
+  };
 
   useEffect(() => {
     if (!groupId) return;
@@ -128,13 +135,16 @@ export default function GroupInfoPage() {
 
   const handleKick = async (userId: string) => {
     if (!groupId) return;
+    setConfirm((prev) => ({ ...prev, loading: true }));
     setKicking((prev) => ({ ...prev, [userId]: true }));
     try {
       await im.group.kick(groupId, userId);
       await refreshGroupManagementState();
       toast("已踢出");
+      setConfirm(emptyConfirmDialog);
     } catch (err) {
       toast(`踢出失败：${getErrorText(err)}`);
+      setConfirm((prev) => ({ ...prev, loading: false }));
     } finally {
       setKicking((prev) => ({ ...prev, [userId]: false }));
     }
@@ -190,13 +200,16 @@ export default function GroupInfoPage() {
 
   const handleSetRole = async (memberId: string, roleLevel: GroupMemberRoleValue) => {
     if (!groupId) return;
+    setConfirm((prev) => ({ ...prev, loading: true }));
     setRoleChanging((prev) => ({ ...prev, [memberId]: true }));
     try {
       await im.group.setMemberRole(groupId, memberId, roleLevel);
       await refreshGroupManagementState();
       toast(roleLevel === GroupMemberRole.ADMIN ? "已设为管理员" : "已取消管理员");
+      setConfirm(emptyConfirmDialog);
     } catch (err) {
       toast(`设置角色失败：${getErrorText(err)}`);
+      setConfirm((prev) => ({ ...prev, loading: false }));
     } finally {
       setRoleChanging((prev) => ({ ...prev, [memberId]: false }));
     }
@@ -204,13 +217,16 @@ export default function GroupInfoPage() {
 
   const handleTransferOwner = async (memberId: string) => {
     if (!groupId) return;
+    setConfirm((prev) => ({ ...prev, loading: true }));
     setTransferring((prev) => ({ ...prev, [memberId]: true }));
     try {
       await im.group.transferOwner(groupId, memberId);
       await refreshGroupManagementState();
       toast("群主已转让");
+      setConfirm(emptyConfirmDialog);
     } catch (err) {
       toast(`转让失败：${getErrorText(err)}`);
+      setConfirm((prev) => ({ ...prev, loading: false }));
     } finally {
       setTransferring((prev) => ({ ...prev, [memberId]: false }));
     }
@@ -218,26 +234,85 @@ export default function GroupInfoPage() {
 
   const handleDisband = async () => {
     if (!groupId) return;
+    setConfirm((prev) => ({ ...prev, loading: true }));
     try {
       await im.group.disband(groupId);
       removeConversationLocal(`group_${groupId}`);
       await refreshAfterMembershipChanged();
       toast("群已解散");
+      setConfirm(emptyConfirmDialog);
       navigate("/chat");
     } catch (err) {
       toast(`解散失败：${getErrorText(err)}`);
+      setConfirm((prev) => ({ ...prev, loading: false }));
     }
   };
 
   const handleQuit = async () => {
     if (!groupId) return;
+    setConfirm((prev) => ({ ...prev, loading: true }));
     try {
       await quitGroup(groupId);
       toast("已退出群");
+      setConfirm(emptyConfirmDialog);
       navigate("/chat");
     } catch (err) {
       toast(`退出失败：${getErrorText(err)}`);
+      setConfirm((prev) => ({ ...prev, loading: false }));
     }
+  };
+
+  const confirmKick = (memberId: string) => {
+    openConfirm({
+      title: "移出群成员？",
+      description: "该成员会被移出当前群聊，并从会话列表中移除这个群。",
+      confirmText: "移出",
+      tone: "danger",
+      onConfirm: () => handleKick(memberId),
+    });
+  };
+
+  const confirmSetRole = (memberId: string, roleLevel: GroupMemberRoleValue) => {
+    const toAdmin = roleLevel === GroupMemberRole.ADMIN;
+    openConfirm({
+      title: toAdmin ? "设为管理员？" : "取消管理员？",
+      description: toAdmin
+        ? "管理员可以管理群资料、审批申请和处理部分成员操作。"
+        : "取消后该成员将恢复为普通成员。",
+      confirmText: toAdmin ? "设为管理员" : "取消管理员",
+      tone: toAdmin ? "warning" : "default",
+      onConfirm: () => handleSetRole(memberId, roleLevel),
+    });
+  };
+
+  const confirmTransferOwner = (memberId: string) => {
+    openConfirm({
+      title: "转让群主？",
+      description: "转让后你会变为普通成员，新群主将拥有群管理权限。",
+      confirmText: "转让群主",
+      tone: "warning",
+      onConfirm: () => handleTransferOwner(memberId),
+    });
+  };
+
+  const confirmDisband = () => {
+    openConfirm({
+      title: "解散这个群？",
+      description: "解散后所有成员都会失去这个群聊，会话也会被移除。这个操作不可撤销。",
+      confirmText: "解散群",
+      tone: "danger",
+      onConfirm: handleDisband,
+    });
+  };
+
+  const confirmQuit = () => {
+    openConfirm({
+      title: "退出这个群？",
+      description: "退出后你将不再接收这个群的消息，群会话会从你的列表中移除。",
+      confirmText: "退出群",
+      tone: "danger",
+      onConfirm: handleQuit,
+    });
   };
 
   if (loading) {
@@ -278,7 +353,7 @@ export default function GroupInfoPage() {
                 </Avatar>
                 <div className="min-w-0">
                   <h2 className="truncate text-lg font-semibold text-[var(--text-strong)]">{groupInfo.groupName}</h2>
-                  <p className="mt-1 truncate text-sm text-[var(--text-muted)]">ID: {groupInfo.groupId}</p>
+                  <p className="mt-1 truncate text-sm text-[var(--text-muted)]" title={groupInfo.groupId}>ID: {shortId(groupInfo.groupId)}</p>
                   <div className="mt-2 flex flex-wrap gap-2">
                     <StateBadge tone="info">
                     <Users className="h-3.5 w-3.5" />
@@ -366,8 +441,8 @@ export default function GroupInfoPage() {
                     </Avatar>
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="truncate text-sm font-semibold text-slate-900">
-                          {member.nickname || member.userId}
+                        <span className="truncate text-sm font-semibold text-slate-900" title={member.nickname || member.userId}>
+                          {member.nickname || shortId(member.userId)}
                         </span>
                         {member.roleLevel === GroupMemberRole.OWNER && <Crown className="h-3.5 w-3.5 text-red-500" />}
                         {label && (
@@ -376,7 +451,7 @@ export default function GroupInfoPage() {
                           </span>
                         )}
                       </div>
-                      <div className="truncate text-xs text-slate-500">ID: {member.userId}</div>
+                      <div className="truncate text-xs text-slate-500" title={member.userId}>ID: {shortId(member.userId)}</div>
                     </div>
                   </div>
 
@@ -392,7 +467,7 @@ export default function GroupInfoPage() {
                             const nextRole = member.roleLevel === GroupMemberRole.ADMIN
                               ? GroupMemberRole.MEMBER
                               : GroupMemberRole.ADMIN;
-                            void handleSetRole(member.userId, nextRole);
+                            confirmSetRole(member.userId, nextRole);
                           }}
                           disabled={!!roleChanging[member.userId]}
                         >
@@ -412,7 +487,7 @@ export default function GroupInfoPage() {
                           className="text-amber-700 hover:bg-amber-50"
                           onClick={(event) => {
                             event.stopPropagation();
-                            void handleTransferOwner(member.userId);
+                            confirmTransferOwner(member.userId);
                           }}
                           disabled={!!transferring[member.userId]}
                         >
@@ -430,7 +505,7 @@ export default function GroupInfoPage() {
                           className="text-red-600 hover:bg-red-50 hover:text-red-700"
                           onClick={(event) => {
                             event.stopPropagation();
-                            void handleKick(member.userId);
+                            confirmKick(member.userId);
                           }}
                           disabled={!!kicking[member.userId]}
                         >
@@ -456,7 +531,7 @@ export default function GroupInfoPage() {
                 <Button
                   variant="destructive"
                   className="w-full justify-start"
-                  onClick={handleDisband}
+                  onClick={confirmDisband}
                 >
                   <Trash2 className="h-4 w-4" />
                   解散群
@@ -466,7 +541,7 @@ export default function GroupInfoPage() {
                 <Button
                   variant="outline"
                   className="w-full justify-start text-red-600 hover:border-red-200 hover:bg-red-50 hover:text-red-700"
-                  onClick={handleQuit}
+                  onClick={confirmQuit}
                 >
                   <LogOut className="h-4 w-4" />
                   退出群
@@ -563,6 +638,10 @@ export default function GroupInfoPage() {
           </form>
         </DialogContent>
       </Dialog>
+      <ConfirmDialog
+        state={confirm}
+        onOpenChange={(open) => setConfirm((prev) => ({ ...prev, open }))}
+      />
     </AppPage>
   );
 }

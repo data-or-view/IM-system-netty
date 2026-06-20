@@ -19,17 +19,26 @@ export interface ViewMessage {
 }
 
 export function toViewMessage(sdkMsg: SDKMessage): ViewMessage {
+  const seq = sdkMsg.messageSeq ?? sdkMsg.sequenceId ?? 0;
   return {
     messageId: sdkMsg.messageId,
-    seq: sdkMsg.messageSeq ?? sdkMsg.sequenceId ?? 0,
+    seq,
     senderUserId: sdkMsg.fromUserId,
     senderNickname: undefined,
     conversationId: sdkMsg.conversationId,
     contentType: Number(sdkMsg.contentType),
     content: sdkMsg.content,
     createTime: sdkMsg.timestamp,
-    status: sdkMsg.status,
+    status: normalizeMessageStatus(sdkMsg.status, seq),
   };
+}
+
+export function normalizeMessageStatus(status: unknown, seq = 0): number {
+  if (status === -1 || status === "FAILED") return -1;
+  if (status === 0 || status === "PENDING") {
+    return seq > 0 ? 1 : 0;
+  }
+  return 1;
 }
 
 export function toOutgoingMessageContent(raw: unknown): string {

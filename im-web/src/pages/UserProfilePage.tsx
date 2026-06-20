@@ -18,6 +18,8 @@ import { im } from "@/sdk/im-sdk";
 import { getErrorText, type UserInfo } from "im-sdk";
 import { AppPage, Surface } from "@/components/AppPage";
 import { LoadingState, StateBadge, StatusDot } from "@/components/design-system";
+import { shortId } from "@/lib/display-formatters";
+import { ConfirmDialog, emptyConfirmDialog, type ConfirmDialogState } from "@/components/ConfirmDialog";
 
 export default function UserProfilePage() {
   const { userId } = useParams<{ userId: string }>();
@@ -31,6 +33,7 @@ export default function UserProfilePage() {
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [confirm, setConfirm] = useState<ConfirmDialogState>(emptyConfirmDialog);
 
   useEffect(() => {
     if (!userId) return;
@@ -101,23 +104,51 @@ export default function UserProfilePage() {
   };
 
   const handleRemoveFriend = async () => {
+    setConfirm((prev) => ({ ...prev, loading: true }));
     try {
       await removeFriend(userId);
       toast("已删除好友");
+      setConfirm(emptyConfirmDialog);
       navigate("/chat");
     } catch (err) {
       toast(`删除失败：${getErrorText(err)}`);
+      setConfirm((prev) => ({ ...prev, loading: false }));
     }
   };
 
   const handleBlack = async () => {
+    setConfirm((prev) => ({ ...prev, loading: true }));
     try {
       await im.friend.black(userId);
       toast("已拉黑");
+      setConfirm(emptyConfirmDialog);
       navigate("/chat");
     } catch (err) {
       toast(`拉黑失败：${getErrorText(err)}`);
+      setConfirm((prev) => ({ ...prev, loading: false }));
     }
+  };
+
+  const confirmRemoveFriend = () => {
+    setConfirm({
+      open: true,
+      title: "删除好友？",
+      description: "删除后你们的好友关系会解除，后续发送消息可能受到限制。",
+      confirmText: "删除好友",
+      tone: "danger",
+      onConfirm: handleRemoveFriend,
+    });
+  };
+
+  const confirmBlack = () => {
+    setConfirm({
+      open: true,
+      title: "拉黑这个用户？",
+      description: "拉黑后对方将无法继续给你发送消息或发起通话。",
+      confirmText: "拉黑",
+      tone: "danger",
+      onConfirm: handleBlack,
+    });
   };
 
   const handleApplyFriend = async () => {
@@ -165,11 +196,11 @@ export default function UserProfilePage() {
             <MessageCircle className="h-4 w-4" />
             发消息
           </Button>
-          <Button variant="outline" className="justify-start text-red-600 hover:border-red-200 hover:bg-red-50" onClick={handleRemoveFriend}>
+          <Button variant="outline" className="justify-start text-red-600 hover:border-red-200 hover:bg-red-50" onClick={confirmRemoveFriend}>
             <UserMinus className="h-4 w-4" />
             删除好友
           </Button>
-          <Button variant="outline" className="justify-start text-red-600 hover:border-red-200 hover:bg-red-50" onClick={handleBlack}>
+          <Button variant="outline" className="justify-start text-red-600 hover:border-red-200 hover:bg-red-50" onClick={confirmBlack}>
             <Ban className="h-4 w-4" />
             拉黑
           </Button>
@@ -236,7 +267,7 @@ export default function UserProfilePage() {
               </Avatar>
               <div className="min-w-0">
                 <h2 className="truncate text-xl font-semibold text-[var(--text-strong)]">{profile.nickname || userId}</h2>
-                <p className="mt-1 truncate text-sm text-[var(--text-muted)]">ID: {userId}</p>
+                <p className="mt-1 truncate text-sm text-[var(--text-muted)]" title={userId}>ID: {shortId(userId)}</p>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {isSelf ? <StateBadge tone="info">我的账号</StateBadge> : isFriend ? <StateBadge tone="online"><StatusDot tone="online" /> 好友</StateBadge> : <StateBadge>未添加</StateBadge>}
                 </div>
@@ -316,6 +347,10 @@ export default function UserProfilePage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <ConfirmDialog
+        state={confirm}
+        onOpenChange={(open) => setConfirm((prev) => ({ ...prev, open }))}
+      />
     </AppPage>
   );
 }

@@ -9,8 +9,7 @@ import {
 } from "@/store/store";
 import {
   ConversationType,
-  SignalingAction,
-  normalizeSignalingContent,
+  getErrorText,
 } from "im-sdk";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -46,6 +45,8 @@ import GroupSearchDialog from "./sidebar/GroupSearchDialog";
 import FriendRequestDialog from "./sidebar/FriendRequestDialog";
 import GroupRequestDialog from "./sidebar/GroupRequestDialog";
 import { toast } from "sonner";
+import { displayText, formatMessagePreview, shortId } from "@/lib/display-formatters";
+import { ConfirmDialog, emptyConfirmDialog, type ConfirmDialogState } from "@/components/ConfirmDialog";
 
 type Tab = "chats" | "friends" | "groups";
 
@@ -568,6 +569,7 @@ function ConversationItem({ conv }: { conv: Conversation }) {
 function FriendItem({ friend }: { friend: FriendInfo }) {
   const { openSingleChat, removeFriend } = useStore();
   const navigate = useNavigate();
+  const [confirm, setConfirm] = useState<ConfirmDialogState>(emptyConfirmDialog);
   const displayName = friend.remark || friend.nickname || friend.friendUserId;
 
   const openChat = () => {
@@ -577,6 +579,18 @@ function FriendItem({ friend }: { friend: FriendInfo }) {
       faceUrl: friend.faceUrl,
     });
     navigate("/chat");
+  };
+
+  const handleRemoveFriend = async () => {
+    setConfirm((prev) => ({ ...prev, loading: true }));
+    try {
+      await removeFriend(friend.friendUserId);
+      toast("已删除好友");
+      setConfirm(emptyConfirmDialog);
+    } catch (err) {
+      toast(`删除失败：${getErrorText(err)}`);
+      setConfirm((prev) => ({ ...prev, loading: false }));
+    }
   };
 
   return (
@@ -590,7 +604,7 @@ function FriendItem({ friend }: { friend: FriendInfo }) {
         </Avatar>
         <div className="min-w-0">
           <div className="truncate text-sm font-semibold text-slate-800">{displayName}</div>
-          <div className="truncate text-xs text-slate-400">ID: {friend.friendUserId}</div>
+          <div className="truncate text-xs text-slate-400" title={friend.friendUserId}>ID: {shortId(friend.friendUserId)}</div>
         </div>
       </button>
 
@@ -603,13 +617,15 @@ function FriendItem({ friend }: { friend: FriendInfo }) {
         <DropdownMenuContent align="end">
           <DropdownMenuItem
             className="text-destructive"
-            onClick={async () => {
-              try {
-                await removeFriend(friend.friendUserId);
-                toast("已删除好友");
-              } catch (err) {
-                toast(`删除失败：${err instanceof Error ? err.message : "请稍后重试"}`);
-              }
+            onClick={() => {
+              setConfirm({
+                open: true,
+                title: "删除好友？",
+                description: "删除后你们的好友关系会解除，后续发送消息可能受到限制。",
+                confirmText: "删除好友",
+                tone: "danger",
+                onConfirm: handleRemoveFriend,
+              });
             }}
           >
             <UserMinus className="mr-2 h-4 w-4" />
@@ -617,6 +633,10 @@ function FriendItem({ friend }: { friend: FriendInfo }) {
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+      <ConfirmDialog
+        state={confirm}
+        onOpenChange={(open) => setConfirm((prev) => ({ ...prev, open }))}
+      />
     </div>
   );
 }
@@ -658,7 +678,7 @@ function GroupItem({ group }: { group: GroupInfo }) {
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm font-semibold text-slate-800">{groupTitle(group)}</div>
         <div className="truncate text-xs text-slate-400">
-          ID: {group.groupId}
+          ID: {shortId(group.groupId)}
           {group.memberCount ? ` · ${group.memberCount} 人` : ""}
         </div>
       </div>
@@ -682,13 +702,6 @@ function fallbackName(name?: string): string {
   return (displayText(name) || "?").charAt(0).toUpperCase();
 }
 
-function displayText(value?: string | null): string | undefined {
-  if (!value) return undefined;
-  const trimmed = value.trim();
-  if (!trimmed || trimmed === "undefined" || trimmed === "null") return undefined;
-  return trimmed;
-}
-
 function conversationTitle(conv: Conversation): string {
   return (
     displayText(conv.showName) ??
@@ -701,70 +714,6 @@ function conversationTitle(conv: Conversation): string {
 
 function groupTitle(group: GroupInfo): string {
   return displayText(group.groupName) ?? displayText(group.groupId) ?? "未命名群聊";
-}
-
-function formatMessagePreview(content?: string, conversationType?: number | string): string {
-  if (!content) return "";
-  try {
-    const parsed = JSON.parse(content) as Record<string, unknown>;
-    if (typeof parsed.text === "string") return parsed.text;
-    if (typeof parsed.fileName === "string") return `[文件] ${parsed.fileName}`;
-    if (typeof parsed.systemType === "string") return formatSystemPreview(parsed);
-    if (typeof parsed.action === "string" || typeof parsed.action === "number" || typeof parsed.roomId === "string") {
-      return formatSignalPreview(parsed, conversationType === ConversationType.GROUP);
-    }
-    if (typeof parsed.description === "string") return parsed.description;
-  } catch {
-    return content;
-  }
-  return content;
-}
-
-function formatSystemPreview(content: Record<string, unknown>): string {
-  const message = typeof content.message === "string" ? content.message.trim() : "";
-  if (content.systemType === "group_role_changed" && message) {
-    const match = message.match(/^(.+?) changed (.+?) to (admin|member)$/i);
-    if (match) return match[3].toLowerCase() === "admin" ? "群管理员已更新" : "群管理员已取消";
-  }
-  if (content.systemType === "group_info_updated") return "群资料已更新";
-  if (content.systemType === "group_created") return "群聊已创建";
-  if (message) return message;
-  switch (content.systemType) {
-    case "group_created":
-      return "群聊已创建";
-    case "group_member_joined":
-      return "有成员加入群聊";
-    case "group_member_left":
-      return "有成员离开群聊";
-    case "group_info_updated":
-      return "群资料已更新";
-    case "group_role_changed":
-      return "群成员权限已变更";
-    default:
-      return "系统消息";
-  }
-}
-
-function formatSignalPreview(content: unknown, isGroup: boolean): string {
-  const signal = normalizeSignalingContent(content as never);
-  const title = isGroup ? "群视频会议" : signal?.callType === "video" ? "视频通话" : "语音通话";
-  switch (signal?.action) {
-    case SignalingAction.INVITE:
-    case SignalingAction.CALLING:
-      return `${title}已发起`;
-    case SignalingAction.ACCEPT:
-      return isGroup ? "有成员加入群视频" : `${title}已接听`;
-    case SignalingAction.CANCEL:
-      return isGroup ? "有成员离开群视频" : `${title}已取消`;
-    case SignalingAction.HANGUP:
-      return isGroup ? "群视频已结束" : `${title}已结束`;
-    case SignalingAction.REJECT:
-      return `${title}已拒绝`;
-    case SignalingAction.TIMEOUT:
-      return `${title}未接听`;
-    default:
-      return title;
-  }
 }
 
 function formatTime(ts: number): string {

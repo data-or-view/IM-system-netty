@@ -7,6 +7,7 @@ import { Inbox, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import { DialogBody, EmptyState, ResultRow, SearchBar } from "./DialogParts";
 import { getErrorText } from "im-sdk";
+import { shortId } from "@/lib/display-formatters";
 
 interface Props {
   open: boolean;
@@ -98,7 +99,7 @@ export default function UserSearchDialog({ open, onOpenChange }: Props) {
                 </Avatar>
                 <div className="min-w-0">
                   <div className="truncate text-sm font-semibold text-slate-900">{user.nickname || user.userId}</div>
-                  <div className="truncate text-xs text-slate-500">ID: {user.userId}</div>
+                  <div className="truncate text-xs text-slate-500" title={user.userId}>ID: {shortId(user.userId)}</div>
                 </div>
               </div>
 

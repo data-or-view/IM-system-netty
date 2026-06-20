@@ -28,7 +28,7 @@ import {
   type SendMessageAck,
 } from "im-sdk";
 import { useCall } from "@/components/call/CallProvider";
-import { messageRenderKey, toLocalFailedMessage, toLocalPendingMessage, toOptimisticMessage } from "@/lib/messages";
+import { messageRenderKey, normalizeMessageStatus, toLocalFailedMessage, toLocalPendingMessage, toOptimisticMessage } from "@/lib/messages";
 import { cn } from "@/lib/utils";
 
 export default function ChatArea() {
@@ -82,7 +82,7 @@ export default function ChatArea() {
               contentType: m.contentType,
               content: m.content,
               createTime: m.timestamp,
-              status: m.status,
+              status: normalizeMessageStatus(m.status, m.messageSeq),
             }));
             dispatch({ type: "ADD_MESSAGES", conversationId: conv.conversationId, msgs: mapped });
           }
@@ -489,6 +489,7 @@ export default function ChatArea() {
             const isMine = msg.senderUserId === state.userId;
             const isRevoked = msg.contentType === 101 || msg.content === "消息已撤回";
             const isCompactSystem = isCompactSystemMessage(msg);
+            const isPending = msg.status === 0 && msg.seq <= 0;
 
             if (isRevoked) {
               return (
@@ -564,7 +565,7 @@ export default function ChatArea() {
                         {isMine &&
                           (msg.status === -1
                             ? " 发送失败"
-                            : msg.status === 0
+                            : isPending
                               ? " 发送中…"
                               : "")}
                       </div>
@@ -572,7 +573,7 @@ export default function ChatArea() {
 
                     {/* Status icon (failure / loading) */}
                     {isMine && (
-                      <MessageStatusIcon status={msg.status} errorText={msg.errorText} />
+                      <MessageStatusIcon status={isPending ? 0 : msg.status} errorText={msg.errorText} />
                     )}
 
                     {/* Revoke dropdown — only for own messages */}
