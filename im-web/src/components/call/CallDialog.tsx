@@ -21,11 +21,24 @@ export function CallDialog() {
     ? `${call.group?.name || "群聊"} 群视频`
     : call.peer?.name || call.peer?.userId || "未知用户";
 
+  const handleEscape = () => {
+    const phase = call.phase;
+    if (phase === "incoming") {
+      void rejectCall();
+    } else if (phase === "connected" || phase === "reconnecting" || phase === "ending") {
+      void hangupCall();
+    } else if (phase !== "idle") {
+      // dialing / ringing / accepted / connectingMedia
+      void cancelCall();
+    }
+  };
+
   return (
     <Dialog open={open}>
       <DialogContent
         hideClose
         onOpenAutoFocus={(event) => event.preventDefault()}
+        onEscapeKeyDown={(e) => { e.preventDefault(); handleEscape(); }}
         className="overflow-hidden border-white/10 bg-zinc-950 p-0 text-white shadow-2xl sm:max-w-[720px]"
       >
         <DialogTitle className="sr-only">
@@ -212,7 +225,7 @@ function CallStatus({ call, title }: { call: CallState; title: string }) {
 
   const text = useMemo(() => {
     if (call.mode === "group") {
-      if (call.phase === "connectingMedia") return "正在加入群视频...";
+      if (call.phase === "connectingMedia") return "正在连接媒体服务，请稍候...";
       if (call.phase === "reconnecting") return "媒体连接正在恢复...";
       return duration;
     }
@@ -231,7 +244,12 @@ function CallStatus({ call, title }: { call: CallState; title: string }) {
   return (
     <div className="mb-7 text-center">
       <div className="text-sm font-medium text-white/90">{text}</div>
-      {call.phase !== "connected" && call.phase !== "reconnecting" && (
+      {call.phase === "connectingMedia" && (
+        <div className="mt-2 text-xs text-white/50">
+          连接失败时可按 Esc 或点击「取消」退出
+        </div>
+      )}
+      {call.phase !== "connected" && call.phase !== "reconnecting" && call.phase !== "connectingMedia" && (
         <div className="mt-2 text-xs text-white/50">请保持页面打开，媒体连接由 LiveKit 承载</div>
       )}
     </div>

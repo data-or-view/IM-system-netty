@@ -308,9 +308,9 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
     await room.connect(url, token, {
       autoSubscribe: true,
-      peerConnectionTimeout: 20000,
-      websocketTimeout: 15000,
-      maxRetries: 3,
+      peerConnectionTimeout: 15000,
+      websocketTimeout: 8000,  // fail fast — 3 × 15s was 45s
+      maxRetries: 1,
     });
 
     const audioTrack = await createLocalAudioTrack(AUDIO_CAPTURE_OPTIONS);
@@ -347,7 +347,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       setCall((prev) => ({ ...prev, phase: "ringing", roomId: ack.roomId }));
     } catch (err) {
       console.error("start call failed:", err);
-      toast(callErrorText(err, "发起通话失败"));
+      toast(callErrorText(err, "发起通话失败", liveKitUrlRef.current));
       await resetCall();
     }
   }, [connectRoom, resetCall]);
@@ -376,6 +376,12 @@ export function CallProvider({ children }: { children: ReactNode }) {
         participants: ack.participants,
       });
       await connectRoom(liveKitUrlRef.current, ack.token, callType);
+      // Guard against race condition: user may have cancelled while connectRoom was running.
+      // If phase is already "idle", don't reopen the dialog by setting "connected".
+      if (callRef.current.phase === "idle") {
+        await disconnectCurrentRoom();
+        return;
+      }
       setCall((prev) => ({
         ...prev,
         phase: "connected",
@@ -391,10 +397,10 @@ export function CallProvider({ children }: { children: ReactNode }) {
       }));
     } catch (err) {
       console.error("join group call failed:", err);
-      toast(callErrorText(err, "加入群视频失败"));
+      toast(callErrorText(err, "加入群视频失败", liveKitUrlRef.current));
       await resetCall();
     }
-  }, [connectRoom, resetCall]);
+  }, [connectRoom, disconnectCurrentRoom, resetCall]);
 
   const startGroupCall = useCallback(async ({ group, callType = "video" }: StartGroupCallInput) => {
     if (!group.groupId || callRef.current.phase !== "idle") return;
@@ -404,7 +410,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       await joinGroupCall({ group, mediaPermissionChecked: true });
     } catch (err) {
       console.error("start group call failed:", err);
-      toast(callErrorText(err, "发起群视频失败"));
+      toast(callErrorText(err, "发起群视频失败", liveKitUrlRef.current));
       await resetCall();
     }
   }, [joinGroupCall, resetCall]);
@@ -452,7 +458,11 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
   const cancelCall = useCallback(async () => {
     const current = callRef.current;
-    if (current.peer?.userId && current.roomId) {
+    if (current.mode === "group" && current.group?.groupId) {
+      // For group calls: remove this user from the server-side participant list so
+      // the participant count stays accurate even if the user never connected to LiveKit.
+      await im.group.leaveCall(current.group.groupId).catch(() => undefined);
+    } else if (current.peer?.userId && current.roomId) {
       const ack = await im.message.sendCallSignal(current.peer.userId, SignalingAction.CANCEL, current.roomId).catch(() => undefined);
       appendLocalCallSignal(ack, SignalingAction.CANCEL, current, state.userId, dispatch);
     }
@@ -629,14 +639,17 @@ function handleRemoteSignal(action: SignalingActionName, reason: string | undefi
   }
 }
 
-function callErrorText(err: unknown, fallback: string): string {
+function callErrorText(err: unknown, fallback: string, sfuUrl?: string): string {
   const text = err instanceof Error ? err.message : String(err ?? "");
   const lower = text.toLowerCase();
   if (lower.includes("permission") || lower.includes("notallowed") || lower.includes("denied")) {
     return "摄像头或麦克风权限不可用，请检查浏览器权限";
   }
   if (lower.includes("timeout") || lower.includes("websocket") || lower.includes("connect")) {
-    return "媒体服务连接失败，请确认 LiveKit 已启动";
+    if (sfuUrl && (sfuUrl.includes("localhost") || sfuUrl.includes("127.0.0.1"))) {
+      return `媒体服务地址配置为 ${sfuUrl}（仅限本机）。跨机器通话需将服务端 im.call.sfu-endpoint 改为公网 IP`;
+    }
+    return `媒体服务连接失败（${sfuUrl ?? "unknown"}），请确认 LiveKit 已启动且地址可访问`;
   }
   if (lower.includes("not found") || lower.includes("not_active") || lower.includes("inactive")) {
     return "通话已结束或对方尚未接入";

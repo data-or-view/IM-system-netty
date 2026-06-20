@@ -75,6 +75,8 @@ im:
     provider: livekit
     api-key: "devkey"
     api-secret: "im-system-livekit-secret-2024"
+    # ⚠️  多机部署时必须改为 LiveKit 服务端的公网 IP 或域名，否则其他机器的用户将无法加入通话。
+    # 例如: "ws://192.168.1.100:7880" (局域网) 或 "wss://livekit.example.com" (公网+TLS)
     sfu-endpoint: "ws://localhost:7880"
 
   # ── MinIO 文件存储 ──

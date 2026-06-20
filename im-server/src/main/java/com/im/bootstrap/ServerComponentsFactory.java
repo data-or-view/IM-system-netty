@@ -275,11 +275,18 @@ final class ServerComponentsFactory {
                                                RedisConfiguration redisConfig) {
         ICallManager callManager = null;
         if (config.getBoolean("im.call.enabled", false)) {
+            String sfuEndpoint = config.getString("im.call.sfu-endpoint", "ws://localhost:7880");
             callManager = new LiveKitCallManager(
                     config.getString("im.call.api-key", "devkey"),
                     config.getString("im.call.api-secret", ""),
-                    config.getString("im.call.sfu-endpoint", "ws://localhost:7880"));
-            log.info("LiveKitCallManager enabled: endpoint={}", config.getString("im.call.sfu-endpoint"));
+                    sfuEndpoint);
+            log.info("LiveKitCallManager enabled: endpoint={}", sfuEndpoint);
+            if (sfuEndpoint.contains("localhost") || sfuEndpoint.contains("127.0.0.1")) {
+                log.warn("[CALL] im.call.sfu-endpoint={} 是本机地址。" +
+                         " 跨机器通话时其他用户会收到此地址但无法连接 LiveKit。" +
+                         " 请将 im.call.sfu-endpoint 改为所有客户端都能访问的公网 IP 或域名，" +
+                         " 例如 ws://192.168.x.x:7880 或 wss://im.example.com/livekit", sfuEndpoint);
+            }
         }
 
         CallStateManager callStateManager = callManager != null

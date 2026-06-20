@@ -4,16 +4,28 @@
 
 @layer base {
   :root {
-    --app-bg: #f7f8fa;
+    /* === Brand === */
+    --brand: #4f6ef7;
+    --brand-dark: #3d55e0;
+
+    /* === App chrome === */
+    --rail-bg: #1a1c2a;
+    --app-bg: #eef0f3;
     --surface: #ffffff;
-    --surface-subtle: #f3f4f6;
+    --surface-subtle: #f8f9fb;
+
+    /* === Text === */
     --text-strong: #111827;
+    --text-body: #374151;
     --text-muted: #6b7280;
-    --brand-ink: #2563eb;
+
+    /* === Signals === */
     --signal-online: #22c55e;
-    --signal-info: #2563eb;
+    --signal-info: #3b82f6;
     --signal-danger: #ef4444;
     --signal-warning: #f59e0b;
+
+    /* === shadcn tokens === */
     --background: 0 0% 100%;
     --foreground: 240 10% 3.9%;
     --card: 0 0% 100%;
@@ -63,11 +75,46 @@
   * {
     @apply border-border;
   }
+
   body {
     @apply bg-[var(--app-bg)] text-foreground antialiased;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui,
+      "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
   }
 
   ::selection {
     @apply bg-blue-600 text-white;
   }
+
+  /* Thin, subtle scrollbar */
+  ::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.12);
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 0, 0, 0.22);
+  }
+}
+
+/* ── Message entrance animation ── */
+@keyframes msg-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.msg-in {
+  animation: msg-slide-in 0.16s ease-out both;
 }

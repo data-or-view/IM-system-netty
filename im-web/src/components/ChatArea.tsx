@@ -3,7 +3,6 @@ import { useNavigate } from "react-router-dom";
 import { SYSTEM_CONVERSATION_ID, useStore } from "@/store/store";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -17,9 +16,20 @@ import { im } from "@/sdk/im-sdk";
 import { MessageContentRenderer } from "@/components/MessageContentRenderer";
 import SystemMessagePanel from "@/components/SystemMessagePanel";
 import { EmptyState, MessageStatusIcon, PageHeader, StateBadge, StatusDot } from "@/components/design-system";
-import { ConversationType, MessageContentType, GroupMemberRole, createClientMsgId, getErrorText, groupMemberRoleRank, type GroupCallSession, type OutgoingMessageContentTypeValue, type SendMessageAck } from "im-sdk";
+import {
+  ConversationType,
+  MessageContentType,
+  GroupMemberRole,
+  createClientMsgId,
+  getErrorText,
+  groupMemberRoleRank,
+  type GroupCallSession,
+  type OutgoingMessageContentTypeValue,
+  type SendMessageAck,
+} from "im-sdk";
 import { useCall } from "@/components/call/CallProvider";
 import { messageRenderKey, toLocalFailedMessage, toLocalPendingMessage, toOptimisticMessage } from "@/lib/messages";
+import { cn } from "@/lib/utils";
 
 export default function ChatArea() {
   const { state, fetchConversations, fetchGroupMembers, dispatch } = useStore();
@@ -27,6 +37,7 @@ export default function ChatArea() {
   const [uploading, setUploading] = useState(false);
   const [activeGroupCall, setActiveGroupCall] = useState<GroupCallSession | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const navigate = useNavigate();
   const { startCall, startGroupCall, joinGroupCall, endGroupCall } = useCall();
 
@@ -38,11 +49,16 @@ export default function ChatArea() {
   const groupMembers = conv?.groupId ? state.groupMembers[conv.groupId] || [] : [];
   const currentGroupMember = groupMembers.find((member) => member.userId === state.userId);
   const canEndActiveGroupCall = Boolean(
-    activeGroupCall && (
-      activeGroupCall.initiatorUserId === state.userId ||
-      groupMemberRoleRank(currentGroupMember?.roleLevel) >= groupMemberRoleRank(GroupMemberRole.ADMIN)
-    ),
+    activeGroupCall &&
+      (activeGroupCall.initiatorUserId === state.userId ||
+        groupMemberRoleRank(currentGroupMember?.roleLevel) >=
+          groupMemberRoleRank(GroupMemberRole.ADMIN))
   );
+
+  // Scroll to bottom on new messages
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages.length]);
 
   // Load history when conversation changes
   useEffect(() => {
@@ -120,70 +136,69 @@ export default function ChatArea() {
     };
   }, [conv?.conversationType, conv?.groupId, messages, refreshActiveGroupCall]);
 
-  const appendSentMessage = useCallback((
-    ack: SendMessageAck,
-    contentType: OutgoingMessageContentTypeValue,
-    content: unknown,
-  ) => {
-    if (!conv) return;
-    const msg = toOptimisticMessage(ack, state.userId || "", contentType, content);
-    dispatch({
-      type: "UPSERT_SENT_MESSAGE",
-      previousConversationId: conv.conversationId,
-      conversation: {
-        ...conv,
-        conversationId: ack.conversationId,
-      },
-      msg,
-    });
-    void fetchConversations();
-  }, [conv, dispatch, fetchConversations, state.userId]);
+  const appendSentMessage = useCallback(
+    (ack: SendMessageAck, contentType: OutgoingMessageContentTypeValue, content: unknown) => {
+      if (!conv) return;
+      const msg = toOptimisticMessage(ack, state.userId || "", contentType, content);
+      dispatch({
+        type: "UPSERT_SENT_MESSAGE",
+        previousConversationId: conv.conversationId,
+        conversation: { ...conv, conversationId: ack.conversationId },
+        msg,
+      });
+      void fetchConversations();
+    },
+    [conv, dispatch, fetchConversations, state.userId]
+  );
 
-  const sendCurrentTextMessage = useCallback(async (content: string) => {
-    if (!conv) return;
-    const messageContent = { text: content };
-    const clientMsgId = createClientMsgId();
-    const pending = toLocalPendingMessage({
-      conversationId: conv.conversationId,
-      senderUserId: state.userId || "",
-      contentType: "text",
-      content: messageContent,
-      messageId: clientMsgId,
-    });
-    dispatch({ type: "APPEND_MESSAGE", conversationId: conv.conversationId, msg: pending });
-    try {
-      await im.waitConnected();
-      const ack = conv.conversationType === ConversationType.GROUP && conv.groupId
-        ? await im.message.sendGroup({
-            groupId: conv.groupId,
-            contentType: "text",
-            content: messageContent,
-            clientMsgId,
-          })
-        : conv.userId
-          ? await im.message.send({
-              toUserId: conv.userId,
-              contentType: "text",
-              content: messageContent,
-              clientMsgId,
-            })
-          : null;
+  const sendCurrentTextMessage = useCallback(
+    async (content: string) => {
+      if (!conv) return;
+      const messageContent = { text: content };
+      const clientMsgId = createClientMsgId();
+      const pending = toLocalPendingMessage({
+        conversationId: conv.conversationId,
+        senderUserId: state.userId || "",
+        contentType: "text",
+        content: messageContent,
+        messageId: clientMsgId,
+      });
+      dispatch({ type: "APPEND_MESSAGE", conversationId: conv.conversationId, msg: pending });
+      try {
+        await im.waitConnected();
+        const ack =
+          conv.conversationType === ConversationType.GROUP && conv.groupId
+            ? await im.message.sendGroup({
+                groupId: conv.groupId,
+                contentType: "text",
+                content: messageContent,
+                clientMsgId,
+              })
+            : conv.userId
+              ? await im.message.send({
+                  toUserId: conv.userId,
+                  contentType: "text",
+                  content: messageContent,
+                  clientMsgId,
+                })
+              : null;
 
-      if (ack) {
-        appendSentMessage(ack, "text", messageContent);
+        if (ack) {
+          appendSentMessage(ack, "text", messageContent);
+        }
+      } catch (err) {
+        const failed = toLocalFailedMessage(pending, getErrorText(err));
+        dispatch({ type: "APPEND_MESSAGE", conversationId: conv.conversationId, msg: failed });
+        throw err;
       }
-    } catch (err) {
-      const failed = toLocalFailedMessage(pending, getErrorText(err));
-      dispatch({ type: "APPEND_MESSAGE", conversationId: conv.conversationId, msg: failed });
-      throw err;
-    }
-  }, [appendSentMessage, conv, dispatch, state.userId]);
+    },
+    [appendSentMessage, conv, dispatch, state.userId]
+  );
 
   const handleSend = () => {
     if (!input.trim() || !conv || isSystemConversation) return;
     const content = input.trim();
     setInput("");
-
     void sendCurrentTextMessage(content).catch((err) => {
       console.error("send message failed:", err);
     });
@@ -196,63 +211,68 @@ export default function ChatArea() {
     }
   };
 
-  const sendFileMessage = useCallback(async (file: File) => {
-    if (!conv) return;
-    setUploading(true);
-    try {
-      await im.waitConnected();
-      const uploaded = await im.file.upload(file.name, file, file.type || "application/octet-stream");
-      const fileContent = {
-        uuid: uploaded.fileId,
-        fileName: uploaded.fileName || file.name,
-        fileSize: Number(uploaded.fileSize ?? file.size),
-        url: uploaded.fileUrl,
-      };
+  const sendFileMessage = useCallback(
+    async (file: File) => {
+      if (!conv) return;
+      setUploading(true);
+      try {
+        await im.waitConnected();
+        const uploaded = await im.file.upload(file.name, file, file.type || "application/octet-stream");
+        const fileContent = {
+          uuid: uploaded.fileId,
+          fileName: uploaded.fileName || file.name,
+          fileSize: Number(uploaded.fileSize ?? file.size),
+          url: uploaded.fileUrl,
+        };
 
-      const msg = conv.conversationType === ConversationType.GROUP && conv.groupId
-        ? await im.message.sendGroup({
-            groupId: conv.groupId,
-            contentType: "file",
-            content: fileContent,
-            clientMsgId: createClientMsgId(),
-          })
-        : conv.userId
-          ? await im.message.send({
-              toUserId: conv.userId,
-              contentType: "file",
-              content: fileContent,
-              clientMsgId: createClientMsgId(),
-            })
-          : null;
+        const msg =
+          conv.conversationType === ConversationType.GROUP && conv.groupId
+            ? await im.message.sendGroup({
+                groupId: conv.groupId,
+                contentType: "file",
+                content: fileContent,
+                clientMsgId: createClientMsgId(),
+              })
+            : conv.userId
+              ? await im.message.send({
+                  toUserId: conv.userId,
+                  contentType: "file",
+                  content: fileContent,
+                  clientMsgId: createClientMsgId(),
+                })
+              : null;
 
-      if (msg) {
-        appendSentMessage(msg, "file", fileContent);
-        toast("文件已发送");
+        if (msg) {
+          appendSentMessage(msg, "file", fileContent);
+          toast("文件已发送");
+        }
+      } catch (err) {
+        console.error("send file failed:", err);
+        toast(`文件发送失败：${getErrorText(err)}`);
+      } finally {
+        setUploading(false);
+        if (fileInputRef.current) fileInputRef.current.value = "";
       }
-    } catch (err) {
-      console.error("send file failed:", err);
-      toast(`文件发送失败：${getErrorText(err)}`);
-    } finally {
-      setUploading(false);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-      }
-    }
-  }, [appendSentMessage, conv]);
+    },
+    [appendSentMessage, conv]
+  );
 
-  const handleRevoke = useCallback(async (msg: { conversationId: string; seq: number; groupId?: string }) => {
-    try {
-      await im.message.revoke({
-        conversationId: msg.conversationId,
-        messageSeq: msg.seq,
-        ...(msg.groupId ? { groupId: msg.groupId } : {}),
-      });
-      dispatch({ type: "REVOKE_MESSAGE", conversationId: msg.conversationId, seq: msg.seq });
-      toast("已撤回");
-    } catch {
-      toast("撤回失败");
-    }
-  }, [dispatch]);
+  const handleRevoke = useCallback(
+    async (msg: { conversationId: string; seq: number; groupId?: string }) => {
+      try {
+        await im.message.revoke({
+          conversationId: msg.conversationId,
+          messageSeq: msg.seq,
+          ...(msg.groupId ? { groupId: msg.groupId } : {}),
+        });
+        dispatch({ type: "REVOKE_MESSAGE", conversationId: msg.conversationId, seq: msg.seq });
+        toast("已撤回");
+      } catch {
+        toast("撤回失败");
+      }
+    },
+    [dispatch]
+  );
 
   const handleHeaderClick = () => {
     if (!conv || isSystemConversation) return;
@@ -263,28 +283,22 @@ export default function ChatArea() {
     }
   };
 
-  const handleStartCall = useCallback((callType: "voice" | "video") => {
-    if (!conv?.userId || conv.conversationType === ConversationType.GROUP) return;
-    void startCall({
-      callType,
-      peer: {
-        userId: conv.userId,
-        name: conv.showName,
-        faceUrl: conv.faceUrl,
-      },
-    });
-  }, [conv, startCall]);
+  const handleStartCall = useCallback(
+    (callType: "voice" | "video") => {
+      if (!conv?.userId || conv.conversationType === ConversationType.GROUP) return;
+      void startCall({
+        callType,
+        peer: { userId: conv.userId, name: conv.showName, faceUrl: conv.faceUrl },
+      });
+    },
+    [conv, startCall]
+  );
 
   const handleStartGroupCall = useCallback(() => {
     if (!conv?.groupId || conv.conversationType !== ConversationType.GROUP) return;
     void startGroupCall({
       callType: "video",
-      group: {
-        groupId: conv.groupId,
-        name: conv.showName,
-        faceUrl: conv.faceUrl,
-        canEnd: true,
-      },
+      group: { groupId: conv.groupId, name: conv.showName, faceUrl: conv.faceUrl, canEnd: true },
     }).then(async () => {
       await refreshActiveGroupCall(conv.groupId!);
     });
@@ -311,13 +325,18 @@ export default function ChatArea() {
 
   if (!state.activeConversationId) {
     return (
-      <div className="flex h-full flex-1 items-center justify-center bg-[var(--app-bg)] px-6">
-        <EmptyState
-          icon={<MessageCircle className="h-4 w-4" />}
-          title="选择一个会话开始"
-          description="选择会话后，历史消息、系统提醒和通话记录会显示在这里。"
-          className="max-w-sm"
-        />
+      <div className="flex h-full flex-1 flex-col items-center justify-center bg-[var(--app-bg)]">
+        <div className="flex flex-col items-center gap-3 text-center">
+          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white shadow-sm">
+            <MessageCircle className="h-7 w-7 text-blue-500" />
+          </div>
+          <div>
+            <p className="text-base font-semibold text-slate-700">选择一个会话开始</p>
+            <p className="mt-1 max-w-xs text-sm text-slate-400">
+              从左侧选择好友或群组，历史消息会显示在这里。
+            </p>
+          </div>
+        </div>
       </div>
     );
   }
@@ -328,31 +347,32 @@ export default function ChatArea() {
 
   return (
     <div className="flex h-full flex-1 flex-col bg-[var(--app-bg)]">
+      {/* Header */}
       <PageHeader
-        icon={(
-          <Avatar className="h-8 w-8">
+        icon={
+          <Avatar className="h-8 w-8 shadow-sm">
             <AvatarImage src={conv?.faceUrl} />
-            <AvatarFallback className="bg-white text-xs text-slate-700">
+            <AvatarFallback className="bg-gradient-to-br from-slate-200 to-slate-300 text-xs text-slate-600">
               {(conv?.showName || "?").charAt(0).toUpperCase()}
             </AvatarFallback>
           </Avatar>
-        )}
+        }
         title={conv?.showName || "会话"}
-        description={(
+        description={
           <span className="inline-flex items-center gap-1.5">
             <StatusDot tone={conv?.conversationType === ConversationType.GROUP ? "info" : "online"} />
             {conv?.conversationType === ConversationType.GROUP ? "群聊" : "单聊"}
           </span>
-        )}
-        actions={(
+        }
+        actions={
           <>
             {conv?.conversationType !== ConversationType.GROUP && conv?.userId && (
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-0.5">
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className="h-9 w-9 rounded-md"
+                  className="h-9 w-9 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-700"
                   title="语音通话"
                   onClick={() => handleStartCall("voice")}
                 >
@@ -362,7 +382,7 @@ export default function ChatArea() {
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className="h-9 w-9 rounded-md"
+                  className="h-9 w-9 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-700"
                   title="视频通话"
                   onClick={() => handleStartCall("video")}
                 >
@@ -375,7 +395,7 @@ export default function ChatArea() {
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="h-9 w-9 rounded-md"
+                className="h-9 w-9 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-700"
                 title={activeGroupCall ? "加入群视频" : "发起群视频"}
                 onClick={activeGroupCall ? handleJoinGroupCall : handleStartGroupCall}
               >
@@ -385,26 +405,30 @@ export default function ChatArea() {
             <button
               type="button"
               onClick={handleHeaderClick}
-              className="flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-slate-100 hover:text-foreground"
+              className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700"
               title="查看资料"
             >
               <Info className="h-4 w-4" />
             </button>
           </>
-        )}
+        }
       />
 
+      {/* Active group call banner */}
       {conv?.conversationType === ConversationType.GROUP && activeGroupCall && (
-        <div className="border-b border-blue-100 bg-blue-50 px-4 py-2 text-sm text-blue-950">
+        <div className="border-b border-blue-100 bg-blue-50 px-5 py-2">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0">
-              <div className="flex items-center gap-2 font-medium">
+              <div className="flex items-center gap-2 text-sm font-semibold text-blue-900">
                 <StatusDot tone="online" pulse />
                 群视频进行中
-                <StateBadge tone="online">{activeGroupCall.participantCount ?? activeGroupCall.participants?.length ?? 1} 人</StateBadge>
+                <StateBadge tone="online">
+                  {activeGroupCall.participantCount ?? activeGroupCall.participants?.length ?? 1} 人
+                </StateBadge>
               </div>
-              <div className="mt-0.5 truncate text-xs text-blue-700/75">
-                发起人 {displayGroupCallUser(activeGroupCall.initiatorUserId, groupMembers)} · {formatGroupCallStartedAt(activeGroupCall.startedAt)}
+              <div className="mt-0.5 truncate text-xs text-blue-600/80">
+                发起人 {displayGroupCallUser(activeGroupCall.initiatorUserId, groupMembers)} ·{" "}
+                {formatGroupCallStartedAt(activeGroupCall.startedAt)}
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -419,7 +443,11 @@ export default function ChatArea() {
                   结束
                 </Button>
               )}
-              <Button size="sm" className="h-8 bg-blue-600 hover:bg-blue-700" onClick={handleJoinGroupCall}>
+              <Button
+                size="sm"
+                className="h-8 bg-blue-600 hover:bg-blue-700"
+                onClick={handleJoinGroupCall}
+              >
                 加入
               </Button>
             </div>
@@ -427,9 +455,10 @@ export default function ChatArea() {
         </div>
       )}
 
-      <ScrollArea className="flex-1 bg-[#f7f8fa] px-5 py-4">
+      {/* Message list */}
+      <ScrollArea className="flex-1 px-4 py-4 md:px-6">
         {messages.length === 0 && (
-          <div className="flex h-full min-h-[360px] items-center justify-center">
+          <div className="flex h-full min-h-[320px] items-center justify-center">
             <EmptyState
               icon={<MessageCircle className="h-4 w-4" />}
               title="暂无消息"
@@ -438,73 +467,104 @@ export default function ChatArea() {
           </div>
         )}
 
-        <div className="mx-auto max-w-4xl space-y-3 pb-1">
+        <div className="mx-auto max-w-3xl space-y-1 pb-2">
           {messages.map((msg) => {
             const isMine = msg.senderUserId === state.userId;
             const isRevoked = msg.contentType === 101 || msg.content === "消息已撤回";
+
             if (isRevoked) {
               return (
-                <div key={msg.messageId} className="flex justify-center">
-                  <span className="rounded-md border border-slate-200 bg-white px-3 py-1 text-xs text-[var(--text-muted)] shadow-sm">
+                <div key={msg.messageId} className="flex justify-center py-1">
+                  <span className="rounded-full border border-slate-200 bg-white/70 px-4 py-1 text-xs text-slate-400 shadow-sm backdrop-blur-sm">
                     {isMine ? "你" : msg.senderNickname || msg.senderUserId} 撤回了一条消息
                   </span>
                 </div>
               );
             }
+
             return (
               <div
                 key={messageRenderKey(msg)}
-                className={`flex ${isMine ? "justify-end" : "justify-start"}`}
+                className={cn(
+                  "msg-in flex items-end gap-2",
+                  isMine ? "justify-end" : "justify-start"
+                )}
               >
-                <div className="group flex max-w-[78%] flex-col">
-                  <div className="flex items-end gap-2">
-                    {!isMine && (
-                      <Avatar className="mb-1 h-8 w-8 cursor-pointer border border-white shadow-sm"
-                        onClick={() => navigate(`/chat/user/${msg.senderUserId}`)}>
-                        <AvatarFallback className="text-[10px]">
-                          {(msg.senderNickname || msg.senderUserId).charAt(0).toUpperCase()}
-                        </AvatarFallback>
-                      </Avatar>
-                    )}
+                {/* Other user avatar (left side) */}
+                {!isMine && (
+                  <Avatar
+                    className="mb-1 h-8 w-8 shrink-0 cursor-pointer shadow-sm"
+                    onClick={() => navigate(`/chat/user/${msg.senderUserId}`)}
+                  >
+                    <AvatarFallback className="bg-gradient-to-br from-slate-200 to-slate-300 text-[10px] text-slate-600">
+                      {(msg.senderNickname || msg.senderUserId).charAt(0).toUpperCase()}
+                    </AvatarFallback>
+                  </Avatar>
+                )}
+
+                {/* Message group */}
+                <div className={cn("group flex max-w-[72%] flex-col gap-1", isMine && "items-end")}>
+                  {/* Sender name (in group chats, for others' messages) */}
+                  {!isMine && conv?.conversationType === ConversationType.GROUP && (
+                    <span className="pl-1 text-[11px] font-medium text-slate-500">
+                      {msg.senderNickname || msg.senderUserId}
+                    </span>
+                  )}
+
+                  <div className={cn("flex items-end gap-1.5", isMine && "flex-row-reverse")}>
+                    {/* Bubble */}
                     <div
-                      className={`rounded-xl px-3 py-2 text-sm shadow-sm ${
+                      className={cn(
+                        "relative px-3.5 py-2.5 text-sm shadow-sm",
                         msg.status === -1
-                          ? "border border-red-200 bg-red-50 text-red-950"
+                          ? "rounded-2xl border border-red-200 bg-red-50 text-red-800"
                           : isMine
-                            ? "bg-blue-600 text-white"
-                            : "border border-slate-200 bg-white text-[var(--text-strong)]"
-                      }`}
-                    >
-                      {!isMine && (
-                        <div className="mb-1 text-xs opacity-70">
-                          {msg.senderNickname || msg.senderUserId}
-                        </div>
+                            ? "rounded-2xl rounded-br-md bg-gradient-to-br from-blue-500 to-blue-600 text-white"
+                            : "rounded-2xl rounded-bl-md border border-slate-200/80 bg-white text-slate-800"
                       )}
+                    >
                       <MessageContentRenderer message={msg} />
                       <div
-                        className={`mt-1 text-[10px] ${
-                          isMine && msg.status !== -1 ? "text-white/60" : "text-muted-foreground"
-                        }`}
+                        className={cn(
+                          "mt-1 text-[10px] leading-none",
+                          isMine && msg.status !== -1
+                            ? "text-white/60"
+                            : "text-slate-400"
+                        )}
                       >
                         {formatMsgTime(msg.createTime)}
-                        {isMine && (msg.status === -1 ? " 发送失败" : msg.status === 0 ? " 发送中..." : msg.status === 1 ? " ✓" : " ✓✓")}
+                        {isMine &&
+                          (msg.status === -1
+                            ? " 发送失败"
+                            : msg.status === 0
+                              ? " 发送中…"
+                              : "")}
                       </div>
                     </div>
-                    {isMine && <MessageStatusIcon status={msg.status} errorText={msg.errorText} />}
 
+                    {/* Status icon (failure / loading) */}
+                    {isMine && (
+                      <MessageStatusIcon status={msg.status} errorText={msg.errorText} />
+                    )}
+
+                    {/* Revoke dropdown — only for own messages */}
                     {isMine && (
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <button className="invisible rounded-md p-1 text-muted-foreground opacity-0 transition-all hover:bg-white group-hover:visible group-hover:opacity-100">
+                          <button className="invisible mb-2 flex h-6 w-6 items-center justify-center rounded-md text-slate-400 opacity-0 transition-all hover:bg-slate-200 group-hover:visible group-hover:opacity-100">
                             <MoreHorizontal className="h-3.5 w-3.5" />
                           </button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" side="top">
-                          <DropdownMenuItem onClick={() => handleRevoke({
-                            conversationId: msg.conversationId,
-                            seq: msg.seq,
-                            groupId: conv?.groupId,
-                          })}>
+                          <DropdownMenuItem
+                            onClick={() =>
+                              handleRevoke({
+                                conversationId: msg.conversationId,
+                                seq: msg.seq,
+                                groupId: conv?.groupId,
+                              })
+                            }
+                          >
                             <Undo2 className="mr-2 h-4 w-4" />
                             撤回
                           </DropdownMenuItem>
@@ -516,38 +576,52 @@ export default function ChatArea() {
               </div>
             );
           })}
+          <div ref={messagesEndRef} />
         </div>
       </ScrollArea>
 
-      <div className="border-t border-slate-200 bg-white px-5 py-3">
-        <div className="mx-auto flex max-w-4xl items-center gap-2 rounded-md bg-slate-100 p-1.5">
-          <input
-            ref={fileInputRef}
-            type="file"
-            className="hidden"
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              if (file) void sendFileMessage(file);
-            }}
-          />
+      {/* Input bar */}
+      <div className="border-t border-slate-200/80 bg-white px-4 py-3 md:px-5">
+        <input
+          ref={fileInputRef}
+          type="file"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) void sendFileMessage(file);
+          }}
+        />
+        <div className="mx-auto flex max-w-3xl items-center gap-2">
+          {/* Attachment */}
           <button
-            className="flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground hover:bg-white hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 disabled:cursor-not-allowed disabled:opacity-40"
             disabled={!conv || uploading}
             onClick={() => fileInputRef.current?.click()}
             title={uploading ? "正在上传文件" : "发送文件"}
           >
-            <Paperclip className="h-4 w-4 text-muted-foreground" />
+            <Paperclip className="h-4 w-4" />
           </button>
-          <Input
-            placeholder="输入消息..."
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            className="h-10 flex-1 border-0 bg-white shadow-none focus-visible:ring-1 focus-visible:ring-blue-200"
-          />
-          <Button size="icon" className="h-10 w-10 rounded-md bg-blue-600 hover:bg-blue-700" onClick={handleSend} disabled={!input.trim()}>
+
+          {/* Input pill */}
+          <div className="flex flex-1 items-center rounded-full border border-slate-200 bg-slate-50 px-4 transition-all focus-within:border-blue-300 focus-within:bg-white focus-within:shadow-sm">
+            <input
+              className="flex-1 bg-transparent py-2.5 text-sm text-slate-800 outline-none placeholder:text-slate-400"
+              placeholder={isSystemConversation ? "系统通知不可回复" : "输入消息…"}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              disabled={isSystemConversation}
+            />
+          </div>
+
+          {/* Send button */}
+          <button
+            onClick={handleSend}
+            disabled={!input.trim() || isSystemConversation}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-blue-600 text-white shadow-sm transition-all hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
+          >
             <Send className="h-4 w-4" />
-          </Button>
+          </button>
         </div>
       </div>
     </div>
@@ -566,7 +640,10 @@ function formatGroupCallStartedAt(ts?: number): string {
   return `${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")} 开始`;
 }
 
-function displayGroupCallUser(userId: string | undefined, members: Array<{ userId: string; nickname?: string }>): string {
+function displayGroupCallUser(
+  userId: string | undefined,
+  members: Array<{ userId: string; nickname?: string }>
+): string {
   if (!userId) return "未知";
   const member = members.find((item) => item.userId === userId);
   return member?.nickname || userId;
