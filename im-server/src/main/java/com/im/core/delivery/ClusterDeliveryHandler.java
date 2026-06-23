@@ -3,6 +3,7 @@ package com.im.core.delivery;
 import com.im.api.ClusterMessage;
 import com.im.api.ClusterMessageHandler;
 import com.im.api.IConnectionSession;
+import com.im.api.IRouteTable;
 import com.im.api.ISessionManager;
 import com.im.api.Message;
 import org.slf4j.Logger;
@@ -29,9 +30,17 @@ public class ClusterDeliveryHandler implements ClusterMessageHandler {
     private static final Logger log = LoggerFactory.getLogger(ClusterDeliveryHandler.class);
 
     private final ISessionManager sessionManager;
+    private final IRouteTable routeTable;
+    private final String localNodeId;
 
     public ClusterDeliveryHandler(ISessionManager sessionManager) {
+        this(sessionManager, null, null);
+    }
+
+    public ClusterDeliveryHandler(ISessionManager sessionManager, IRouteTable routeTable, String localNodeId) {
         this.sessionManager = sessionManager;
+        this.routeTable = routeTable;
+        this.localNodeId = localNodeId;
     }
 
     @Override
@@ -59,15 +68,38 @@ public class ClusterDeliveryHandler implements ClusterMessageHandler {
             return;
         }
 
+        int delivered = 0;
         for (IConnectionSession session : sessions) {
-            if (session.getConnection().isActive()) {
+            if (matchesTarget(clusterMsg, session) && session.getConnection().isActive()) {
                 session.getConnection().write(message);
+                delivered++;
                 log.debug("Cluster-delivered msg {} to user {} session {}",
                         message.getSequenceId(), toUserId, session.getSessionId());
             }
         }
 
-        log.info("Cluster-delivered msg {} to user {} ({} sessions on this node)",
-                message.getSequenceId(), toUserId, sessions.size());
+        if (delivered == 0 && clusterMsg.hasTargetBinding()) {
+            removeStaleTargetRoute(toUserId, clusterMsg);
+        }
+
+        log.info("Cluster-delivered msg {} to user {} ({} matched of {} sessions on this node)",
+                message.getSequenceId(), toUserId, delivered, sessions.size());
+    }
+
+    private boolean matchesTarget(ClusterMessage clusterMsg, IConnectionSession session) {
+        if (!clusterMsg.hasTargetBinding()) {
+            return true;
+        }
+        return clusterMsg.getTargetPlatformId() == session.getPlatformId()
+                && clusterMsg.getTargetSessionId().equals(session.getSessionId());
+    }
+
+    private void removeStaleTargetRoute(String userId, ClusterMessage clusterMsg) {
+        if (routeTable == null || localNodeId == null || clusterMsg.getTargetPlatformId() == null) {
+            return;
+        }
+        routeTable.offline(userId, localNodeId, clusterMsg.getTargetPlatformId(), clusterMsg.getTargetSessionId());
+        log.warn("Removed stale cluster target route: userId={}, node={}, platform={}, session={}",
+                userId, localNodeId, clusterMsg.getTargetPlatformId(), clusterMsg.getTargetSessionId());
     }
 }

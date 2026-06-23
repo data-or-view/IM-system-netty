@@ -177,10 +177,11 @@ final class ServerComponentsFactory {
     private static ClusterDependencies createCluster(RedisConfiguration redisConfig,
                                                      SessionManager sessionManager,
                                                      String nodeId) {
+        RedisRouteTable routeTable = new RedisRouteTable(redisConfig, sessionManager, nodeId);
         return new ClusterDependencies(
-                new RedisRouteTable(redisConfig, sessionManager, nodeId),
+                routeTable,
                 new RedisClusterMessageBus(redisConfig, nodeId),
-                new RedisNodeDiscovery(redisConfig));
+                new RedisNodeDiscovery(redisConfig, routeTable));
     }
 
     private static BusinessDependencies createBusiness(Config config,
@@ -343,7 +344,8 @@ final class ServerComponentsFactory {
                 config.getLong("im.mq.failure-compensation.idle-interval-ms", 2000),
                 config.getLong("im.mq.failure-compensation.base-delay-ms", 1000));
 
-        ClusterDeliveryHandler clusterDeliveryHandler = new ClusterDeliveryHandler(runtime.sessionManager());
+        ClusterDeliveryHandler clusterDeliveryHandler = new ClusterDeliveryHandler(
+                runtime.sessionManager(), cluster.routeTable(), nodeId);
         cluster.clusterMessageBus().subscribe("SINGLE_CHAT", clusterDeliveryHandler);
         cluster.clusterMessageBus().subscribe("GROUP_CHAT", clusterDeliveryHandler);
         cluster.clusterMessageBus().subscribe("CLUSTER_COMMAND", new ClusterSessionCommandHandler(runtime.sessionManager()));

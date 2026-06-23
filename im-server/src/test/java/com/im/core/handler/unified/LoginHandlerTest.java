@@ -13,6 +13,7 @@ import com.im.api.Operation;
 import com.im.api.PlatformID;
 import com.im.api.RouteBinding;
 import com.im.api.RouteNode;
+import com.im.common.exception.ConflictException;
 import com.im.core.session.NettyConnectionRef;
 import com.im.core.session.SessionManager;
 import com.im.core.usecase.LoginUseCase;
@@ -25,6 +26,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class LoginHandlerTest {
@@ -64,6 +66,37 @@ class LoginHandlerTest {
         assertEquals(PlatformID.IOS, message.getCommand().platformId());
         assertEquals("old-session", message.getCommand().sessionId());
         assertTrue(routeTable.onlineCalls.stream().anyMatch(call -> call.contains("node-a")));
+
+        sessionManager.clear();
+    }
+
+    @Test
+    void rejectNewRefusesExistingRemoteRouteBeforeRegisteringNewRoute() {
+        SessionManager sessionManager = new SessionManager();
+        sessionManager.setLoginStrategy(MultiLoginStrategy.REJECT_NEW);
+        RecordingRouteTable routeTable = new RecordingRouteTable();
+        routeTable.bindings.add(new RouteBinding("u1", "node-b", PlatformID.IOS, "old-session", 0));
+        LoginHandler handler = new LoginHandler(
+                new LoginUseCase(new StubAuthenticator(), new EmptyMessageStore()),
+                sessionManager,
+                routeTable,
+                "node-a",
+                new RecordingClusterMessageBus(),
+                MultiLoginStrategy.REJECT_NEW);
+
+        EmbeddedChannel channel = new EmbeddedChannel();
+        NettyConnectionRef connection = new NettyConnectionRef(channel);
+        sessionManager.createSession(connection);
+        ApiRequest request = new ApiRequest(
+                Operation.LOGIN,
+                Map.of("userId", "u1", "platformId", PlatformID.IOS),
+                Map.of(),
+                null,
+                null);
+        request.setAttribute("_connectionId", connection.connectionId());
+
+        assertThrows(ConflictException.class, () -> handler.handle(request));
+        assertTrue(routeTable.onlineCalls.isEmpty());
 
         sessionManager.clear();
     }
@@ -127,9 +160,10 @@ class LoginHandlerTest {
         }
 
         @Override
-        public void sendToNode(ClusterMessage msg, String targetNodeId) {
+        public boolean sendToNode(ClusterMessage msg, String targetNodeId) {
             sent.add(msg);
             targets.add(targetNodeId);
+            return true;
         }
 
         @Override

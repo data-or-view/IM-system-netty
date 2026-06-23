@@ -35,7 +35,6 @@ export default function GroupInfoPage() {
   const navigate = useNavigate();
   const {
     state,
-    dispatch,
     fetchGroupMembers,
     fetchGroupInfo,
     fetchConversations,
@@ -83,20 +82,6 @@ export default function GroupInfoPage() {
   const members = groupId ? state.groupMembers[groupId] || [] : [];
   const currentMember = members.find((m) => m.userId === state.userId);
 
-  useEffect(() => {
-    for (const member of members) {
-      dispatch({
-        type: "SET_USER_PROFILE",
-        userId: member.userId,
-        info: {
-          userId: member.userId,
-          nickname: member.nickname,
-          faceUrl: member.faceUrl,
-        },
-      });
-    }
-  }, [dispatch, members]);
-
   // Determine current user's role
   useEffect(() => {
     if (!state.userId) return;
@@ -127,8 +112,8 @@ export default function GroupInfoPage() {
   const refreshGroupManagementState = async () => {
     if (!groupId) return;
     await Promise.all([
-      fetchGroupInfo(groupId),
-      fetchGroupMembers(groupId),
+      fetchGroupInfo(groupId, { force: true }),
+      fetchGroupMembers(groupId, { force: true }),
       fetchConversations(),
     ]);
   };
@@ -188,7 +173,7 @@ export default function GroupInfoPage() {
     setSavingNickname(true);
     try {
       await im.group.updateMyGroupNickname(groupId, nextNickname);
-      await fetchGroupMembers(groupId);
+      await fetchGroupMembers(groupId, { force: true });
       setNicknameEditOpen(false);
       toast("群昵称已更新");
     } catch (err) {

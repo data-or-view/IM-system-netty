@@ -2,6 +2,7 @@ package com.im.core.discovery;
 
 import com.im.api.NodeInformation;
 import com.im.api.INodeDiscovery;
+import com.im.api.IRouteTable;
 import com.im.common.util.IMExecutors;
 import com.im.core.redis.RedisConfiguration;
 import io.lettuce.core.cluster.api.async.RedisClusterAsyncCommands;
@@ -40,6 +41,7 @@ public class RedisNodeDiscovery implements INodeDiscovery {
     private static final long HEARTBEAT_INTERVAL_SEC = 10;
 
     private final RedisClusterAsyncCommands<String, String> async;
+    private final IRouteTable routeTable;
     private final List<NodeEventListener> listeners = new CopyOnWriteArrayList<>();
 
     private volatile NodeInformation self;
@@ -48,7 +50,12 @@ public class RedisNodeDiscovery implements INodeDiscovery {
     private ScheduledExecutorService scanExecutor;
 
     public RedisNodeDiscovery(RedisConfiguration redisConfig) {
+        this(redisConfig, null);
+    }
+
+    public RedisNodeDiscovery(RedisConfiguration redisConfig, IRouteTable routeTable) {
         this.async = redisConfig.async();
+        this.routeTable = routeTable;
         log.info("RedisNodeDiscovery initialized");
     }
 
@@ -103,6 +110,7 @@ public class RedisNodeDiscovery implements INodeDiscovery {
         try {
             async.del(KEY_NODE + leaving.getNodeId()).get(3, TimeUnit.SECONDS);
             removeFromAliveSet(leaving.getNodeId());
+            cleanupNodeRoutes(leaving.getNodeId());
             log.info("Node unregistered (redis): {}", leaving);
         } catch (Exception e) {
             log.warn("Redis unregister failed: {}", e.getMessage());
@@ -237,6 +245,7 @@ public class RedisNodeDiscovery implements INodeDiscovery {
             for (String nodeId : nodeIds) {
                 async.del(KEY_NODE + nodeId);
                 async.srem(KEY_ALIVE, nodeId);
+                cleanupNodeRoutes(nodeId);
             }
             // 通知监听器
             for (String nodeId : nodeIds) {
@@ -246,6 +255,20 @@ public class RedisNodeDiscovery implements INodeDiscovery {
             }
         } catch (Exception e) {
             log.warn("Redis cleanup failed: {}", e.getMessage());
+        }
+    }
+
+    private void cleanupNodeRoutes(String nodeId) {
+        if (routeTable == null) {
+            return;
+        }
+        try {
+            int removed = routeTable.cleanupNodeRoutes(nodeId);
+            if (removed > 0) {
+                log.info("Cleaned routes for removed node: nodeId={}, removed={}", nodeId, removed);
+            }
+        } catch (Exception e) {
+            log.warn("Route cleanup failed for removed node {}: {}", nodeId, e.getMessage());
         }
     }
 

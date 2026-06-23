@@ -15,6 +15,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 连接生命周期事件处理器，参考 RocketMQ 的 NettyConnectManageHandler。
@@ -39,6 +42,8 @@ public class ConnectionEventHandler extends ChannelInboundHandlerAdapter {
     private final IRouteTable routeTable;
     private final String localNodeId;
     private final ExecutorService eventExecutor;
+    private final ScheduledExecutorService routeRenewExecutor;
+    private final AtomicBoolean renewalRunning = new AtomicBoolean(false);
 
     public ConnectionEventHandler(ISessionManager sessionManager, PendingAcknowledgementManager pendingAcknowledgementManager) {
         this(sessionManager, pendingAcknowledgementManager, null, "local");
@@ -51,6 +56,8 @@ public class ConnectionEventHandler extends ChannelInboundHandlerAdapter {
         this.routeTable = routeTable;
         this.localNodeId = localNodeId;
         this.eventExecutor = IMExecutors.newVirtualThreadExecutor("im-event");
+        this.routeRenewExecutor = IMExecutors.newScheduledExecutor("im-route-renew", 1);
+        startRouteRenewal();
     }
 
     @Override
@@ -108,7 +115,40 @@ public class ConnectionEventHandler extends ChannelInboundHandlerAdapter {
         pendingAcknowledgementManager.failFastAll();
     }
 
+    private void startRouteRenewal() {
+        if (routeTable == null) {
+            return;
+        }
+        routeRenewExecutor.scheduleWithFixedDelay(this::safeRenewLocalRoutes,
+                30, 30, TimeUnit.SECONDS);
+    }
+
+    private void safeRenewLocalRoutes() {
+        if (!renewalRunning.compareAndSet(false, true)) {
+            return;
+        }
+        try {
+            renewLocalRoutes();
+        } catch (Exception e) {
+            log.warn("Local route renewal failed: node={}", localNodeId, e);
+        } finally {
+            renewalRunning.set(false);
+        }
+    }
+
+    private void renewLocalRoutes() {
+        for (IConnectionSession session : sessionManager.allSessions()) {
+            if (!session.isAuthenticated()
+                    || session.getUserId() == null
+                    || !session.getConnection().isActive()) {
+                continue;
+            }
+            routeTable.renewOnline(session.getUserId(), session.getPlatformId(), session.getSessionId());
+        }
+    }
+
     public void shutdown() {
         eventExecutor.shutdown();
+        routeRenewExecutor.shutdown();
     }
 }

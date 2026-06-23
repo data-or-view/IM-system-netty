@@ -183,23 +183,23 @@ public class DeliveryConsumer implements Lifecycle {
 
     /**
      * 推送消息到指定路由绑定。
-     * 本地节点按 session 精确投递；远端节点按 node 去重转发，避免同节点多个 binding 重复转发。
+     * 本地节点和远端节点都按 session 精确投递。
      */
     private void pushToBindings(Message msg, String toUserId, List<RouteBinding> bindings) {
-        Set<String> forwardedRemoteNodes = new java.util.HashSet<>();
         List<Future<?>> futures = new ArrayList<>();
         long now = System.currentTimeMillis();
         for (RouteBinding binding : bindings) {
             if (binding.isExpired(now)) {
                 log.debug("Skip expired route binding: userId={}, platform={}, session={}, node={}",
                         toUserId, binding.platformId(), binding.sessionId(), binding.nodeId());
+                routeTable.offline(toUserId, binding.nodeId(), binding.platformId(), binding.sessionId());
                 continue;
             }
             RouteNode route = binding.toRouteNode(localNodeId);
             if (route.isLocal()) {
                 futures.add(pusher.submit(() -> pushToLocalBinding(msg, toUserId, binding)));
-            } else if (forwardedRemoteNodes.add(route.getNodeId())) {
-                futures.add(pusher.submit(() -> forwardToRemoteNode(msg, toUserId, route.getNodeId())));
+            } else {
+                futures.add(pusher.submit(() -> forwardToRemoteNode(msg, toUserId, route.getNodeId(), binding)));
             }
         }
         waitForPushes(futures);
@@ -230,6 +230,7 @@ public class DeliveryConsumer implements Lifecycle {
         }
         log.warn("Local route found but no matching active session for user {}, platform={}, session={}, msg {}",
                 toUserId, binding.platformId(), binding.sessionId(), msg.getSequenceId());
+        routeTable.offline(toUserId, binding.nodeId(), binding.platformId(), binding.sessionId());
     }
 
     private boolean matches(RouteBinding binding, IConnectionSession session) {
@@ -237,15 +238,18 @@ public class DeliveryConsumer implements Lifecycle {
                 && binding.sessionId().equals(session.getSessionId());
     }
 
-    private void forwardToRemoteNode(Message msg, String toUserId, String nodeId) {
+    private void forwardToRemoteNode(Message msg, String toUserId, String nodeId, RouteBinding binding) {
         if (clusterMessageBus != null) {
-            ClusterMessage clusterMsg = ClusterMessage.fromMessage(localNodeId, msg);
-            clusterMessageBus.sendToNode(clusterMsg, nodeId);
-            log.info("Forwarded msg {} to remote node {} for user {}",
-                    msg.getSequenceId(), nodeId, toUserId);
+            ClusterMessage clusterMsg = ClusterMessage.fromMessage(localNodeId, msg, binding);
+            boolean sent = clusterMessageBus.sendToNode(clusterMsg, nodeId);
+            if (!sent) {
+                throw new IllegalStateException("remote cluster delivery was not accepted by node " + nodeId);
+            }
+            log.info("Forwarded msg {} to remote node {} for user {} session {}",
+                    msg.getSequenceId(), nodeId, toUserId, binding.sessionId());
         } else {
-            log.warn("Remote route {} but no ClusterMessageBus, msg {} dropped",
-                    nodeId, msg.getSequenceId());
+            throw new IllegalStateException("remote route " + nodeId
+                    + " but no ClusterMessageBus, msg " + msg.getSequenceId() + " dropped");
         }
     }
 

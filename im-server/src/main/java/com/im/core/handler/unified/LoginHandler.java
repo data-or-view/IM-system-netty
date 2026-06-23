@@ -13,6 +13,7 @@ import com.im.api.MultiLoginStrategy;
 import com.im.api.PlatformID;
 import com.im.api.RequestHandler;
 import com.im.api.RouteBinding;
+import com.im.common.exception.ConflictException;
 import com.im.common.validation.Preconditions;
 import com.im.core.serialization.jackson.ObjectMapperProvider;
 import com.im.core.usecase.LoginResult;
@@ -64,6 +65,8 @@ public class LoginHandler implements RequestHandler {
 
         int platformId = req.getInt("platformId", PlatformID.WEB);
         String password = req.getString("password", "");
+
+        rejectNewLoginIfNeeded(userId);
 
         // ① 签发 token + 拉取离线消息（不注册路由）
         LoginResult result = loginUseCase.execute(userId, password, platformId, 0);
@@ -130,6 +133,20 @@ public class LoginHandler implements RequestHandler {
             ClusterCommand command = ClusterCommand.kickSession(
                     userId, binding.platformId(), binding.sessionId(), loginStrategy.name());
             clusterMessageBus.sendToNode(ClusterMessage.fromCommand(localNodeId, command), binding.nodeId());
+        }
+    }
+
+    private void rejectNewLoginIfNeeded(String userId) {
+        if (routeTable == null || loginStrategy != MultiLoginStrategy.REJECT_NEW) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        for (RouteBinding binding : routeTable.lookupAllBindings(userId)) {
+            if (!binding.isExpired(now)) {
+                log.info("Reject new login for user {} due to existing route: node={}, platform={}, session={}",
+                        userId, binding.nodeId(), binding.platformId(), binding.sessionId());
+                throw new ConflictException("user already logged in");
+            }
         }
     }
 }

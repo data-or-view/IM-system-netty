@@ -17,7 +17,14 @@ import React, {
 import { im } from "@/sdk/im-sdk";
 import { ConversationType, MessageReceiveOption, createClientMsgId } from "im-sdk";
 import type { SystemMessageInboxItem, SystemMessageSummary, TokenPair, UserInfo as SDKUserInfo, FriendInfo as SDKFriendInfo, FriendApply as SDKFriendApply, GroupInfo as SDKGroupInfo, GroupMember as SDKGroupMember, GroupApply as SDKGroupApply, Conversation as SDKConversation, GroupJoinResponse } from "im-sdk";
-import { AUTH_REFRESH_TOKEN_KEY, AUTH_TOKEN_KEY, AUTH_USER_ID_KEY, SYNC_CURSORS_KEY } from "@/config/storage-keys";
+import {
+  AUTH_REFRESH_TOKEN_KEY,
+  AUTH_TOKEN_KEY,
+  AUTH_USER_ID_KEY,
+  clearStoredSyncCursors,
+  getStoredAuthUserId,
+  syncCursorsKey,
+} from "@/config/storage-keys";
 import { toOptimisticMessage, toViewMessage, type ViewMessage } from "@/lib/messages";
 import {
   applyDomainEvent,
@@ -70,12 +77,19 @@ interface State {
   groupMembers: Record<string, GroupMember[]>;
   groupInfoCache: Record<string, GroupInfo>;
   userProfileCache: Record<string, UserInfo>;
+  groupMembersCachedAt: Record<string, number>;
+  groupInfoCachedAt: Record<string, number>;
+  userProfileCachedAt: Record<string, number>;
 }
+
+const USER_PROFILE_TTL_MS = 5 * 60 * 1000;
+const GROUP_INFO_TTL_MS = 5 * 60 * 1000;
+const GROUP_MEMBERS_TTL_MS = 60 * 1000;
 
 const initialState: State = {
   token: localStorage.getItem(AUTH_TOKEN_KEY),
   refreshToken: localStorage.getItem(AUTH_REFRESH_TOKEN_KEY),
-  userId: localStorage.getItem(AUTH_USER_ID_KEY),
+  userId: getStoredAuthUserId(),
   connected: false,
   conversations: [],
   messages: {},
@@ -92,6 +106,9 @@ const initialState: State = {
   groupMembers: {},
   groupInfoCache: {},
   userProfileCache: {},
+  groupMembersCachedAt: {},
+  groupInfoCachedAt: {},
+  userProfileCachedAt: {},
 };
 
 // ========== Actions ==========
@@ -148,7 +165,11 @@ function reducer(state: State, action: Action): State {
     case "LOGOUT":
       return { ...initialState, token: null, refreshToken: null, userId: null, connected: false };
     case "SET_CONVERSATIONS": {
-      return setConversationsKeepingActive(state, action.list) as State;
+      return mergeProfileCaches(
+        setConversationsKeepingActive(state, action.list) as State,
+        profilesFromConversations(action.list),
+        groupsFromConversations(action.list),
+      );
     }
     case "APPEND_MESSAGE": {
       const existing = state.messages[action.conversationId] || [];
@@ -185,13 +206,13 @@ function reducer(state: State, action: Action): State {
       };
     }
     case "SET_FRIENDS":
-      return { ...state, friends: action.list };
+      return mergeProfileCaches({ ...state, friends: action.list }, profilesFromFriends(action.list), []);
     case "SET_MY_GROUPS":
-      return { ...state, myGroups: action.list };
+      return mergeProfileCaches({ ...state, myGroups: action.list }, [], action.list);
     case "SET_SEARCH_USERS":
-      return { ...state, searchUsers: action.list };
+      return mergeProfileCaches({ ...state, searchUsers: action.list }, action.list, []);
     case "SET_SEARCH_GROUPS":
-      return { ...state, searchGroups: action.list };
+      return mergeProfileCaches({ ...state, searchGroups: action.list }, [], action.list);
     case "SET_UNHANDLED_APPLY_COUNT":
       return { ...state, unhandledApplyCount: action.count };
     case "SET_UNHANDLED_GROUP_APPLY_COUNT":
@@ -321,11 +342,19 @@ function reducer(state: State, action: Action): State {
         ),
       };
     case "SET_GROUP_MEMBERS":
-      return { ...state, groupMembers: { ...state.groupMembers, [action.groupId]: action.members } };
+      return mergeProfileCaches({
+        ...state,
+        groupMembers: { ...state.groupMembers, [action.groupId]: action.members },
+        groupMembersCachedAt: { ...state.groupMembersCachedAt, [action.groupId]: Date.now() },
+      }, profilesFromGroupMembers(action.members), []);
     case "SET_GROUP_INFO":
-      return { ...state, groupInfoCache: { ...state.groupInfoCache, [action.groupId]: action.info } };
+      return mergeProfileCaches({
+        ...state,
+        groupInfoCache: { ...state.groupInfoCache, [action.groupId]: action.info },
+        groupInfoCachedAt: { ...state.groupInfoCachedAt, [action.groupId]: Date.now() },
+      }, [], [action.info]);
     case "SET_USER_PROFILE":
-      return { ...state, userProfileCache: { ...state.userProfileCache, [action.userId]: action.info } };
+      return mergeProfileCaches(state, [action.info], []);
     case "REPLACE_DOMAIN_STATE":
       return {
         ...state,
@@ -364,9 +393,9 @@ interface StoreContextType {
   fetchUnhandledApplyCount: () => Promise<void>;
   approveGroupApply: (groupId: string, userId: string, agreed: boolean) => Promise<void>;
   fetchUnhandledGroupApplyCount: () => Promise<void>;
-  fetchGroupMembers: (groupId: string) => Promise<void>;
-  fetchGroupInfo: (groupId: string) => Promise<void>;
-  fetchUserProfile: (userId: string) => Promise<void>;
+  fetchGroupMembers: (groupId: string, options?: { force?: boolean }) => Promise<void>;
+  fetchGroupInfo: (groupId: string, options?: { force?: boolean }) => Promise<void>;
+  fetchUserProfile: (userId: string, options?: { force?: boolean }) => Promise<void>;
   markConversationRead: (conversationId: string, seq?: number) => Promise<void>;
   refreshSystemMessages: () => Promise<void>;
   openSingleChat: (input: OpenSingleChatInput) => void;
@@ -394,21 +423,119 @@ function persistTokens(tokens: TokenPair) {
   if (tokens.refreshToken) localStorage.setItem(AUTH_REFRESH_TOKEN_KEY, tokens.refreshToken);
 }
 
-function clearStoredAuth() {
+function currentStoredUserId(stateUserId?: string | null): string | null {
+  return getStoredAuthUserId() || stateUserId || null;
+}
+
+function clearStoredAuth(userId?: string | null) {
+  clearStoredSyncCursors(userId ?? getStoredAuthUserId());
   localStorage.removeItem(AUTH_USER_ID_KEY);
   localStorage.removeItem(AUTH_TOKEN_KEY);
   localStorage.removeItem(AUTH_REFRESH_TOKEN_KEY);
   im.clearTokens();
 }
 
-function persistSyncCursors(messages: Record<string, Message[]>): void {
+function persistSyncCursors(userId: string | null | undefined, messages: Record<string, Message[]>): void {
+  if (!userId) return;
   const cursors = Object.entries(messages)
     .map(([conversationId, list]) => ({
       conversationId,
       lastSeq: list.reduce((max, msg) => Math.max(max, msg.seq || 0), 0),
     }))
     .filter((cursor) => cursor.lastSeq > 0);
-  sessionStorage.setItem(SYNC_CURSORS_KEY, JSON.stringify(cursors));
+  sessionStorage.setItem(syncCursorsKey(userId), JSON.stringify(cursors));
+}
+
+function cacheFresh(cachedAt: number | undefined, ttlMs: number): boolean {
+  return cachedAt !== undefined && Date.now() - cachedAt < ttlMs;
+}
+
+function mergeUserProfile(existing: UserInfo | undefined, next: UserInfo): UserInfo {
+  return {
+    ...existing,
+    ...next,
+    nickname: next.nickname || existing?.nickname,
+    faceUrl: next.faceUrl || existing?.faceUrl,
+  };
+}
+
+function mergeGroupInfo(existing: GroupInfo | undefined, next: GroupInfo): GroupInfo {
+  return {
+    ...existing,
+    ...next,
+    groupName: next.groupName || existing?.groupName || next.groupId,
+    faceUrl: next.faceUrl || existing?.faceUrl,
+  };
+}
+
+function mergeProfileCaches(state: State, users: UserInfo[], groups: GroupInfo[]): State {
+  const now = Date.now();
+  let userProfileCache = state.userProfileCache;
+  let userProfileCachedAt = state.userProfileCachedAt;
+  let groupInfoCache = state.groupInfoCache;
+  let groupInfoCachedAt = state.groupInfoCachedAt;
+
+  for (const user of users) {
+    if (!user.userId) continue;
+    if (userProfileCache === state.userProfileCache) userProfileCache = { ...state.userProfileCache };
+    if (userProfileCachedAt === state.userProfileCachedAt) userProfileCachedAt = { ...state.userProfileCachedAt };
+    userProfileCache[user.userId] = mergeUserProfile(userProfileCache[user.userId], user);
+    userProfileCachedAt[user.userId] = now;
+  }
+
+  for (const group of groups) {
+    if (!group.groupId) continue;
+    if (groupInfoCache === state.groupInfoCache) groupInfoCache = { ...state.groupInfoCache };
+    if (groupInfoCachedAt === state.groupInfoCachedAt) groupInfoCachedAt = { ...state.groupInfoCachedAt };
+    groupInfoCache[group.groupId] = mergeGroupInfo(groupInfoCache[group.groupId], group);
+    groupInfoCachedAt[group.groupId] = now;
+  }
+
+  if (
+    userProfileCache === state.userProfileCache &&
+    userProfileCachedAt === state.userProfileCachedAt &&
+    groupInfoCache === state.groupInfoCache &&
+    groupInfoCachedAt === state.groupInfoCachedAt
+  ) {
+    return state;
+  }
+  return { ...state, userProfileCache, userProfileCachedAt, groupInfoCache, groupInfoCachedAt };
+}
+
+function profilesFromFriends(friends: FriendInfo[]): UserInfo[] {
+  return friends.map((friend) => ({
+    userId: friend.friendUserId,
+    nickname: friend.remark || friend.nickname,
+    faceUrl: friend.faceUrl,
+  }));
+}
+
+function profilesFromGroupMembers(members: GroupMember[]): UserInfo[] {
+  return members.map((member) => ({
+    userId: member.userId,
+    nickname: member.nickname,
+    faceUrl: member.faceUrl,
+  }));
+}
+
+function profilesFromConversations(conversations: Conversation[]): UserInfo[] {
+  return conversations
+    .filter((conversation) => conversation.conversationType === ConversationType.SINGLE && conversation.userId)
+    .map((conversation) => ({
+      userId: conversation.userId || "",
+      nickname: conversation.showName || conversation.userId,
+      faceUrl: conversation.faceUrl,
+    }));
+}
+
+function groupsFromConversations(conversations: Conversation[]): GroupInfo[] {
+  return conversations
+    .filter((conversation) => conversation.conversationType === ConversationType.GROUP && (conversation.groupId || conversation.conversationId))
+    .map((conversation) => ({
+      groupId: conversation.groupId || conversation.conversationId.replace(/^group_/, ""),
+      groupName: conversation.groupName || conversation.showName || conversation.groupId || conversation.conversationId,
+      faceUrl: conversation.faceUrl,
+    }));
 }
 
 function groupInfoFromConversation(list: Conversation[]): GroupInfo[] {
@@ -597,9 +724,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     refreshTimerRef.current = window.setTimeout(flushRefreshTasks, 80);
   }, [flushRefreshTasks]);
 
-  const fetchUserProfile = useCallback(async (userId: string) => {
+  const fetchUserProfile = useCallback(async (userId: string, options?: { force?: boolean }) => {
     try {
-      const info = userId === (localStorage.getItem(AUTH_USER_ID_KEY) || state.userId)
+      const currentState = stateRef.current;
+      if (
+        !options?.force &&
+        currentState.userProfileCache[userId] &&
+        cacheFresh(currentState.userProfileCachedAt[userId], USER_PROFILE_TTL_MS)
+      ) {
+        return;
+      }
+      const info = userId === currentStoredUserId(state.userId)
         ? await im.user.me()
         : await im.user.info(userId);
       dispatch({ type: "SET_USER_PROFILE", userId, info: info as unknown as UserInfo });
@@ -632,7 +767,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const unsubMessageBatch = im.on("messageBatch", (sdkMsgs) => {
       const currentState = stateRef.current;
       const activeConversationId = currentState.activeConversationId;
-      const currentUserId = localStorage.getItem(AUTH_USER_ID_KEY) || currentState.userId;
+      const currentUserId = currentStoredUserId(currentState.userId);
       const result = applyDomainEvent(currentState, {
         type: "MESSAGE_RECEIVED",
         messages: sdkMsgs,
@@ -716,8 +851,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [markConversationRead, state.activeConversationId, state.messages]);
 
   useEffect(() => {
-    persistSyncCursors(state.messages);
-  }, [state.messages]);
+    persistSyncCursors(state.userId, state.messages);
+  }, [state.messages, state.userId]);
 
   useEffect(() => {
     if (state.token && state.userId && im.state === "disconnected") {
@@ -749,7 +884,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [login]);
 
   const logout = useCallback(() => {
-    clearStoredAuth();
+    clearStoredAuth(state.userId);
     im.disconnect();
     dispatch({ type: "LOGOUT" });
   }, []);
@@ -759,7 +894,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const clientMsgId = createClientMsgId();
     await im.waitConnected();
     const ack = await im.message.send({ toUserId, contentType: "text", content: messageContent, clientMsgId });
-    const currentUserId = localStorage.getItem(AUTH_USER_ID_KEY) || state.userId || "";
+    const currentUserId = currentStoredUserId(state.userId) || "";
     const msg = toOptimisticMessage(ack, currentUserId, "text", messageContent);
     if (msg.conversationId) {
       dispatch({ type: "APPEND_MESSAGE", conversationId: msg.conversationId, msg });
@@ -829,8 +964,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, [fetchMyGroups, fetchUnhandledGroupApplyCount]);
 
-  const fetchGroupMembers = useCallback(async (groupId: string) => {
+  const fetchGroupMembers = useCallback(async (groupId: string, options?: { force?: boolean }) => {
     try {
+      const currentState = stateRef.current;
+      if (
+        !options?.force &&
+        currentState.groupMembers[groupId] &&
+        cacheFresh(currentState.groupMembersCachedAt[groupId], GROUP_MEMBERS_TTL_MS)
+      ) {
+        return;
+      }
       const members = await im.group.members(groupId);
       dispatch({ type: "SET_GROUP_MEMBERS", groupId, members: members as unknown as GroupMember[] });
     } catch (err) {
@@ -838,8 +981,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const fetchGroupInfo = useCallback(async (groupId: string) => {
+  const fetchGroupInfo = useCallback(async (groupId: string, options?: { force?: boolean }) => {
     try {
+      const currentState = stateRef.current;
+      if (
+        !options?.force &&
+        currentState.groupInfoCache[groupId] &&
+        cacheFresh(currentState.groupInfoCachedAt[groupId], GROUP_INFO_TTL_MS)
+      ) {
+        return;
+      }
       const info = await im.group.info(groupId);
       dispatch({ type: "SET_GROUP_INFO", groupId, info: info as unknown as GroupInfo });
     } catch (err) {

@@ -25,6 +25,7 @@ import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Redis Pub/Sub 集群消息总线。
@@ -45,6 +46,7 @@ public class RedisClusterMessageBus implements IClusterMessageBus {
     private static final String BROADCAST_CHANNEL = "im:bus:broadcast";
     private static final String NODE_CHANNEL_PREFIX = "im:node:";
     private static final String NODE_CHANNEL_SUFFIX = ":msgs";
+    private static final long PUBLISH_TIMEOUT_SECONDS = 3;
 
     private static final ObjectMapper MAPPER = ObjectMapperProvider.get();
 
@@ -105,18 +107,26 @@ public class RedisClusterMessageBus implements IClusterMessageBus {
     // ── 发送 ──
 
     @Override
-    public void sendToNode(ClusterMessage msg, String targetNodeId) {
+    public boolean sendToNode(ClusterMessage msg, String targetNodeId) {
         if (nodeId.equals(targetNodeId)) {
             log.debug("Skipping sendToNode self: {}", targetNodeId);
-            return;
+            return true;
         }
         try {
             String json = serialize(msg);
             String channel = nodeChannel(targetNodeId);
-            pubSubAsync.publish(channel, json);
-            log.debug("Sent to node {}: topic={}, kind={}", targetNodeId, msg.getTopic(), msg.getKind());
+            Long receivers = pubSubAsync.publish(channel, json).get(PUBLISH_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            if (receivers == null || receivers <= 0) {
+                log.warn("No subscribers while sending to node {}: topic={}, kind={}",
+                        targetNodeId, msg.getTopic(), msg.getKind());
+                return false;
+            }
+            log.debug("Sent to node {}: topic={}, kind={}, receivers={}",
+                    targetNodeId, msg.getTopic(), msg.getKind(), receivers);
+            return true;
         } catch (Exception e) {
-            log.error("Failed to send to node {}: {}", targetNodeId, e.getMessage());
+            log.error("Failed to send to node {}: {}", targetNodeId, e.getMessage(), e);
+            throw new IllegalStateException("failed to send cluster message to node " + targetNodeId, e);
         }
     }
 
@@ -208,6 +218,10 @@ public class RedisClusterMessageBus implements IClusterMessageBus {
         } else {
             Message message = msg.getMessage();
             root.put("message", message.toJsonMap());
+            if (msg.hasTargetBinding()) {
+                root.put("targetPlatformId", msg.getTargetPlatformId());
+                root.put("targetSessionId", msg.getTargetSessionId());
+            }
         }
 
         return MAPPER.writeValueAsString(root);
@@ -232,7 +246,12 @@ public class RedisClusterMessageBus implements IClusterMessageBus {
 
         @SuppressWarnings("unchecked")
         Map<String, Object> msgMap = (Map<String, Object>) root.get("message");
-        return new ClusterMessage(kind, fromNodeId, Message.fromJsonMap(msgMap), ttl);
+        Integer targetPlatformId = root.containsKey("targetPlatformId")
+                ? ((Number) root.get("targetPlatformId")).intValue()
+                : null;
+        String targetSessionId = (String) root.get("targetSessionId");
+        return new ClusterMessage(kind, fromNodeId, Message.fromJsonMap(msgMap),
+                targetPlatformId, targetSessionId, ttl);
     }
 
     private static Map<String, Object> commandToMap(ClusterCommand command) {

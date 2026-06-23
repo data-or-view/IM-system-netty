@@ -30,8 +30,12 @@ public interface IClusterMessageBus extends Lifecycle {
     /**
      * 发送消息到指定节点。
      * 用于用户消息跨节点转发。
+     *
+     * @return true if the message was accepted by the transport; false if the
+     *         transport could determine that no remote node received it.
+     * @throws RuntimeException when the transport fails before accepting the send
      */
-    void sendToNode(ClusterMessage msg, String targetNodeId);
+    boolean sendToNode(ClusterMessage msg, String targetNodeId);
 
     /**
      * 广播消息到所有在线节点（不含自身）。

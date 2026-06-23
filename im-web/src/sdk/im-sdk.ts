@@ -13,7 +13,8 @@ import { SDK_CONNECT_TIMEOUT_MS, SDK_REQUEST_TIMEOUT_MS, DEV_HTTP_URL, DEV_WS_UR
 import {
   AUTH_REFRESH_TOKEN_KEY,
   AUTH_TOKEN_KEY,
-  SYNC_CURSORS_KEY,
+  getStoredAuthUserId,
+  syncCursorsKey,
 } from "@/config/storage-keys";
 
 export const im = createIM({
@@ -23,7 +24,7 @@ export const im = createIM({
   requestTimeout: SDK_REQUEST_TIMEOUT_MS,
   syncOnReconnect: true,
   syncConversations: () => {
-    const raw = sessionStorage.getItem(SYNC_CURSORS_KEY);
+    const raw = sessionStorage.getItem(syncCursorsKey(getStoredAuthUserId()));
     if (!raw) return [];
     try {
       const parsed = JSON.parse(raw) as unknown;

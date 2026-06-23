@@ -21,8 +21,11 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class DeliveryConsumerTest {
 
@@ -60,6 +63,26 @@ class DeliveryConsumerTest {
     }
 
     @Test
+    void removesStaleLocalRouteWhenMatchingSessionIsMissing() {
+        TestMessageQueue queue = new TestMessageQueue();
+        TestRouteTable routeTable = new TestRouteTable("node-a");
+        routeTable.bindings.put("u2", List.of(new RouteBinding(
+                "u2", "node-a", PlatformID.IOS, "missing-session", 0)));
+        DeliveryConsumer consumer = new DeliveryConsumer(
+                queue, new SessionManager(), routeTable, new NoopClusterMessageBus(), "node-a");
+
+        try {
+            consumer.start();
+            queue.handler(MessageQueueTopics.DELIVER).onMessage(
+                    Message.createSingle("u1", "u2", "c1", 101, "{\"text\":\"hi\"}", 1));
+
+            assertEquals(List.of("u2|node-a|1|missing-session"), routeTable.offlineCalls);
+        } finally {
+            consumer.stop();
+        }
+    }
+
+    @Test
     void skipsExpiredRemoteRouteBinding() throws Exception {
         TestMessageQueue queue = new TestMessageQueue();
         TestRouteTable routeTable = new TestRouteTable("node-a");
@@ -74,6 +97,53 @@ class DeliveryConsumerTest {
                     Message.createSingle("u1", "u2", "c1", 101, "{\"text\":\"hi\"}", 1));
 
             assertNull(bus.awaitSent(), "expired route binding must not be forwarded");
+        } finally {
+            consumer.stop();
+        }
+    }
+
+    @Test
+    void remoteForwardFailurePropagatesToReliableDeliveryChain() {
+        TestMessageQueue queue = new TestMessageQueue();
+        TestRouteTable routeTable = new TestRouteTable("node-a");
+        routeTable.bindings.put("u2", List.of(new RouteBinding(
+                "u2", "node-b", PlatformID.IOS, "s1", 0)));
+        DeliveryConsumer consumer = new DeliveryConsumer(
+                queue, new SessionManager(), routeTable, new FailingClusterMessageBus(), "node-a");
+
+        try {
+            consumer.start();
+            Message message = Message.createSingle("u1", "u2", "c1", 101, "{\"text\":\"hi\"}", 1);
+
+            assertThrows(IllegalStateException.class,
+                    () -> queue.handler(MessageQueueTopics.DELIVER).onMessage(message));
+        } finally {
+            consumer.stop();
+        }
+    }
+
+    @Test
+    void forwardsEachRemoteBindingWithTargetSessionMetadata() throws Exception {
+        TestMessageQueue queue = new TestMessageQueue();
+        TestRouteTable routeTable = new TestRouteTable("node-a");
+        RecordingClusterMessageBus bus = new RecordingClusterMessageBus();
+        routeTable.bindings.put("u2", List.of(
+                new RouteBinding("u2", "node-b", PlatformID.IOS, "ios-session", 0),
+                new RouteBinding("u2", "node-b", PlatformID.WINDOWS, "pc-session", 0)));
+        DeliveryConsumer consumer = new DeliveryConsumer(queue, new SessionManager(), routeTable, bus, "node-a");
+
+        try {
+            consumer.start();
+            queue.handler(MessageQueueTopics.DELIVER).onMessage(
+                    Message.createSingle("u1", "u2", "c1", 101, "{\"text\":\"hi\"}", 1));
+
+            assertEquals(2, bus.awaitSentCount(2), "same-node bindings must not be collapsed");
+            assertTrue(bus.sent.stream().anyMatch(message ->
+                    message.getTargetPlatformId() == PlatformID.IOS
+                            && "ios-session".equals(message.getTargetSessionId())));
+            assertTrue(bus.sent.stream().anyMatch(message ->
+                    message.getTargetPlatformId() == PlatformID.WINDOWS
+                            && "pc-session".equals(message.getTargetSessionId())));
         } finally {
             consumer.stop();
         }
@@ -126,6 +196,7 @@ class DeliveryConsumerTest {
     private static final class TestRouteTable implements IRouteTable {
         private final String localNodeId;
         private final Map<String, List<RouteBinding>> bindings = new ConcurrentHashMap<>();
+        private final CopyOnWriteArrayList<String> offlineCalls = new CopyOnWriteArrayList<>();
 
         private TestRouteTable(String localNodeId) {
             this.localNodeId = localNodeId;
@@ -137,6 +208,7 @@ class DeliveryConsumerTest {
 
         @Override
         public void offline(String userId, String nodeId, int platformId, String sessionId) {
+            offlineCalls.add(userId + "|" + nodeId + "|" + platformId + "|" + sessionId);
         }
 
         @Override
@@ -184,7 +256,8 @@ class DeliveryConsumerTest {
         }
 
         @Override
-        public void sendToNode(ClusterMessage message, String targetNodeId) {
+        public boolean sendToNode(ClusterMessage message, String targetNodeId) {
+            return true;
         }
 
         @Override
@@ -212,8 +285,9 @@ class DeliveryConsumerTest {
         }
 
         @Override
-        public void sendToNode(ClusterMessage message, String targetNodeId) {
+        public boolean sendToNode(ClusterMessage message, String targetNodeId) {
             sent.add(message);
+            return true;
         }
 
         @Override
@@ -236,5 +310,24 @@ class DeliveryConsumerTest {
             }
             return sent.isEmpty() ? null : sent.getFirst();
         }
+
+        int awaitSentCount(int expected) throws InterruptedException {
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+            while (sent.size() < expected && System.nanoTime() < deadline) {
+                Thread.sleep(10);
+            }
+            return sent.size();
+        }
+    }
+
+    private static final class FailingClusterMessageBus implements IClusterMessageBus {
+        @Override public void start() {}
+        @Override public void stop() {}
+        @Override public boolean sendToNode(ClusterMessage message, String targetNodeId) {
+            return false;
+        }
+        @Override public void broadcast(ClusterMessage msg) {}
+        @Override public void subscribe(String topic, com.im.api.ClusterMessageHandler handler) {}
+        @Override public void unsubscribe(String topic, com.im.api.ClusterMessageHandler handler) {}
     }
 }

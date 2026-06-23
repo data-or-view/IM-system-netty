@@ -12,33 +12,45 @@ public class ClusterMessage {
     private final String fromNodeId;
     private final Message message;
     private final ClusterCommand command;
+    private final Integer targetPlatformId;
+    private final String targetSessionId;
     private int ttl;
 
     public ClusterMessage(ClusterMessageKind kind, String fromNodeId, Message message) {
-        this(kind, fromNodeId, message, null, 3);
+        this(kind, fromNodeId, message, null, null, null, 3);
     }
 
     public ClusterMessage(ClusterMessageKind kind, String fromNodeId, Message message, int ttl) {
-        this(kind, fromNodeId, message, null, ttl);
+        this(kind, fromNodeId, message, null, null, null, ttl);
+    }
+
+    public ClusterMessage(ClusterMessageKind kind, String fromNodeId, Message message,
+                          Integer targetPlatformId, String targetSessionId, int ttl) {
+        this(kind, fromNodeId, message, null, targetPlatformId, targetSessionId, ttl);
     }
 
     public ClusterMessage(ClusterMessageKind kind, String fromNodeId, ClusterCommand command) {
-        this(kind, fromNodeId, null, command, 3);
+        this(kind, fromNodeId, null, command, null, null, 3);
     }
 
     public ClusterMessage(ClusterMessageKind kind, String fromNodeId, ClusterCommand command, int ttl) {
-        this(kind, fromNodeId, null, command, ttl);
+        this(kind, fromNodeId, null, command, null, null, ttl);
     }
 
-    private ClusterMessage(ClusterMessageKind kind, String fromNodeId, Message message, ClusterCommand command, int ttl) {
+    private ClusterMessage(ClusterMessageKind kind, String fromNodeId, Message message, ClusterCommand command,
+                           Integer targetPlatformId, String targetSessionId, int ttl) {
         this.kind = Objects.requireNonNull(kind, "kind");
         this.fromNodeId = Objects.requireNonNull(fromNodeId, "fromNodeId");
         if (kind == ClusterMessageKind.USER_MESSAGE) {
             this.message = Objects.requireNonNull(message, "message");
             this.command = null;
+            this.targetPlatformId = targetPlatformId;
+            this.targetSessionId = normalizeSessionId(targetSessionId);
         } else {
             this.message = message;
             this.command = Objects.requireNonNull(command, "command");
+            this.targetPlatformId = null;
+            this.targetSessionId = null;
         }
         this.ttl = ttl;
     }
@@ -48,6 +60,12 @@ public class ClusterMessage {
      */
     public static ClusterMessage fromMessage(String fromNodeId, Message message) {
         return new ClusterMessage(ClusterMessageKind.USER_MESSAGE, fromNodeId, message);
+    }
+
+    public static ClusterMessage fromMessage(String fromNodeId, Message message, RouteBinding targetBinding) {
+        Objects.requireNonNull(targetBinding, "targetBinding");
+        return new ClusterMessage(ClusterMessageKind.USER_MESSAGE, fromNodeId, message,
+                targetBinding.platformId(), targetBinding.sessionId(), 3);
     }
 
     public static ClusterMessage fromCommand(String fromNodeId, ClusterCommand command) {
@@ -68,6 +86,18 @@ public class ClusterMessage {
 
     public ClusterCommand getCommand() {
         return command;
+    }
+
+    public Integer getTargetPlatformId() {
+        return targetPlatformId;
+    }
+
+    public String getTargetSessionId() {
+        return targetSessionId;
+    }
+
+    public boolean hasTargetBinding() {
+        return targetPlatformId != null && targetSessionId != null;
     }
 
     public int getTtl() {
@@ -92,5 +122,9 @@ public class ClusterMessage {
     @Override
     public String toString() {
         return "ClusterMessage{" + kind + ", from=" + fromNodeId + ", ttl=" + ttl + "}";
+    }
+
+    private static String normalizeSessionId(String sessionId) {
+        return sessionId == null || sessionId.isBlank() ? null : sessionId;
     }
 }

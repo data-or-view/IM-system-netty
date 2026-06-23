@@ -11,6 +11,7 @@
     "scenario:smoke": "pnpm run build && node dist/scenarios/smoke.js",
     "scenario:group-chat": "pnpm run build && node dist/scenarios/group-chat.js",
     "scenario:group-chat-perf": "pnpm run build && node dist/scenarios/group-chat-perf.js",
+    "scenario:cluster-ha": "pnpm run build && node dist/scenarios/cluster-ha.js",
     "scenario:group-call": "pnpm run build && node dist/scenarios/group-call.js",
     "scenario:group-join-system": "pnpm run build && node dist/scenarios/group-join-system-message.js",
     "scenario:system-message": "pnpm run build && node dist/scenarios/system-message.js",

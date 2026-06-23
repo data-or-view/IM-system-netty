@@ -122,4 +122,16 @@ public interface IRouteTable {
     default void renewOnline(String userId, int platformId, String sessionId) {
         renewOnline(userId, platformId);
     }
+
+    /**
+     * 清理指定节点遗留的路由。
+     *
+     * <p>生产集群中节点异常下线时，节点本身无法逐个执行用户 offline。
+     * Redis/MySQL 实现应维护 nodeId 到路由字段的反向索引，并在节点过期或注销时删除该节点残留路由。</p>
+     *
+     * @return 删除的路由绑定数量
+     */
+    default int cleanupNodeRoutes(String nodeId) {
+        return 0;
+    }
 }

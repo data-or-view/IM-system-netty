@@ -24,7 +24,7 @@ import { ConfirmDialog, emptyConfirmDialog, type ConfirmDialogState } from "@/co
 export default function UserProfilePage() {
   const { userId } = useParams<{ userId: string }>();
   const navigate = useNavigate();
-  const { state, dispatch, applyFriend, fetchFriends, openSingleChat, removeFriend } = useStore();
+  const { state, applyFriend, fetchFriends, fetchUserProfile, openSingleChat, removeFriend } = useStore();
   const [profile, setProfile] = useState<UserInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [friendshipChecked, setFriendshipChecked] = useState(false);
@@ -38,17 +38,16 @@ export default function UserProfilePage() {
   useEffect(() => {
     if (!userId) return;
     let cancelled = false;
-    setLoading(true);
+    const cached = state.userProfileCache[userId];
+    setProfile(cached ?? null);
+    setLoading(!cached);
     setFriendshipChecked(userId === state.userId);
 
-    const loadProfile = userId === state.userId ? im.user.me() : im.user.info(userId);
     const loadFriendship = userId === state.userId ? Promise.resolve() : fetchFriends();
 
-    Promise.all([loadProfile, loadFriendship])
-      .then(([info]) => {
+    Promise.all([fetchUserProfile(userId), loadFriendship])
+      .then(() => {
         if (cancelled) return;
-        setProfile(info as unknown as UserInfo);
-        dispatch({ type: "SET_USER_PROFILE", userId, info: info as unknown as UserInfo });
         setFriendshipChecked(true);
       })
       .catch((err) => {
@@ -62,7 +61,16 @@ export default function UserProfilePage() {
     return () => {
       cancelled = true;
     };
-  }, [userId, state.userId, dispatch, fetchFriends]);
+  }, [fetchFriends, fetchUserProfile, state.userId, state.userProfileCache, userId]);
+
+  useEffect(() => {
+    if (!userId) return;
+    const cached = state.userProfileCache[userId];
+    if (cached) {
+      setProfile(cached);
+      setLoading(false);
+    }
+  }, [state.userProfileCache, userId]);
 
   useEffect(() => {
     if (!editOpen || !profile) return;
@@ -243,7 +251,7 @@ export default function UserProfilePage() {
         updated = await im.user.updateProfile({ nickname: nextNickname });
       }
       setProfile(updated);
-      dispatch({ type: "SET_USER_PROFILE", userId, info: updated as unknown as UserInfo });
+      await fetchUserProfile(userId, { force: true });
       setEditOpen(false);
       toast("资料已更新");
     } catch {

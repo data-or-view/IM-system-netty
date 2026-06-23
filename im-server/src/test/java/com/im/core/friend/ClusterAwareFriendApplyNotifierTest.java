@@ -109,9 +109,10 @@ class ClusterAwareFriendApplyNotifierTest {
 
         @Override public void start() {}
         @Override public void stop() {}
-        @Override public void sendToNode(ClusterMessage msg, String targetNodeId) {
+        @Override public boolean sendToNode(ClusterMessage msg, String targetNodeId) {
             sent.add(msg);
             targets.add(targetNodeId);
+            return true;
         }
         @Override public void broadcast(ClusterMessage msg) {}
         @Override public void subscribe(String topic, com.im.api.ClusterMessageHandler handler) {}
