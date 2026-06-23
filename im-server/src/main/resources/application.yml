@@ -56,7 +56,7 @@ im:
 
   # ── 业务消息队列 ──
   mq:
-    type: redis                  # redis / rocketmq
+    type: rocketmq             # redis / rocketmq
     failure-compensation:
       batch-size: 100            # 每轮最多重放失败表记录数
       max-attempts: 10           # 单条失败记录最大补偿次数
