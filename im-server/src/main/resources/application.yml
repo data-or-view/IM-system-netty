@@ -62,6 +62,7 @@ im:
       max-attempts: 10           # 单条失败记录最大补偿次数
       idle-interval-ms: 2000     # 没有到期记录时的扫描间隔
       base-delay-ms: 1000        # 失败后指数退避基础延迟
+      claim-lease-ms: 30000      # RETRYING 抢占租约；节点宕机后到期可被其他节点重新 claim
 
   # ── RocketMQ（im.mq.type=rocketmq 时使用） ──
   rocketmq:
@@ -70,7 +71,10 @@ im:
       group: "im-producer"
     consumer:
       group-prefix: "im-consumer"
-    topic-prefix: ""             # 可设为 "im."，则 persist -> im.persist
+      # 首次部署可用 LAST；恢复、迁移或重建 consumer group 前需按运维策略改为 FIRST/TIMESTAMP，避免跳过历史积压。
+      consume-from-where: "CONSUME_FROM_LAST_OFFSET"
+      consume-timestamp: ""      # consume-from-where=CONSUME_FROM_TIMESTAMP 时使用 yyyyMMddHHmmss
+    topic-prefix: ""             # 可设为 "im-prod-"，则 persist -> im-prod-persist；RocketMQ topic 不允许点号
     send:
       timeout-ms: 3000
     retry-times: 2

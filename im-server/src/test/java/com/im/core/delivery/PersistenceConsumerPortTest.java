@@ -68,7 +68,7 @@ class PersistenceConsumerPortTest {
         }
 
         @Override
-        public void publishAsync(String topic, Message msg) {
+        public void publish(String topic, Message msg) {
         }
 
         @Override

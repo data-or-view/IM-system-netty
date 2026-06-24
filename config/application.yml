@@ -60,11 +60,27 @@ im:
   webhook:
     url: ""                      # Webhook 回调 URL
 
+  # ── 业务消息队列 ──
+  mq:
+    type: rocketmq               # redis / rocketmq
+    failure-compensation:
+      batch-size: 100
+      max-attempts: 10
+      idle-interval-ms: 2000
+      base-delay-ms: 1000
+      claim-lease-ms: 30000
+
   # ── RocketMQ ──
   rocketmq:
-    name-server: ""              # RocketMQ NameServer 地址，例: 127.0.0.1:9876
+    name-server: ""              # 生产环境必须替换为可访问的 NameServer 地址，例: rmq-ns.prod:9876
     producer:
       group: "im-producer"       # Producer Group
+    consumer:
+      group-prefix: "im-consumer"
+      # 首次部署可用 LAST；恢复、迁移或重建 consumer group 前需按运维策略改为 FIRST/TIMESTAMP，避免跳过历史积压。
+      consume-from-where: "CONSUME_FROM_LAST_OFFSET"
+      consume-timestamp: ""      # consume-from-where=CONSUME_FROM_TIMESTAMP 时使用 yyyyMMddHHmmss
+    topic-prefix: ""             # 生产建议按环境隔离，如 im-prod-；RocketMQ topic 不允许点号
     send:
       timeout-ms: 3000           # 同步发送超时时间
     retry-times: 2               # 同步发送失败重试次数

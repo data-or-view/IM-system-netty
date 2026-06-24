@@ -221,7 +221,7 @@ public class SendMessageUseCase {
             return;
         }
         retryExecutor.execute(RetryStrategies.MQ_PUBLISH, () -> {
-            messageQueue.publishAsync(topic, msg);
+            messageQueue.publish(topic, msg);
             return null;
         });
     }

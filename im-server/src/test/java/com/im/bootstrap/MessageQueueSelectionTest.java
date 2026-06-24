@@ -3,7 +3,7 @@ package com.im.bootstrap;
 import com.im.api.IMessageQueue;
 import com.im.config.Config;
 import com.im.core.mq.RedisMessageQueue;
-import com.im.core.mq.RocketMqMessageQueue;
+import com.im.infrastructure.message.rocketmq.RocketMqMessageQueue;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;

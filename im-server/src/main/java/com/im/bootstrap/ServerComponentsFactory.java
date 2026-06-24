@@ -62,7 +62,6 @@ import com.im.core.group.GroupMemberIdsSnapshot;
 import com.im.core.group.GroupMemberListSnapshot;
 import com.im.core.handler.ConnectionEventHandler;
 import com.im.core.mq.RedisMessageQueue;
-import com.im.core.mq.RocketMqMessageQueue;
 import com.im.core.redis.RedisConfiguration;
 import com.im.core.redis.RedisRouteTable;
 import com.im.core.reliability.DbSendMessageFailureStore;
@@ -83,6 +82,7 @@ import com.im.core.user.CachedUserManager;
 import com.im.core.user.DbUserManager;
 import com.im.core.serialization.jackson.JacksonSerializer;
 import com.im.infrastructure.storage.file.MinioFileStorageService;
+import com.im.infrastructure.message.rocketmq.RocketMqMessageQueue;
 import com.wzg.idempotency.persistence.MyBatisPlusPersistenceStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -342,7 +342,8 @@ final class ServerComponentsFactory {
                 config.getInt("im.mq.failure-compensation.batch-size", 100),
                 config.getInt("im.mq.failure-compensation.max-attempts", 10),
                 config.getLong("im.mq.failure-compensation.idle-interval-ms", 2000),
-                config.getLong("im.mq.failure-compensation.base-delay-ms", 1000));
+                config.getLong("im.mq.failure-compensation.base-delay-ms", 1000),
+                config.getLong("im.mq.failure-compensation.claim-lease-ms", 30000));
 
         ClusterDeliveryHandler clusterDeliveryHandler = new ClusterDeliveryHandler(
                 runtime.sessionManager(), cluster.routeTable(), nodeId);

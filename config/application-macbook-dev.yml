@@ -40,10 +40,24 @@ im:
     bucket: "im-system"
 
   # ── RocketMQ ──
+  mq:
+    type: rocketmq
+    failure-compensation:
+      batch-size: 100
+      max-attempts: 10
+      idle-interval-ms: 2000
+      base-delay-ms: 1000
+      claim-lease-ms: 30000
+
   rocketmq:
-    name-server: "127.0.0.1:9876"
+    name-server: "127.0.0.1:9876" # 本地开发地址；生产环境必须替换
     producer:
       group: "im-producer-macbook-dev"
+    consumer:
+      group-prefix: "im-consumer-macbook-dev"
+      consume-from-where: "CONSUME_FROM_LAST_OFFSET"
+      consume-timestamp: ""
+    topic-prefix: "im-dev-"
     send:
       timeout-ms: 3000
     retry-times: 2

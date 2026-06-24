@@ -18,6 +18,10 @@ public final class DbSendMessageFailureStore implements SendMessageFailureStore 
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final int MAX_ERROR_LENGTH = 2000;
+    static final String STATUS_PENDING = "PENDING";
+    static final String STATUS_RETRYING = "RETRYING";
+    static final String STATUS_REPUBLISHED = "REPUBLISHED";
+    static final String STATUS_FAILED = "FAILED";
 
     @Override
     public void recordFailure(String topic, Message message, Throwable cause) {
@@ -39,40 +43,80 @@ public final class DbSendMessageFailureStore implements SendMessageFailureStore 
     }
 
     @Override
-    public List<MessageSendFailureRecord> findDueFailures(long nowMillis, int limit) {
+    public List<MessageSendFailureRecord> claimDueFailures(long nowMillis, int limit) {
+        return claimDueFailures(nowMillis, limit, 30_000L);
+    }
+
+    @Override
+    public List<MessageSendFailureRecord> claimDueFailures(long nowMillis, int limit, long leaseMillis) {
         try (SqlSession session = MyBatisPlusFactory.openSession()) {
             MessageSendFailureMapper mapper = session.getMapper(MessageSendFailureMapper.class);
-            List<MessageSendFailureEntity> entities = mapper.selectList(new QueryWrapper<MessageSendFailureEntity>()
-                    .eq("status", "PENDING")
-                    .le("next_retry_at", nowMillis)
-                    .orderByAsc("next_retry_at")
-                    .last("LIMIT " + Math.max(1, limit)));
-            return entities.stream()
-                    .map(e -> new MessageSendFailureRecord(
-                            e.getId(),
-                            e.getTopic(),
-                            e.getMessageId(),
-                            e.getPayloadJson(),
-                            e.getAttemptCount() == null ? 0 : e.getAttemptCount()))
+            QuerySpec querySpec = dueClaimQuery(nowMillis, limit);
+            List<MessageSendFailureRecord> claimed = mapper.selectList(querySpec.wrapper())
+                    .stream()
+                    .filter(entity -> claimOne(mapper, entity.getId(), nowMillis, nowMillis + Math.max(1, leaseMillis)))
+                    .map(DbSendMessageFailureStore::toRecord)
                     .toList();
+            session.commit();
+            return claimed;
         } catch (Exception e) {
-            throw new DatabasePersistenceException("failed to find due message send failures", e);
+            throw new DatabasePersistenceException("failed to claim due message send failures", e);
         }
     }
 
     @Override
-    public void markReplayed(long id) {
-        updateStatus(id, "SUCCEEDED", null, null, null);
+    public List<MessageSendFailureRecord> findDueFailures(long nowMillis, int limit) {
+        return claimDueFailures(nowMillis, limit);
+    }
+
+    @Override
+    public void markRepublished(long id) {
+        updateStatus(id, STATUS_REPUBLISHED, null, null, null);
     }
 
     @Override
     public void markRetryLater(long id, int attemptCount, long nextRetryAt, Throwable cause) {
-        updateStatus(id, "PENDING", attemptCount, nextRetryAt, cause);
+        updateStatus(id, STATUS_PENDING, attemptCount, nextRetryAt, cause);
     }
 
     @Override
     public void markFailed(long id, int attemptCount, Throwable cause) {
-        updateStatus(id, "FAILED", attemptCount, null, cause);
+        updateStatus(id, STATUS_FAILED, attemptCount, null, cause);
+    }
+
+    static boolean claimOne(MessageSendFailureMapper mapper, long id, long nowMillis, long leaseUntilMillis) {
+        MessageSendFailureEntity update = new MessageSendFailureEntity();
+        update.setStatus(STATUS_RETRYING);
+        update.setUpdatedAt(nowMillis);
+        update.setNextRetryAt(leaseUntilMillis);
+        return mapper.update(update, new UpdateWrapper<MessageSendFailureEntity>()
+                .eq("id", id)
+                .and(w -> w.eq("status", STATUS_PENDING)
+                        .or(n -> n.eq("status", STATUS_RETRYING).le("next_retry_at", nowMillis)))) == 1;
+    }
+
+    static QuerySpec dueClaimQueryForTest(long nowMillis, int limit) {
+        return dueClaimQuery(nowMillis, limit);
+    }
+
+    private static QuerySpec dueClaimQuery(long nowMillis, int limit) {
+        QueryWrapper<MessageSendFailureEntity> wrapper = new QueryWrapper<MessageSendFailureEntity>()
+                .and(w -> w.eq("status", STATUS_PENDING)
+                        .or(n -> n.eq("status", STATUS_RETRYING).le("next_retry_at", nowMillis)))
+                .orderByAsc("next_retry_at")
+                .last("LIMIT " + Math.max(1, limit));
+        return new QuerySpec(wrapper);
+    }
+
+    record QuerySpec(QueryWrapper<MessageSendFailureEntity> wrapper) {}
+
+    private static MessageSendFailureRecord toRecord(MessageSendFailureEntity e) {
+        return new MessageSendFailureRecord(
+                e.getId(),
+                e.getTopic(),
+                e.getMessageId(),
+                e.getPayloadJson(),
+                e.getAttemptCount() == null ? 0 : e.getAttemptCount());
     }
 
     private static MessageSendFailureEntity toEntity(String topic, Message message, Throwable cause) throws Exception {
@@ -86,7 +130,7 @@ public final class DbSendMessageFailureStore implements SendMessageFailureStore 
         entity.setToUserId(nullToEmpty(message.getToUserId()));
         entity.setGroupId(nullToEmpty(message.getGroupId()));
         entity.setPayloadJson(OBJECT_MAPPER.writeValueAsString(message.toJsonMap()));
-        entity.setStatus("PENDING");
+        entity.setStatus(STATUS_PENDING);
         entity.setAttemptCount(0);
         entity.setNextRetryAt(now + 1000);
         entity.setLastError(truncate(errorMessage(cause), MAX_ERROR_LENGTH));
@@ -100,7 +144,7 @@ public final class DbSendMessageFailureStore implements SendMessageFailureStore 
         long now = System.currentTimeMillis();
         MessageSendFailureEntity update = new MessageSendFailureEntity();
         update.setPayloadJson(OBJECT_MAPPER.writeValueAsString(message.toJsonMap()));
-        update.setStatus("PENDING");
+        update.setStatus(STATUS_PENDING);
         update.setNextRetryAt(now + 1000);
         update.setLastError(truncate(errorMessage(cause), MAX_ERROR_LENGTH));
         update.setUpdatedAt(now);

@@ -26,6 +26,7 @@ public final class MessageFailureCompensator implements Lifecycle {
     private final int maxAttempts;
     private final long idleIntervalMs;
     private final long baseDelayMs;
+    private final long claimLeaseMs;
     private volatile boolean running;
     private volatile Thread worker;
 
@@ -35,12 +36,23 @@ public final class MessageFailureCompensator implements Lifecycle {
                                      int maxAttempts,
                                      long idleIntervalMs,
                                      long baseDelayMs) {
+        this(messageQueue, failureStore, batchSize, maxAttempts, idleIntervalMs, baseDelayMs, 30_000L);
+    }
+
+    public MessageFailureCompensator(IMessageQueue messageQueue,
+                                     SendMessageFailureStore failureStore,
+                                     int batchSize,
+                                     int maxAttempts,
+                                     long idleIntervalMs,
+                                     long baseDelayMs,
+                                     long claimLeaseMs) {
         this.messageQueue = messageQueue;
         this.failureStore = failureStore;
         this.batchSize = Math.max(1, batchSize);
         this.maxAttempts = Math.max(1, maxAttempts);
         this.idleIntervalMs = Math.max(200, idleIntervalMs);
         this.baseDelayMs = Math.max(200, baseDelayMs);
+        this.claimLeaseMs = Math.max(1_000, claimLeaseMs);
     }
 
     @Override
@@ -79,7 +91,7 @@ public final class MessageFailureCompensator implements Lifecycle {
     int replayDueFailures() {
         int replayed = 0;
         long now = System.currentTimeMillis();
-        for (MessageSendFailureRecord record : failureStore.findDueFailures(now, batchSize)) {
+        for (MessageSendFailureRecord record : failureStore.claimDueFailures(now, batchSize, claimLeaseMs)) {
             replayOne(record);
             replayed++;
         }
@@ -91,13 +103,13 @@ public final class MessageFailureCompensator implements Lifecycle {
         try {
             message = deserialize(record.payloadJson());
             try (MessageObservability.Scope ignored = MessageObservability.bindDeadLetter(record.topic(), record.id(), message)) {
-                log.info("Replaying failed message: id={}, attempt={}, fields={}",
+                log.info("Republishing business-DLQ message: id={}, attempt={}, fields={}",
                         record.id(), record.attemptCount() + 1, MessageObservability.fields(record.topic(), message));
             }
-            messageQueue.publishAsync(record.topic(), message);
-            failureStore.markReplayed(record.id());
+            messageQueue.publish(record.topic(), message);
+            failureStore.markRepublished(record.id());
             try (MessageObservability.Scope ignored = MessageObservability.bindDeadLetter(record.topic(), record.id(), message)) {
-                log.info("Replayed failed message: id={}, fields={}",
+                log.info("Republished business-DLQ message: id={}, fields={}",
                         record.id(), MessageObservability.fields(record.topic(), message));
             }
         } catch (Exception e) {

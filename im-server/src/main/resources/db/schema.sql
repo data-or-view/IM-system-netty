@@ -332,7 +332,7 @@ CREATE TABLE IF NOT EXISTS im_message_send_failures (
     to_user_id          VARCHAR(64)  NOT NULL DEFAULT '' COMMENT '单聊接收者ID',
     group_id            VARCHAR(64)  NOT NULL DEFAULT '' COMMENT '群ID',
     payload_json        MEDIUMTEXT   NOT NULL COMMENT '消息载荷 JSON',
-    status              VARCHAR(32)  NOT NULL DEFAULT 'PENDING' COMMENT '状态: PENDING/RETRYING/SUCCEEDED/FAILED',
+    status              VARCHAR(32)  NOT NULL DEFAULT 'PENDING' COMMENT '状态: PENDING/RETRYING/REPUBLISHED/FAILED；REPUBLISHED 仅表示已重投 MQ，不代表业务消费成功',
     attempt_count       INT          NOT NULL DEFAULT 0 COMMENT '补偿重试次数',
     next_retry_at       BIGINT       NOT NULL DEFAULT 0 COMMENT '下一次补偿时间(毫秒)',
     last_error          TEXT         COMMENT '最后失败原因',

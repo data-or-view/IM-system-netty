@@ -28,9 +28,9 @@ public interface IMessageQueue extends Lifecycle {
     void stop();
 
     /**
-     * 生产消息到指定 topic。
+     * 生产消息到指定 topic，并在底层队列确认写入/发送结果后返回。
      */
-    void publishAsync(String topic, Message msg);
+    void publish(String topic, Message msg);
 
     /**
      * 订阅指定 topic。

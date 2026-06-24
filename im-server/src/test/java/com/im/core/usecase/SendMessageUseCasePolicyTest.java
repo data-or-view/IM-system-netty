@@ -97,7 +97,7 @@ class SendMessageUseCasePolicyTest {
 
         @Override public void start() {}
         @Override public void stop() {}
-        @Override public void publishAsync(String topic, Message msg) { published.add(new Published(topic, msg)); }
+        @Override public void publish(String topic, Message msg) { published.add(new Published(topic, msg)); }
         @Override public void subscribe(String topic, MessageHandler handler) {}
         @Override public void unsubscribe(String topic, MessageHandler handler) {}
         @Override public boolean hasSubscribers(String topic) { return false; }

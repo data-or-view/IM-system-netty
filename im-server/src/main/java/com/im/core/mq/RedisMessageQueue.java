@@ -37,7 +37,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *
  * <p>行为：</p>
  * <ul>
- *   <li>{@link #publishAsync} → XADD 到流</li>
+ *   <li>{@link #publish} → XADD 到流</li>
  *   <li>{@link #subscribe} → 启动虚拟线程做 XREADGROUP BLOCK</li>
  *   <li>{@link #unsubscribe} → 移除 handler，topic 无 handler 时停止消费者线程</li>
  * </ul>
@@ -109,7 +109,7 @@ public class RedisMessageQueue implements IMessageQueue {
     }
 
     @Override
-    public void publishAsync(String topic, Message msg) {
+    public void publish(String topic, Message msg) {
         if (!running.get()) {
             throw new RedisPersistenceException("redis message queue not running");
         }

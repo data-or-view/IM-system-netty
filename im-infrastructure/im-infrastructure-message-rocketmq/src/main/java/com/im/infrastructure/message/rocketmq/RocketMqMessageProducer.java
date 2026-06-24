@@ -17,10 +17,9 @@ import java.util.Map;
 /**
  * RocketMQ producer for the infrastructure message abstraction.
  *
- * <p>This class intentionally only implements the producer side because the current shared
- * abstraction has no consumer/ack contract yet. Wiring it into im-server should wait until
- * the queue consumer model is explicit, otherwise RocketMQ offsets and Redis stream semantics
- * would be hidden behind the same type name but behave differently.
+ * <p>This producer is retained for the infrastructure message abstraction. IM server message
+ * delivery uses {@link RocketMqMessageQueue}, the infrastructure implementation of
+ * {@code IMessageQueue}, so RocketMQ SDK details stay outside the server module.
  */
 public class RocketMqMessageProducer implements MessageProducer, Lifecycle {
 

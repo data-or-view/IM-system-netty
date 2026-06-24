@@ -152,14 +152,14 @@ public class CallStateManager {
                     ContentType.SIGNAL.getId(), contentStr, 0);
             callerMsg.setMessageId(IdGenerator.messageId());
             callerMsg.setTimestamp(now);
-            messageQueue.publishAsync(MessageQueueTopics.DELIVER, callerMsg);
+            messageQueue.publish(MessageQueueTopics.DELIVER, callerMsg);
 
             // 发给被叫
             Message calleeMsg = Message.createSingle(SYSTEM_USER_ID, session.calleeId(), null,
                     ContentType.SIGNAL.getId(), contentStr, 0);
             calleeMsg.setMessageId(IdGenerator.messageId());
             calleeMsg.setTimestamp(now);
-            messageQueue.publishAsync(MessageQueueTopics.DELIVER, calleeMsg);
+            messageQueue.publish(MessageQueueTopics.DELIVER, calleeMsg);
 
             log.info("Timeout messages sent: room={}, caller={}, callee={}", roomId, session.callerId(), session.calleeId());
         } catch (Exception e) {

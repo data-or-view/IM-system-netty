@@ -42,6 +42,10 @@
             <groupId>com.im</groupId>
             <artifactId>im-infrastructure-idempotency</artifactId>
         </dependency>
+        <dependency>
+            <groupId>com.im</groupId>
+            <artifactId>im-infrastructure-message-rocketmq</artifactId>
+        </dependency>
 
         <!-- Jackson -->
         <dependency>
@@ -68,11 +72,6 @@
             <groupId>io.lettuce</groupId>
             <artifactId>lettuce-core</artifactId>
         </dependency>
-        <dependency>
-            <groupId>org.apache.rocketmq</groupId>
-            <artifactId>rocketmq-client</artifactId>
-        </dependency>
-
         <!-- Database -->
         <dependency>
             <groupId>com.baomidou</groupId>
@@ -206,4 +205,25 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <profile>
+            <id>rocketmq-it</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <configuration>
+                            <includes>
+                                <include>**/*Test.java</include>
+                                <include>**/*IT.java</include>
+                            </includes>
+                            <argLine>-javaagent:${project.build.directory}/agent/opentelemetry-javaagent-${opentelemetry-javaagent.version}.jar -Dotel.service.name=im-system-test -Dotel.traces.exporter=console -Dotel.metrics.exporter=none -Dotel.logs.exporter=none</argLine>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

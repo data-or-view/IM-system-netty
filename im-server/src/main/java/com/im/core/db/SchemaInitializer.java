@@ -141,8 +141,9 @@ public final class SchemaInitializer {
 
     private static List<String> findMissingTables(Connection conn) throws Exception {
         DatabaseMetaData meta = conn.getMetaData();
+        String catalog = conn.getCatalog();
         List<String> missing = new ArrayList<>();
-        try (ResultSet rs = meta.getTables(null, null, "%", new String[]{"TABLE"})) {
+        try (ResultSet rs = meta.getTables(catalog, null, "%", new String[]{"TABLE"})) {
             java.util.Set<String> existing = new java.util.HashSet<>();
             while (rs.next()) {
                 existing.add(rs.getString("TABLE_NAME").toLowerCase(Locale.ROOT));
@@ -184,21 +185,21 @@ public final class SchemaInitializer {
 
     private static boolean tableExists(Connection conn, String table) throws Exception {
         DatabaseMetaData meta = conn.getMetaData();
-        try (ResultSet rs = meta.getTables(null, null, table, new String[]{"TABLE"})) {
+        try (ResultSet rs = meta.getTables(conn.getCatalog(), null, table, new String[]{"TABLE"})) {
             return rs.next();
         }
     }
 
     private static boolean columnExists(Connection conn, String table, String column) throws Exception {
         DatabaseMetaData meta = conn.getMetaData();
-        try (ResultSet rs = meta.getColumns(null, null, table, column)) {
+        try (ResultSet rs = meta.getColumns(conn.getCatalog(), null, table, column)) {
             return rs.next();
         }
     }
 
     private static String columnType(Connection conn, String table, String column) throws Exception {
         DatabaseMetaData meta = conn.getMetaData();
-        try (ResultSet rs = meta.getColumns(null, null, table, column)) {
+        try (ResultSet rs = meta.getColumns(conn.getCatalog(), null, table, column)) {
             if (rs.next()) {
                 return rs.getString("TYPE_NAME").toLowerCase(Locale.ROOT);
             }

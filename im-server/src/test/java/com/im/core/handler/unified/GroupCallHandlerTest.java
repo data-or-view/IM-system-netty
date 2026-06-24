@@ -198,7 +198,7 @@ class GroupCallHandlerTest {
         @Override public void stop() {}
 
         @Override
-        public void publishAsync(String topic, Message message) {
+        public void publish(String topic, Message message) {
             topics.add(topic);
             messages.add(message);
         }
