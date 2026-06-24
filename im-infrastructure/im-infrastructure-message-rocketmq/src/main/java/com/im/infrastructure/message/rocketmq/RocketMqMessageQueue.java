@@ -38,7 +38,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *
  * <p>Consumer business failures are passed back to RocketMQ only when handlers throw.
  * The current server consumers wrap business processing with a DB-backed business DLQ
- * before this class sees the result, so offset retry and business replay are intentionally
+ * before this class sees the result, so offset retry and business-DLQ republish are intentionally
  * separate concerns.</p>
  */
 public class RocketMqMessageQueue implements IMessageQueue {

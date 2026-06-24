@@ -22,7 +22,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * 使用 DB 1 避免影响默认数据库。
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
-class RedisCacheTest {
+class RedisCacheIT {
 
     private static final String KEY_PREFIX = "test:redis-cache:";
     private static final Duration DEFAULT_TTL = Duration.ofSeconds(60);

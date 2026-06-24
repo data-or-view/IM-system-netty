@@ -6,7 +6,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.im.api.IMessageQueue;
 import com.im.api.Message;
-import com.im.api.MessageSendFailureRecord;
+import com.im.api.BusinessMessageDlqRecord;
 import com.im.core.db.DatabaseConfiguration;
 import com.im.core.db.MyBatisPlusFactory;
 import com.im.core.db.SchemaInitializer;
@@ -43,7 +43,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-class DbSendMessageFailureStoreIT {
+class DbBusinessMessageDlqStoreIT {
 
     private static final ObjectMapper MAPPER = ObjectMapperProvider.get();
     private static final String TEST_DB = "im_system_rocketmq_it";
@@ -54,7 +54,7 @@ class DbSendMessageFailureStoreIT {
     private static final String MYSQL_PASSWORD = System.getenv().getOrDefault("IM_IT_MYSQL_PASSWORD", "123456");
     private static final String TEST_PREFIX = "it-" + Long.toString(System.currentTimeMillis(), 36) + "-";
 
-    private final DbSendMessageFailureStore store = new DbSendMessageFailureStore();
+    private final DbBusinessMessageDlqStore store = new DbBusinessMessageDlqStore();
 
     @BeforeAll
     static void initDatabase() throws Exception {
@@ -93,7 +93,7 @@ class DbSendMessageFailureStoreIT {
         assertEquals("deliver", entity.getTopic());
         assertEquals(message.getMessageId(), entity.getMessageId());
         assertEquals("single_it_record", entity.getConversationId());
-        assertEquals(DbSendMessageFailureStore.STATUS_PENDING, entity.getStatus());
+        assertEquals(DbBusinessMessageDlqStore.STATUS_PENDING, entity.getStatus());
         assertEquals(0, entity.getAttemptCount());
         assertTrue(entity.getNextRetryAt() > 0);
         assertTrue(entity.getLastError().contains("db write failed"));
@@ -110,19 +110,19 @@ class DbSendMessageFailureStoreIT {
 
         long now = System.currentTimeMillis();
         long leaseMillis = 20_000L;
-        List<MessageSendFailureRecord> claimed = store.claimDueFailures(now, 10, leaseMillis);
+        List<BusinessMessageDlqRecord> claimed = store.claimDueFailures(now, 10, leaseMillis);
 
-        assertEquals(List.of(message.getMessageId()), claimed.stream().map(MessageSendFailureRecord::messageId).toList());
+        assertEquals(List.of(message.getMessageId()), claimed.stream().map(BusinessMessageDlqRecord::messageId).toList());
         MessageSendFailureEntity retrying = selectByMessageId(message.getMessageId());
-        assertEquals(DbSendMessageFailureStore.STATUS_RETRYING, retrying.getStatus());
+        assertEquals(DbBusinessMessageDlqStore.STATUS_RETRYING, retrying.getStatus());
         assertEquals(now + leaseMillis, retrying.getNextRetryAt());
 
-        List<MessageSendFailureRecord> secondClaim = store.claimDueFailures(now + 1, 10, leaseMillis);
+        List<BusinessMessageDlqRecord> secondClaim = store.claimDueFailures(now + 1, 10, leaseMillis);
         assertFalse(secondClaim.stream().anyMatch(record -> Objects.equals(record.messageId(), message.getMessageId())));
 
-        forceStatusAndNextRetryAt(message.getMessageId(), DbSendMessageFailureStore.STATUS_RETRYING, now - 1);
-        List<MessageSendFailureRecord> reclaimed = store.claimDueFailures(now, 10, leaseMillis);
-        assertEquals(List.of(message.getMessageId()), reclaimed.stream().map(MessageSendFailureRecord::messageId).toList());
+        forceStatusAndNextRetryAt(message.getMessageId(), DbBusinessMessageDlqStore.STATUS_RETRYING, now - 1);
+        List<BusinessMessageDlqRecord> reclaimed = store.claimDueFailures(now, 10, leaseMillis);
+        assertEquals(List.of(message.getMessageId()), reclaimed.stream().map(BusinessMessageDlqRecord::messageId).toList());
     }
 
     @Test
@@ -130,14 +130,14 @@ class DbSendMessageFailureStoreIT {
         Message message = message(nextId("retry"), "single_it_retry");
         store.recordFailure("deliver", message, new IllegalStateException("first failure"));
         forceDue(message.getMessageId(), 1L);
-        MessageFailureCompensator compensator = new MessageFailureCompensator(
+        BusinessMessageDlqCompensator compensator = new BusinessMessageDlqCompensator(
                 new AlwaysFailingQueue(), store, 10, 3, 1000, 1000, 5000);
 
-        int replayed = compensator.replayDueFailures();
+        int republished = compensator.republishDueDlqMessages();
 
-        assertEquals(1, replayed);
+        assertEquals(1, republished);
         MessageSendFailureEntity entity = selectByMessageId(message.getMessageId());
-        assertEquals(DbSendMessageFailureStore.STATUS_PENDING, entity.getStatus());
+        assertEquals(DbBusinessMessageDlqStore.STATUS_PENDING, entity.getStatus());
         assertEquals(1, entity.getAttemptCount());
         assertTrue(entity.getNextRetryAt() > System.currentTimeMillis());
         assertTrue(entity.getLastError().contains("publish unavailable"));
@@ -163,16 +163,16 @@ class DbSendMessageFailureStoreIT {
 
         try {
             queue.start();
-            MessageFailureCompensator compensator = new MessageFailureCompensator(
+            BusinessMessageDlqCompensator compensator = new BusinessMessageDlqCompensator(
                     queue, store, 10, 3, 1000, 1000, 5000);
 
-            int replayed = compensator.replayDueFailures();
+            int republishedCount = compensator.republishDueDlqMessages();
 
-            assertEquals(1, replayed);
+            assertEquals(1, republishedCount);
             assertTrue(received.await(40, TimeUnit.SECONDS), "republished MySQL business-DLQ message was not consumed");
             assertEquals(message.getMessageId(), republished.getFirst().getMessageId());
             MessageSendFailureEntity entity = selectByMessageId(message.getMessageId());
-            assertEquals(DbSendMessageFailureStore.STATUS_REPUBLISHED, entity.getStatus());
+            assertEquals(DbBusinessMessageDlqStore.STATUS_REPUBLISHED, entity.getStatus());
             assertEquals(0, entity.getAttemptCount());
         } finally {
             queue.stop();
@@ -205,7 +205,7 @@ class DbSendMessageFailureStoreIT {
     }
 
     private static void forceDue(String messageId, long nextRetryAt) {
-        forceStatusAndNextRetryAt(messageId, DbSendMessageFailureStore.STATUS_PENDING, nextRetryAt);
+        forceStatusAndNextRetryAt(messageId, DbBusinessMessageDlqStore.STATUS_PENDING, nextRetryAt);
     }
 
     private static void forceStatusAndNextRetryAt(String messageId, String status, long nextRetryAt) {

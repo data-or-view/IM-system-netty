@@ -4,7 +4,7 @@ import com.im.api.*;
 import com.im.common.retry.RetryExecutor;
 import com.im.common.lifecycle.Lifecycle;
 import com.im.core.reliability.ReliableMessageHandler;
-import com.im.api.SendMessageFailureStore;
+import com.im.api.BusinessMessageDlqStore;
 import com.im.api.SendMessageIdempotency;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,7 +33,7 @@ public class PersistenceConsumer implements Lifecycle {
     private final IGroupManager groupManager;
     private final RetryExecutor retryExecutor;
     private final SendMessageIdempotency idempotency;
-    private final SendMessageFailureStore failureStore;
+    private final BusinessMessageDlqStore failureStore;
 
     private volatile IMessageQueue.MessageHandler handler;
 
@@ -72,7 +72,7 @@ public class PersistenceConsumer implements Lifecycle {
                                IGroupManager groupManager,
                                RetryExecutor retryExecutor,
                                SendMessageIdempotency idempotency,
-                               SendMessageFailureStore failureStore) {
+                               BusinessMessageDlqStore failureStore) {
         this.messageQueue = messageQueue;
         this.singleMessageStore = singleMessageStore;
         this.groupMessageStore = groupMessageStore;

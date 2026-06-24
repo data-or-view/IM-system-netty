@@ -73,7 +73,7 @@ final class DispatcherFactory {
                 chatSendPolicy,
                 dependencies.business().retryExecutor(),
                 dependencies.storage().sendMessageIdempotency(),
-                dependencies.storage().sendMessageFailureStore());
+                dependencies.storage().businessMessageDlqStore());
         SystemMessagePublishUseCase systemMessagePublishUseCase = new SystemMessagePublishUseCase(
                 dependencies.storage().systemMessageStore(),
                 dependencies.runtime().systemMessageNotifier());

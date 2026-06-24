@@ -10,7 +10,7 @@ public final class MessageObservability {
 
     private static final String TOPIC = "mq.topic";
     private static final String STREAM_ID = "mq.stream.id";
-    private static final String DEAD_LETTER_ID = "dead_letter.id";
+    private static final String BUSINESS_DLQ_ID = "business_dlq.id";
     private static final String MESSAGE_ID = "message_id";
     private static final String CONVERSATION_ID = "conversation_id";
     private static final String GROUP_ID = "group_id";
@@ -28,8 +28,8 @@ public final class MessageObservability {
         return bind(topic, streamId, null, message);
     }
 
-    public static Scope bindDeadLetter(String topic, long deadLetterId, Message message) {
-        return bind(topic, null, String.valueOf(deadLetterId), message);
+    public static Scope bindBusinessDlq(String topic, long businessDlqId, Message message) {
+        return bind(topic, null, String.valueOf(businessDlqId), message);
     }
 
     public static Map<String, Object> fields(String topic, Message message) {
@@ -51,11 +51,11 @@ public final class MessageObservability {
         return fields;
     }
 
-    private static Scope bind(String topic, String streamId, String deadLetterId, Message message) {
+    private static Scope bind(String topic, String streamId, String businessDlqId, Message message) {
         Map<String, String> previous = new LinkedHashMap<>();
         putMdc(previous, TOPIC, topic);
         putMdc(previous, STREAM_ID, streamId);
-        putMdc(previous, DEAD_LETTER_ID, deadLetterId);
+        putMdc(previous, BUSINESS_DLQ_ID, businessDlqId);
         if (message != null) {
             putMdc(previous, MESSAGE_ID, message.getMessageId());
             putMdc(previous, CONVERSATION_ID, message.getConversationId());

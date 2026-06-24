@@ -15,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class RocketMqConfigTemplateTest {
 
     @Test
-    void rootApplicationTemplateContainsFullRocketMqQueueConfig() throws Exception {
+    void rootApplicationTemplateDeclaresProductionRocketMqQueueConfigKeys() throws Exception {
         Map<String, Object> im = imConfig(Path.of("../config/application.yml"));
 
         assertEquals("rocketmq", nested(im, "mq", "type"));
@@ -23,7 +23,7 @@ class RocketMqConfigTemplateTest {
     }
 
     @Test
-    void macbookDevTemplateContainsFullRocketMqQueueConfig() throws Exception {
+    void macbookDevTemplateDeclaresProductionRocketMqQueueConfigKeys() throws Exception {
         Map<String, Object> im = imConfig(Path.of("../config/application-macbook-dev.yml"));
 
         assertEquals("rocketmq", nested(im, "mq", "type"));
@@ -31,7 +31,7 @@ class RocketMqConfigTemplateTest {
     }
 
     @Test
-    void serverResourceTemplateContainsFullRocketMqQueueConfig() throws Exception {
+    void serverResourceTemplateDeclaresProductionRocketMqQueueConfigKeys() throws Exception {
         Map<String, Object> im = imConfig(Path.of("src/main/resources/application.yml"));
 
         assertEquals("rocketmq", nested(im, "mq", "type"));
@@ -45,6 +45,7 @@ class RocketMqConfigTemplateTest {
         assertTrue(nested(im, "rocketmq", "topic-prefix") instanceof String);
         assertTrue(nested(im, "rocketmq", "send", "timeout-ms") instanceof Number);
         assertTrue(nested(im, "rocketmq", "retry-times") instanceof Number);
+        assertTrue(nested(im, "rocketmq", "consumer", "consume-from-where") instanceof String);
     }
 
     @SuppressWarnings("unchecked")

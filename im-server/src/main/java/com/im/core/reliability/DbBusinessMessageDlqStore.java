@@ -4,8 +4,8 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.im.api.Message;
-import com.im.api.MessageSendFailureRecord;
-import com.im.api.SendMessageFailureStore;
+import com.im.api.BusinessMessageDlqRecord;
+import com.im.api.BusinessMessageDlqStore;
 import com.im.common.exception.DatabasePersistenceException;
 import com.im.core.db.MyBatisPlusFactory;
 import com.im.core.db.entity.MessageSendFailureEntity;
@@ -14,7 +14,7 @@ import org.apache.ibatis.session.SqlSession;
 
 import java.util.List;
 
-public final class DbSendMessageFailureStore implements SendMessageFailureStore {
+public final class DbBusinessMessageDlqStore implements BusinessMessageDlqStore {
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final int MAX_ERROR_LENGTH = 2000;
@@ -43,19 +43,19 @@ public final class DbSendMessageFailureStore implements SendMessageFailureStore 
     }
 
     @Override
-    public List<MessageSendFailureRecord> claimDueFailures(long nowMillis, int limit) {
+    public List<BusinessMessageDlqRecord> claimDueFailures(long nowMillis, int limit) {
         return claimDueFailures(nowMillis, limit, 30_000L);
     }
 
     @Override
-    public List<MessageSendFailureRecord> claimDueFailures(long nowMillis, int limit, long leaseMillis) {
+    public List<BusinessMessageDlqRecord> claimDueFailures(long nowMillis, int limit, long leaseMillis) {
         try (SqlSession session = MyBatisPlusFactory.openSession()) {
             MessageSendFailureMapper mapper = session.getMapper(MessageSendFailureMapper.class);
             QuerySpec querySpec = dueClaimQuery(nowMillis, limit);
-            List<MessageSendFailureRecord> claimed = mapper.selectList(querySpec.wrapper())
+            List<BusinessMessageDlqRecord> claimed = mapper.selectList(querySpec.wrapper())
                     .stream()
                     .filter(entity -> claimOne(mapper, entity.getId(), nowMillis, nowMillis + Math.max(1, leaseMillis)))
-                    .map(DbSendMessageFailureStore::toRecord)
+                    .map(DbBusinessMessageDlqStore::toRecord)
                     .toList();
             session.commit();
             return claimed;
@@ -65,7 +65,7 @@ public final class DbSendMessageFailureStore implements SendMessageFailureStore 
     }
 
     @Override
-    public List<MessageSendFailureRecord> findDueFailures(long nowMillis, int limit) {
+    public List<BusinessMessageDlqRecord> findDueFailures(long nowMillis, int limit) {
         return claimDueFailures(nowMillis, limit);
     }
 
@@ -110,8 +110,8 @@ public final class DbSendMessageFailureStore implements SendMessageFailureStore 
 
     record QuerySpec(QueryWrapper<MessageSendFailureEntity> wrapper) {}
 
-    private static MessageSendFailureRecord toRecord(MessageSendFailureEntity e) {
-        return new MessageSendFailureRecord(
+    private static BusinessMessageDlqRecord toRecord(MessageSendFailureEntity e) {
+        return new BusinessMessageDlqRecord(
                 e.getId(),
                 e.getTopic(),
                 e.getMessageId(),

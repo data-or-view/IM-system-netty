@@ -5,7 +5,7 @@ import com.im.common.lifecycle.Lifecycle;
 import com.im.common.retry.RetryExecutor;
 import com.im.common.util.IMExecutors;
 import com.im.core.reliability.ReliableMessageHandler;
-import com.im.api.SendMessageFailureStore;
+import com.im.api.BusinessMessageDlqStore;
 import com.im.api.SendMessageIdempotency;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,7 +43,7 @@ public class DeliveryConsumer implements Lifecycle {
     private final IGroupManager groupManager;
     private final RetryExecutor retryExecutor;
     private final SendMessageIdempotency idempotency;
-    private final SendMessageFailureStore failureStore;
+    private final BusinessMessageDlqStore failureStore;
 
     /** 并行推送执行器（虚拟线程，每个路由一条） */
     private final ExecutorService pusher;
@@ -87,7 +87,7 @@ public class DeliveryConsumer implements Lifecycle {
             IGroupManager groupManager,
             RetryExecutor retryExecutor,
             SendMessageIdempotency idempotency,
-            SendMessageFailureStore failureStore) {
+            BusinessMessageDlqStore failureStore) {
         this.messageQueue = messageQueue;
         this.sessionManager = sessionManager;
         this.routeTable = routeTable;

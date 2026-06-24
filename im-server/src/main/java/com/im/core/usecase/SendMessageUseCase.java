@@ -17,7 +17,7 @@ import com.im.common.retry.RetryExecutor;
 import com.im.common.retry.RetryStrategies;
 import com.im.core.handler.ContentSerializer;
 import com.im.core.handler.WebhookService;
-import com.im.api.SendMessageFailureStore;
+import com.im.api.BusinessMessageDlqStore;
 import com.im.api.SendMessageIdempotency;
 import com.im.core.retry.FailsafeRetryExecutor;
 
@@ -37,7 +37,7 @@ public class SendMessageUseCase {
     private final IChatSendPolicy sendPolicy;
     private final RetryExecutor retryExecutor;
     private final SendMessageIdempotency sendMessageIdempotency;
-    private final SendMessageFailureStore failureStore;
+    private final BusinessMessageDlqStore failureStore;
 
     public SendMessageUseCase(IMessageQueue messageQueue,
                               ISequenceManager sequenceManager, IGroupManager groupManager,
@@ -50,7 +50,7 @@ public class SendMessageUseCase {
                               WebhookService webhookService,
                               IChatSendPolicy sendPolicy) {
         this(messageQueue, sequenceManager, webhookService, sendPolicy,
-                new FailsafeRetryExecutor(), SendMessageIdempotency.none(), SendMessageFailureStore.none());
+                new FailsafeRetryExecutor(), SendMessageIdempotency.none(), BusinessMessageDlqStore.none());
     }
 
     public SendMessageUseCase(IMessageQueue messageQueue,
@@ -59,7 +59,7 @@ public class SendMessageUseCase {
                               IChatSendPolicy sendPolicy,
                               RetryExecutor retryExecutor,
                               SendMessageIdempotency sendMessageIdempotency,
-                              SendMessageFailureStore failureStore) {
+                              BusinessMessageDlqStore failureStore) {
         this.messageQueue = messageQueue;
         this.sequenceManager = sequenceManager;
         this.webhookService = webhookService;
@@ -67,7 +67,7 @@ public class SendMessageUseCase {
         this.retryExecutor = retryExecutor != null ? retryExecutor : new FailsafeRetryExecutor();
         this.sendMessageIdempotency = sendMessageIdempotency != null
                 ? sendMessageIdempotency : SendMessageIdempotency.none();
-        this.failureStore = failureStore != null ? failureStore : SendMessageFailureStore.none();
+        this.failureStore = failureStore != null ? failureStore : BusinessMessageDlqStore.none();
     }
     // ── 新接口：统一 handler 使用 ──
 
@@ -211,7 +211,7 @@ public class SendMessageUseCase {
                 return false;
             } catch (RuntimeException failureRecordError) {
                 throw new InfrastructureException(ImErrorCode.MQ_UNAVAILABLE,
-                        "message deliver publish failed and dead-letter record failed", failureRecordError);
+                        "message deliver publish failed and business-DLQ record failed", failureRecordError);
             }
         }
     }

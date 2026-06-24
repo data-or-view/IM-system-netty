@@ -4,8 +4,8 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.im.api.IMessageQueue;
 import com.im.api.Message;
-import com.im.api.MessageSendFailureRecord;
-import com.im.api.SendMessageFailureStore;
+import com.im.api.BusinessMessageDlqRecord;
+import com.im.api.BusinessMessageDlqStore;
 import com.im.common.lifecycle.Lifecycle;
 import com.im.common.util.IMExecutors;
 import com.im.core.observability.MessageObservability;
@@ -15,13 +15,13 @@ import org.slf4j.LoggerFactory;
 
 import java.util.Map;
 
-public final class MessageFailureCompensator implements Lifecycle {
+public final class BusinessMessageDlqCompensator implements Lifecycle {
 
-    private static final Logger log = LoggerFactory.getLogger(MessageFailureCompensator.class);
+    private static final Logger log = LoggerFactory.getLogger(BusinessMessageDlqCompensator.class);
     private static final ObjectMapper MAPPER = ObjectMapperProvider.get();
 
     private final IMessageQueue messageQueue;
-    private final SendMessageFailureStore failureStore;
+    private final BusinessMessageDlqStore failureStore;
     private final int batchSize;
     private final int maxAttempts;
     private final long idleIntervalMs;
@@ -30,8 +30,8 @@ public final class MessageFailureCompensator implements Lifecycle {
     private volatile boolean running;
     private volatile Thread worker;
 
-    public MessageFailureCompensator(IMessageQueue messageQueue,
-                                     SendMessageFailureStore failureStore,
+    public BusinessMessageDlqCompensator(IMessageQueue messageQueue,
+                                     BusinessMessageDlqStore failureStore,
                                      int batchSize,
                                      int maxAttempts,
                                      long idleIntervalMs,
@@ -39,8 +39,8 @@ public final class MessageFailureCompensator implements Lifecycle {
         this(messageQueue, failureStore, batchSize, maxAttempts, idleIntervalMs, baseDelayMs, 30_000L);
     }
 
-    public MessageFailureCompensator(IMessageQueue messageQueue,
-                                     SendMessageFailureStore failureStore,
+    public BusinessMessageDlqCompensator(IMessageQueue messageQueue,
+                                     BusinessMessageDlqStore failureStore,
                                      int batchSize,
                                      int maxAttempts,
                                      long idleIntervalMs,
@@ -61,8 +61,8 @@ public final class MessageFailureCompensator implements Lifecycle {
             return;
         }
         running = true;
-        worker = IMExecutors.startVirtualThread("message-failure-compensator", this::runLoop);
-        log.info("MessageFailureCompensator started: batchSize={}, maxAttempts={}", batchSize, maxAttempts);
+        worker = IMExecutors.startVirtualThread("business-message-dlq-compensator", this::runLoop);
+        log.info("BusinessMessageDlqCompensator started: batchSize={}, maxAttempts={}", batchSize, maxAttempts);
     }
 
     @Override
@@ -71,44 +71,44 @@ public final class MessageFailureCompensator implements Lifecycle {
         if (worker != null) {
             worker.interrupt();
         }
-        log.info("MessageFailureCompensator stopped");
+        log.info("BusinessMessageDlqCompensator stopped");
     }
 
     private void runLoop() {
         while (running && !Thread.currentThread().isInterrupted()) {
             try {
-                int replayed = replayDueFailures();
-                if (replayed == 0) {
+                int republished = republishDueDlqMessages();
+                if (republished == 0) {
                     sleep();
                 }
             } catch (Exception e) {
-                log.error("Message failure compensation loop failed: {}", e.getMessage(), e);
+                log.error("Business message DLQ compensation loop failed: {}", e.getMessage(), e);
                 sleep();
             }
         }
     }
 
-    int replayDueFailures() {
-        int replayed = 0;
+    int republishDueDlqMessages() {
+        int republished = 0;
         long now = System.currentTimeMillis();
-        for (MessageSendFailureRecord record : failureStore.claimDueFailures(now, batchSize, claimLeaseMs)) {
-            replayOne(record);
-            replayed++;
+        for (BusinessMessageDlqRecord record : failureStore.claimDueFailures(now, batchSize, claimLeaseMs)) {
+            republishOne(record);
+            republished++;
         }
-        return replayed;
+        return republished;
     }
 
-    private void replayOne(MessageSendFailureRecord record) {
+    private void republishOne(BusinessMessageDlqRecord record) {
         Message message = null;
         try {
             message = deserialize(record.payloadJson());
-            try (MessageObservability.Scope ignored = MessageObservability.bindDeadLetter(record.topic(), record.id(), message)) {
+            try (MessageObservability.Scope ignored = MessageObservability.bindBusinessDlq(record.topic(), record.id(), message)) {
                 log.info("Republishing business-DLQ message: id={}, attempt={}, fields={}",
                         record.id(), record.attemptCount() + 1, MessageObservability.fields(record.topic(), message));
             }
             messageQueue.publish(record.topic(), message);
             failureStore.markRepublished(record.id());
-            try (MessageObservability.Scope ignored = MessageObservability.bindDeadLetter(record.topic(), record.id(), message)) {
+            try (MessageObservability.Scope ignored = MessageObservability.bindBusinessDlq(record.topic(), record.id(), message)) {
                 log.info("Republished business-DLQ message: id={}, fields={}",
                         record.id(), MessageObservability.fields(record.topic(), message));
             }
@@ -116,16 +116,16 @@ public final class MessageFailureCompensator implements Lifecycle {
             int nextAttempt = record.attemptCount() + 1;
             if (nextAttempt >= maxAttempts) {
                 failureStore.markFailed(record.id(), nextAttempt, e);
-                try (MessageObservability.Scope ignored = MessageObservability.bindDeadLetter(record.topic(), record.id(), message)) {
-                    log.error("Failed message replay exhausted: id={}, attempt={}, fields={}, causeType={}, causeMessage={}",
+                try (MessageObservability.Scope ignored = MessageObservability.bindBusinessDlq(record.topic(), record.id(), message)) {
+                    log.error("Business-DLQ republish exhausted: id={}, attempt={}, fields={}, causeType={}, causeMessage={}",
                             record.id(), nextAttempt, MessageObservability.fields(record.topic(), message),
                             e.getClass().getName(), e.getMessage(), e);
                 }
                 return;
             }
             failureStore.markRetryLater(record.id(), nextAttempt, nextRetryAt(nextAttempt), e);
-            try (MessageObservability.Scope ignored = MessageObservability.bindDeadLetter(record.topic(), record.id(), message)) {
-                log.warn("Failed message replay postponed: id={}, attempt={}, fields={}, causeType={}, causeMessage={}",
+            try (MessageObservability.Scope ignored = MessageObservability.bindBusinessDlq(record.topic(), record.id(), message)) {
+                log.warn("Business-DLQ republish postponed: id={}, attempt={}, fields={}, causeType={}, causeMessage={}",
                         record.id(), nextAttempt, MessageObservability.fields(record.topic(), message),
                         e.getClass().getName(), e.getMessage());
             }

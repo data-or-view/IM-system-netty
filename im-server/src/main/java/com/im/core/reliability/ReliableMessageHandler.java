@@ -2,7 +2,7 @@ package com.im.core.reliability;
 
 import com.im.api.IMessageQueue;
 import com.im.api.Message;
-import com.im.api.SendMessageFailureStore;
+import com.im.api.BusinessMessageDlqStore;
 import com.im.api.SendMessageIdempotency;
 import com.im.common.enums.ImErrorCode;
 import com.im.common.exception.InfrastructureException;
@@ -20,18 +20,18 @@ public final class ReliableMessageHandler implements IMessageQueue.MessageHandle
     private final IMessageQueue.MessageHandler delegate;
     private final RetryExecutor retryExecutor;
     private final SendMessageIdempotency idempotency;
-    private final SendMessageFailureStore failureStore;
+    private final BusinessMessageDlqStore failureStore;
 
     public ReliableMessageHandler(String topic,
                                   IMessageQueue.MessageHandler delegate,
                                   RetryExecutor retryExecutor,
                                   SendMessageIdempotency idempotency,
-                                  SendMessageFailureStore failureStore) {
+                                  BusinessMessageDlqStore failureStore) {
         this.topic = topic;
         this.delegate = delegate;
         this.retryExecutor = retryExecutor;
         this.idempotency = idempotency != null ? idempotency : SendMessageIdempotency.none();
-        this.failureStore = failureStore != null ? failureStore : SendMessageFailureStore.none();
+        this.failureStore = failureStore != null ? failureStore : BusinessMessageDlqStore.none();
     }
 
     @Override
@@ -48,21 +48,21 @@ public final class ReliableMessageHandler implements IMessageQueue.MessageHandle
                 return "OK";
             }, String.class);
         } catch (RuntimeException processingFailure) {
-            recordDeadLetter(msg, processingFailure);
+            recordBusinessDlq(msg, processingFailure);
         }
     }
 
-    private void recordDeadLetter(Message msg, RuntimeException processingFailure) {
+    private void recordBusinessDlq(Message msg, RuntimeException processingFailure) {
         try {
             failureStore.recordFailure(topic, msg, processingFailure);
-            log.error("Message consumed to dead-letter table: fields={}, causeType={}, causeMessage={}",
+            log.error("Message consumed to business-DLQ table: fields={}, causeType={}, causeMessage={}",
                     MessageObservability.fields(topic, msg),
                     processingFailure.getClass().getName(),
                     processingFailure.getMessage(),
                     processingFailure);
         } catch (RuntimeException recordFailure) {
             throw new InfrastructureException(ImErrorCode.INTERNAL_ERROR,
-                    "consumer failed and dead-letter record failed", recordFailure);
+                    "consumer failed and business-DLQ record failed", recordFailure);
         }
     }
 

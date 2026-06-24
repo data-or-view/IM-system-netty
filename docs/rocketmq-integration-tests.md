@@ -44,13 +44,13 @@ mvn -pl im-infrastructure/im-infrastructure-message-rocketmq -am -Procketmq-it -
 Business DLQ compensation through a real RocketMQ broker:
 
 ```bash
-mvn -pl im-server -am -Procketmq-it -Dtest=MessageFailureCompensatorIT -Dsurefire.failIfNoSpecifiedTests=false test
+mvn -pl im-server -am -Procketmq-it -Dtest=BusinessMessageDlqCompensatorIT -Dsurefire.failIfNoSpecifiedTests=false test
 ```
 
 Business DLQ compensation through real MySQL and RocketMQ:
 
 ```bash
-mvn -pl im-server -am -Procketmq-it -Dtest=DbSendMessageFailureStoreIT -Dsurefire.failIfNoSpecifiedTests=false test
+mvn -pl im-server -am -Procketmq-it -Dtest=DbBusinessMessageDlqStoreIT -Dsurefire.failIfNoSpecifiedTests=false test
 ```
 
 ## Isolation

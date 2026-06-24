@@ -3,8 +3,8 @@ package com.im.core.reliability;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.im.api.IMessageQueue;
 import com.im.api.Message;
-import com.im.api.MessageSendFailureRecord;
-import com.im.api.SendMessageFailureStore;
+import com.im.api.BusinessMessageDlqRecord;
+import com.im.api.BusinessMessageDlqStore;
 import com.im.core.serialization.jackson.ObjectMapperProvider;
 import com.im.infrastructure.message.rocketmq.RocketMqMessageQueue;
 import com.im.infrastructure.message.rocketmq.RocketMqMessageQueueProperties;
@@ -24,7 +24,7 @@ import java.util.concurrent.TimeUnit;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-class MessageFailureCompensatorIT {
+class BusinessMessageDlqCompensatorIT {
 
     private static final ObjectMapper MAPPER = ObjectMapperProvider.get();
 
@@ -44,12 +44,12 @@ class MessageFailureCompensatorIT {
 
         try {
             queue.start();
-            MessageFailureCompensator compensator = new MessageFailureCompensator(
+            BusinessMessageDlqCompensator compensator = new BusinessMessageDlqCompensator(
                     queue, failureStore, 10, 3, 1000, 1000, 5000);
 
-            int replayed = compensator.replayDueFailures();
+            int republishedCount = compensator.republishDueDlqMessages();
 
-            assertEquals(1, replayed);
+            assertEquals(1, republishedCount);
             assertTrue(received.await(30, TimeUnit.SECONDS), "republished business-DLQ message was not consumed");
             assertEquals("msg-dlq-it", republished.getFirst().getMessageId());
             assertEquals(List.of("PENDING", "RETRYING", "REPUBLISHED"), failureStore.transitions);
@@ -93,7 +93,7 @@ class MessageFailureCompensatorIT {
         }
     }
 
-    private static final class InMemoryBusinessDlqStore implements SendMessageFailureStore {
+    private static final class InMemoryBusinessDlqStore implements BusinessMessageDlqStore {
         private final String payloadJson;
         private final List<String> transitions = new CopyOnWriteArrayList<>(List.of("PENDING"));
         private boolean claimed;
@@ -108,13 +108,13 @@ class MessageFailureCompensatorIT {
         }
 
         @Override
-        public List<MessageSendFailureRecord> claimDueFailures(long nowMillis, int limit, long leaseMillis) {
+        public List<BusinessMessageDlqRecord> claimDueFailures(long nowMillis, int limit, long leaseMillis) {
             if (claimed) {
                 return List.of();
             }
             claimed = true;
             transitions.add("RETRYING");
-            return List.of(new MessageSendFailureRecord(1L, "deliver", "msg-dlq-it", payloadJson, 0));
+            return List.of(new BusinessMessageDlqRecord(1L, "deliver", "msg-dlq-it", payloadJson, 0));
         }
 
         @Override

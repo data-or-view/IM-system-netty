@@ -64,9 +64,9 @@ import com.im.core.handler.ConnectionEventHandler;
 import com.im.core.mq.RedisMessageQueue;
 import com.im.core.redis.RedisConfiguration;
 import com.im.core.redis.RedisRouteTable;
-import com.im.core.reliability.DbSendMessageFailureStore;
-import com.im.core.reliability.MessageFailureCompensator;
-import com.im.api.SendMessageFailureStore;
+import com.im.core.reliability.DbBusinessMessageDlqStore;
+import com.im.core.reliability.BusinessMessageDlqCompensator;
+import com.im.api.BusinessMessageDlqStore;
 import com.im.api.SendMessageIdempotency;
 import com.im.core.reliability.WzgSendMessageIdempotency;
 import com.im.core.retry.FailsafeRetryExecutor;
@@ -152,7 +152,7 @@ final class ServerComponentsFactory {
                 storage.messageQueue(),
                 consumers.persistenceConsumer(),
                 consumers.deliveryConsumer(),
-                consumers.messageFailureCompensator(),
+                consumers.businessMessageDlqCompensator(),
                 transportServer,
                 call.callStateManager(),
                 connectionEventHandler::shutdown,
@@ -265,7 +265,7 @@ final class ServerComponentsFactory {
         SendMessageIdempotency sendMessageIdempotency = new WzgSendMessageIdempotency(
                 new MyBatisPlusPersistenceStore(MyBatisPlusFactory.getSqlSessionFactory()),
                 Duration.ofSeconds(config.getLong("im.idempotency.send-expire-seconds", 24 * 60 * 60L)));
-        SendMessageFailureStore sendMessageFailureStore = new DbSendMessageFailureStore();
+        BusinessMessageDlqStore businessMessageDlqStore = new DbBusinessMessageDlqStore();
         IFileStorageService fileStorage = new MinioFileStorageService(
                 config.getString("im.minio.endpoint").orElse("http://127.0.0.1:9000"),
                 config.getString("im.minio.access-key").orElse("minioadmin"),
@@ -279,7 +279,7 @@ final class ServerComponentsFactory {
                 config.getInt("im.minio.presign-expire-seconds", 900));
         return new StorageDependencies(
                 sequenceManager, messageStore, singleMessageStore, groupMessageStore, messageQueue,
-                sendMessageIdempotency, sendMessageFailureStore,
+                sendMessageIdempotency, businessMessageDlqStore,
                 fileStorage, directFileTransferUseCase, new DbSystemMessageStore());
     }
 
@@ -331,14 +331,14 @@ final class ServerComponentsFactory {
         PersistenceConsumer persistenceConsumer = new PersistenceConsumer(
                 storage.messageQueue(), storage.singleMessageStore(), storage.groupMessageStore(),
                 business.conversationManager(), business.groupManager(),
-                business.retryExecutor(), storage.sendMessageIdempotency(), storage.sendMessageFailureStore());
+                business.retryExecutor(), storage.sendMessageIdempotency(), storage.businessMessageDlqStore());
         DeliveryConsumer deliveryConsumer = new DeliveryConsumer(
                 storage.messageQueue(), runtime.sessionManager(), cluster.routeTable(),
                 cluster.clusterMessageBus(), nodeId, business.groupManager(),
-                business.retryExecutor(), storage.sendMessageIdempotency(), storage.sendMessageFailureStore());
-        MessageFailureCompensator messageFailureCompensator = new MessageFailureCompensator(
+                business.retryExecutor(), storage.sendMessageIdempotency(), storage.businessMessageDlqStore());
+        BusinessMessageDlqCompensator businessMessageDlqCompensator = new BusinessMessageDlqCompensator(
                 storage.messageQueue(),
-                storage.sendMessageFailureStore(),
+                storage.businessMessageDlqStore(),
                 config.getInt("im.mq.failure-compensation.batch-size", 100),
                 config.getInt("im.mq.failure-compensation.max-attempts", 10),
                 config.getLong("im.mq.failure-compensation.idle-interval-ms", 2000),
@@ -353,7 +353,7 @@ final class ServerComponentsFactory {
         cluster.clusterMessageBus().subscribe("CLUSTER_COMMAND", runtime.friendApplyNotifier()::handleClusterPush);
         cluster.clusterMessageBus().subscribe("CLUSTER_COMMAND", runtime.groupApplyNotifier()::handleClusterPush);
         cluster.clusterMessageBus().subscribe("CLUSTER_COMMAND", runtime.systemMessageNotifier()::handleClusterPush);
-        return new ConsumerDependencies(persistenceConsumer, deliveryConsumer, messageFailureCompensator);
+        return new ConsumerDependencies(persistenceConsumer, deliveryConsumer, businessMessageDlqCompensator);
     }
 
     private static void applyMultiLoginStrategy(Config config, SessionManager sessionManager) {
@@ -556,7 +556,7 @@ final class ServerComponentsFactory {
                                IGroupMessageStore groupMessageStore,
                                IMessageQueue messageQueue,
                                SendMessageIdempotency sendMessageIdempotency,
-                               SendMessageFailureStore sendMessageFailureStore,
+                               BusinessMessageDlqStore businessMessageDlqStore,
                                IFileStorageService fileStorage,
                                DirectFileTransferUseCase directFileTransferUseCase,
                                ISystemMessageStore systemMessageStore) {
@@ -569,6 +569,6 @@ final class ServerComponentsFactory {
 
     private record ConsumerDependencies(PersistenceConsumer persistenceConsumer,
                                         DeliveryConsumer deliveryConsumer,
-                                        MessageFailureCompensator messageFailureCompensator) {
+                                        BusinessMessageDlqCompensator businessMessageDlqCompensator) {
     }
 }

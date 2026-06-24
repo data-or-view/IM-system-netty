@@ -1,6 +1,6 @@
 package com.im.api;
 
-public record MessageSendFailureRecord(long id,
+public record BusinessMessageDlqRecord(long id,
                                        String topic,
                                        String messageId,
                                        String payloadJson,

@@ -2,7 +2,7 @@ package com.im.core.reliability;
 
 import com.im.api.IMessageQueue;
 import com.im.api.Message;
-import com.im.api.SendMessageFailureStore;
+import com.im.api.BusinessMessageDlqStore;
 import com.im.api.SendMessageIdempotency;
 import com.im.common.retry.RetryConfig;
 import com.im.common.retry.RetryExecutor;
@@ -17,7 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 class ReliableMessageHandlerTest {
 
     @Test
-    void recordsDeadLetterWhenConsumerProcessingFails() {
+    void recordsBusinessDlqWhenConsumerProcessingFails() {
         RecordingFailureStore failureStore = new RecordingFailureStore();
         ReliableMessageHandler handler = new ReliableMessageHandler(
                 "persist",
@@ -34,7 +34,7 @@ class ReliableMessageHandlerTest {
     }
 
     @Test
-    void throwsWhenDeadLetterRecordAlsoFails() {
+    void throwsWhenBusinessDlqRecordAlsoFails() {
         ReliableMessageHandler handler = new ReliableMessageHandler(
                 "deliver",
                 msg -> { throw new IllegalStateException("push failed"); },
@@ -63,7 +63,7 @@ class ReliableMessageHandlerTest {
         }
     }
 
-    private static final class RecordingFailureStore implements SendMessageFailureStore {
+    private static final class RecordingFailureStore implements BusinessMessageDlqStore {
         private final AtomicInteger recorded = new AtomicInteger();
         private String topic;
         private Message message;
