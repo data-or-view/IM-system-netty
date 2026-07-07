@@ -11,7 +11,6 @@
 | `IRouteTable` | 用户路由表 | register, unregister, lookup, lookupAll |
 | `INodeDiscovery` | 节点发现 | register, unregister, getAliveNodes |
 | `IClusterMessageBus` | 集群消息总线 | sendToNode, broadcast |
-| `IClusterStateStore` | 分布式状态存储 | get, set, delete, watch |
 | `IMessageQueue` | 消息队列抽象 | publish, subscribe, unsubscribe |
 | `ISequenceManager` | 消息序号生成 | nextSeq, getMaxSeq |
 | `IMessageStore` | 消息持久化存储 | save, pullBySeq, pullOffline |
@@ -28,7 +27,6 @@
 | `ICallManager` | RTC 信令 | createRoom, issueToken |
 | `IWebhookManager` | Webhook 回调 | callBefore, callAfter |
 | `IMessageRevoke` | 消息撤回 | revoke |
-| `IOfflinePush` | 离线推送 | push |
 | `IFileStorage` | 文件存储 | upload, delete, getFileUrl |
 
 ### DTO

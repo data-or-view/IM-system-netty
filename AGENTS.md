@@ -24,7 +24,7 @@
 | 领域 | 要求 |
 |------|------|
 | 会话管理 | Channel 引用只能是 JVM 本地；跨节点可见状态必须写 Redis 或 MySQL。 |
-| Conversation | 会话列表、未读数、置顶、免打扰必须写 Redis cache + MySQL，禁止 LocalConversationManager 进入生产路径。 |
+| Conversation | 会话列表、未读数、置顶、免打扰必须写 Redis cache + MySQL，禁止任何本地内存会话实现进入生产路径。 |
 | 路由表 | 用户在线路由必须走 `RedisRouteTable`，禁止 LocalRouteTable 进入生产路径。 |
 | 在线状态 | 平台在线状态写 Redis ZSet，心跳续期，不能只看本地连接。 |
 | 消息序号 | 用 `RedisSequenceManager` 的 Redis INCR 保证多节点递增。 |

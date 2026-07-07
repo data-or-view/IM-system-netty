@@ -29,7 +29,6 @@ class ApiBoundaryTest {
             "io.netty.",
             "io.lettuce.",
             "org.apache.rocketmq.",
-            "org.apache.kafka.",
             "java.sql.",
             "com.baomidou.",
             "com.zaxxer.",

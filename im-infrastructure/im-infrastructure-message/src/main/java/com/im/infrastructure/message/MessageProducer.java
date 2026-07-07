@@ -6,7 +6,7 @@ import java.util.List;
 /**
  * 消息生产者。
  *
- * <p>业务侧只依赖这个接口发送消息，不感知底层是内存、RocketMQ 还是 Kafka。
+ * <p>业务侧只依赖这个接口发送消息，不感知底层消息实现。
  * 对应 OpenIM 的 {@code mq.Producer} 和 cinema 的 {@code MessageBus} 的生产者侧。
  *
  * <p>批量发送是首选方式（cinema 的设计理念：批量接口更容易做吞吐优化，

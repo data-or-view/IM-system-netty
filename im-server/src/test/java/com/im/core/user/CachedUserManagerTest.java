@@ -2,8 +2,8 @@ package com.im.core.user;
 
 import com.im.api.IUserManager;
 import com.im.api.UserInformation;
-import com.im.core.cache.ConcurrentHashCache;
 import com.im.core.cache.SafeCache;
+import com.im.core.cache.TestInMemoryCache;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -18,7 +18,7 @@ class CachedUserManagerTest {
         RecordingUserManager delegate = new RecordingUserManager();
         delegate.user = new UserInformation("u1", "Alice");
         CachedUserManager manager = new CachedUserManager(delegate,
-                new SafeCache<>(new ConcurrentHashCache<>(), "user-profile-test"));
+                new SafeCache<>(new TestInMemoryCache<>(), "user-profile-test"));
 
         assertEquals("Alice", manager.getUserInformation("u1").getNickname());
         delegate.user = new UserInformation("u1", "Alice stale source");
@@ -40,7 +40,7 @@ class CachedUserManagerTest {
                 "u2", new UserInformation("u2", "Bob")
         );
         CachedUserManager manager = new CachedUserManager(delegate,
-                new SafeCache<>(new ConcurrentHashCache<>(), "user-profile-test"));
+                new SafeCache<>(new TestInMemoryCache<>(), "user-profile-test"));
 
         List<UserInformation> first = manager.getUsersInfo(List.of("u1", "u2"));
         List<UserInformation> second = manager.getUsersInfo(List.of("u2", "u1"));

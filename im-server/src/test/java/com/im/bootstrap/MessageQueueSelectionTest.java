@@ -37,7 +37,7 @@ class MessageQueueSelectionTest {
     @Test
     void rejectsUnknownMessageQueueType() {
         assertThrows(IllegalArgumentException.class, () -> StorageComponentsFactory.createMessageQueue(
-                new TestConfig(Map.of("im.mq.type", "kafka")), null, "node-a"));
+                new TestConfig(Map.of("im.mq.type", "unsupported-mq")), null, "node-a"));
     }
 
     private record TestConfig(Map<String, String> values) implements Config {

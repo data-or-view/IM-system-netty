@@ -17,7 +17,7 @@ import java.util.Set;
  * <p>适用场景：
  * <ul>
  *   <li>Redis 缓存不可用时，自动降级到数据源</li>
- *   <li>本地缓存 ConcurrentHashMap 出现罕见 OOM/并发异常时静默忽略</li>
+ *   <li>缓存实现出现罕见 OOM/并发异常时静默忽略</li>
  *   <li>缓存重构/迁移期，即使缓存出错也不影响主流程</li>
  * </ul>
  *

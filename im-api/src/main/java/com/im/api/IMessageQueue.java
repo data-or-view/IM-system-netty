@@ -10,13 +10,12 @@ import java.util.Set;
  * 用于解耦"消息接收"和"消息投递/持久化"。
  * ChatHandler publish 后立刻回 ACK，Consumer 异步处理。
  *
- * 消息中间件可插拔：
+ * 消息中间件可插拔，当前保留集群可用实现：
  *   ┌──────────────┬──────────────────────────────┐
  *   │ 方案         │ 场景                         │
  *   ├──────────────┼──────────────────────────────┤
- *   │ MemoryQueue  │ 单机开发测试                  │
- *   │ RedisQueue   │ 生产集群，Redis Streams       │
- *   │ KafkaQueue   │ 生产集群，高吞吐               │
+ *   │ RedisQueue   │ 本地集群基准，Redis Streams   │
+ *   │ RocketMQ     │ 独立 MQ 部署，高吞吐           │
  *   └──────────────┴──────────────────────────────┘
  */
 public interface IMessageQueue extends Lifecycle {

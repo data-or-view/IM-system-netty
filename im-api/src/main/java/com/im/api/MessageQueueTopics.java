@@ -3,10 +3,9 @@ package com.im.api;
 /**
  * 消息队列 Topic 常量。
  *
- * 参考 OpenIM 的 Kafka topic 设计：
+ * 参考 OpenIM 的消息 topic 分层：
  *   · ToPushTopic       → 在线推送（对应 DELIVER）
- *   · ToOfflinePushTopic → 离线推送（对应 OFFLINE，未来）
- *   · msgtransfer 从 Kafka 消费并写入 MongoDB（对应 PERSIST）
+ *   · msgtransfer 消费并写入持久化存储（对应 PERSIST）
  */
 public final class MessageQueueTopics {
 

@@ -25,7 +25,7 @@ When designing new IM features, evaluating architecture changes, or debugging me
 |--------|------|------|
 | `im-api` | `im-api/` | Java interfaces, DTOs, `Operation`, protocol enums. |
 | `im-server` | `im-server/` | Netty transport, dispatcher, handlers, use cases, Redis/MySQL/MQ/MinIO/LiveKit implementation. |
-| `im-infrastructure-*` | `im-infrastructure/` | Config, cache, serialization, idempotency, object storage, Kafka/RocketMQ infrastructure. |
+| `im-infrastructure-*` | `im-infrastructure/` | Config, cache, serialization, idempotency, object storage, and RocketMQ infrastructure. |
 | `im-sdk` | `im-sdk/` | TypeScript SDK for WS/HTTP, token, reconnect sync, business APIs. |
 | `im-web` | `im-web/` | React/Vite chat workspace using `im-sdk`. |
 | `im-scenario-tests` | `im-scenario-tests/` | Real HTTP/WS multi-user scenario tests. |

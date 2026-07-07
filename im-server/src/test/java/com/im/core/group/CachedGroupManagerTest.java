@@ -6,8 +6,8 @@ import com.im.api.GroupInformation;
 import com.im.api.GroupJoinResult;
 import com.im.api.GroupMemberInformation;
 import com.im.api.IGroupManager;
-import com.im.core.cache.ConcurrentHashCache;
 import com.im.core.cache.SafeCache;
+import com.im.core.cache.TestInMemoryCache;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -22,7 +22,7 @@ class CachedGroupManagerTest {
         RecordingGroupManager delegate = new RecordingGroupManager();
         delegate.group = group("g1", "old name");
         CachedGroupManager manager = new CachedGroupManager(delegate,
-                new SafeCache<>(new ConcurrentHashCache<>(), "group-profile-test"));
+                new SafeCache<>(new TestInMemoryCache<>(), "group-profile-test"));
 
         assertEquals("old name", manager.getGroupInformation("g1").getGroupName());
         delegate.group = group("g1", "stale source");
@@ -41,7 +41,7 @@ class CachedGroupManagerTest {
         RecordingGroupManager delegate = new RecordingGroupManager();
         delegate.group = group("g1", "active");
         CachedGroupManager manager = new CachedGroupManager(delegate,
-                new SafeCache<>(new ConcurrentHashCache<>(), "group-profile-test"));
+                new SafeCache<>(new TestInMemoryCache<>(), "group-profile-test"));
 
         assertEquals("active", manager.getGroupInformation("g1").getGroupName());
         delegate.group = null;
@@ -56,8 +56,8 @@ class CachedGroupManagerTest {
         RecordingGroupManager delegate = new RecordingGroupManager();
         delegate.members = List.of(member("g1", "u1"));
         CachedGroupManager manager = new CachedGroupManager(delegate,
-                new SafeCache<>(new ConcurrentHashCache<>(), "group-profile-test"),
-                new SafeCache<>(new ConcurrentHashCache<>(), "group-member-list-test"));
+                new SafeCache<>(new TestInMemoryCache<>(), "group-profile-test"),
+                new SafeCache<>(new TestInMemoryCache<>(), "group-member-list-test"));
 
         assertEquals(List.of("u1"), manager.getMemberList("g1").stream().map(GroupMemberInformation::getUserId).toList());
         delegate.members = List.of(member("g1", "u1"), member("g1", "u2"));
@@ -75,9 +75,9 @@ class CachedGroupManagerTest {
         RecordingGroupManager delegate = new RecordingGroupManager();
         delegate.memberIds = Set.of("u1");
         CachedGroupManager manager = new CachedGroupManager(delegate,
-                new SafeCache<>(new ConcurrentHashCache<>(), "group-profile-test"),
-                new SafeCache<>(new ConcurrentHashCache<>(), "group-member-list-test"),
-                new SafeCache<>(new ConcurrentHashCache<>(), "group-member-ids-test"));
+                new SafeCache<>(new TestInMemoryCache<>(), "group-profile-test"),
+                new SafeCache<>(new TestInMemoryCache<>(), "group-member-list-test"),
+                new SafeCache<>(new TestInMemoryCache<>(), "group-member-ids-test"));
 
         assertEquals(Set.of("u1"), manager.getMemberIds("g1"));
         delegate.memberIds = Set.of("u1", "u2");
@@ -96,9 +96,9 @@ class CachedGroupManagerTest {
         delegate.memberIds = Set.of("u1");
         delegate.quitResult = false;
         CachedGroupManager manager = new CachedGroupManager(delegate,
-                new SafeCache<>(new ConcurrentHashCache<>(), "group-profile-test"),
-                new SafeCache<>(new ConcurrentHashCache<>(), "group-member-list-test"),
-                new SafeCache<>(new ConcurrentHashCache<>(), "group-member-ids-test"));
+                new SafeCache<>(new TestInMemoryCache<>(), "group-profile-test"),
+                new SafeCache<>(new TestInMemoryCache<>(), "group-member-list-test"),
+                new SafeCache<>(new TestInMemoryCache<>(), "group-member-ids-test"));
 
         assertEquals(Set.of("u1"), manager.getMemberIds("g1"));
         delegate.memberIds = Set.of("u2");
