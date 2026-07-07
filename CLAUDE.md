@@ -1,93 +1,67 @@
 # IM-system-netty
 
-Single-process Netty-based IM server with WS/HTTP unified pipeline.
+Cluster-first full-stack IM system with a Java 21 Netty backend, React/Vite frontend, TypeScript SDK, and real-protocol scenario tests.
+
+For current project facts, read these first:
+
+1. `AGENTS.md` - AI coding constraints and cluster rules.
+2. `docs/ai-project-guide.md` - deployment architecture, modules, startup scripts, config, message flow.
+3. `ARCHITECTURE.md` - backend lifecycle, runtime composition, Redis/MySQL data model.
+4. `im-server/src/main/java/com/im/bootstrap/ServerComponentsFactory.java` - production composition root.
+5. `im-api/src/main/java/com/im/api/Operation.java` - operation names, HTTP routes, auth boundary.
 
 ## OpenIM Reference
 
 This project references OpenIM source code for design inspiration. The source is at:
 
-- **Absolute**: `/Users/macbook/java/IdeaProjects/github-source/data-or-view/open-im-server/`
-- **Relative**: `../open-im-server/`
+- Absolute: `/Users/macbook/java/IdeaProjects/github-source/data-or-view/open-im-server/`
+- Relative: `../open-im-server/`
 
-When designing new features, evaluating architecture changes, or debugging message flow, invoke the `openim-reference` skill to look up how OpenIM implements the equivalent functionality.
+When designing new IM features, evaluating architecture changes, or debugging message flow, use the `openim-reference` skill if available.
 
 ## Project Structure
 
 | Module | Path | Role |
 |--------|------|------|
-| `im-api` | `im-api/` | Public interfaces (IUserManager, IMessageQueue, IRouteTable, etc.) |
-| `im-server` | `im-server/` | Use cases, handlers, WS/HTTP transport, session, Netty server, main() |
-| `im-infrastructure-*` | `im-infrastructure/` | 通用基础设施（序列化、缓存接口、配置、消息队列封装） |
+| `im-api` | `im-api/` | Java interfaces, DTOs, `Operation`, protocol enums. |
+| `im-server` | `im-server/` | Netty transport, dispatcher, handlers, use cases, Redis/MySQL/MQ/MinIO/LiveKit implementation. |
+| `im-infrastructure-*` | `im-infrastructure/` | Config, cache, serialization, idempotency, object storage, Kafka/RocketMQ infrastructure. |
+| `im-sdk` | `im-sdk/` | TypeScript SDK for WS/HTTP, token, reconnect sync, business APIs. |
+| `im-web` | `im-web/` | React/Vite chat workspace using `im-sdk`. |
+| `im-scenario-tests` | `im-scenario-tests/` | Real HTTP/WS multi-user scenario tests. |
 
 ## Key Design Decisions
 
-- **Cluster-first**: 本项目一定是多节点部署。所有跨节点共享状态（会话、路由、在线状态、未读数等）必须写 Redis 或 MySQL，禁止用本地内存。详见 `AGENTS.md` 和 `cluster-deployment` skill。
-- Single-process JVM with virtual threads (Project Loom)
-- WS and HTTP share the same ApiDispatcher pipeline
-- Async persistence via PersistenceConsumer (Redis Streams → MySQL)
-- Online status in Redis ZSet via IRouteTable
-- Interfaces in im-api, implementations injected via constructor
+- Cluster-first: all cross-node shared state must be in Redis or MySQL. Local/in-memory implementations are only for unit tests or local fallback, never production wiring.
+- Production `ServerComponentsFactory` requires Redis and database. Do not bypass this to make local startup easier.
+- WS and HTTP share `ApiDispatcher`, interceptors, request handlers, and error mapping.
+- Message sequence uses Redis INCR per conversation.
+- Routing and online status use `RedisRouteTable`; cross-node pushes use `RedisClusterMessageBus`.
+- Messages, conversations, users, groups, friends, idempotency, failures, file metadata, and system messages are stored in MySQL.
+- Business MQ is selected by `im.mq.type`: Redis Streams or RocketMQ.
+
+## Common Commands
+
+```bash
+mvn -pl im-api,im-server -am package -DskipTests
+bin/restart-backend.sh
+bin/start-cluster.sh
+bin/stop-cluster.sh
+pnpm --dir im-web dev
+pnpm --dir im-scenario-tests scenario:smoke
+pnpm --dir im-scenario-tests scenario:cluster-ha
+```
 
 ## Testing Policy
 
-- **Functional / E2E tests must use real infrastructure**（Redis、MySQL 等），不能用 Local/in-memory 实现。例如 `MultiLoginE2ETest` 连接本地 Redis 验证多端登录逻辑，`IMServerE2ETest` 也应改为连接真实数据库。
-- **Unit tests** 适用于与基础设施无关的纯逻辑测试（如枚举转换、校验、工具类），可以使用 mock 或纯内存对象。
-- E2E 测试类命名规范：以 `E2ETest` 或 `E2E` 结尾，放在 `im-server/src/test/java/com/im/bootstrap/` 下。
-- 测试之前确认本地基础设施已启动（如 `redis-cli ping`）。
+- Pure logic unit tests may use mocks or in-memory objects.
+- Functional/E2E tests involving Redis, MySQL, RocketMQ, MinIO, routing, or cross-node delivery should use real infrastructure.
+- Reuse `im-server/src/test/java/com/im/bootstrap/BaseE2ETest.java` for server E2E tests.
+- Put multi-user public-protocol flows in `im-scenario-tests/scenarios/`.
 
-## E2E 测试基类 BaseE2ETest
+## Config Notes
 
-`im-bootstrap/src/test/java/com/im/bootstrap/BaseE2ETest.java` 提供可复用的 E2E 测试能力：
-
-- **自动端口分配**：每次启动分配独立 WS 端口（18100+），多测试类并行无冲突
-- **IMServer 生命周期**：`startServer(configMap)` 启动服务，`stopServer()` 停止并清理系统属性
-- **WebSocket 工具**：`connectWs()`、`sendAndWait()`、`closeWs()` 简化客户端操作
-- **Redis 清理**：`cleanupRedis(userIds)` 删除指定用户的在线状态和路由数据
-- **JSON 工具**：`readJson()` 快速解析响应
-
-### 使用示例
-
-```java
-class MyE2ETest extends BaseE2ETest {
-    private static final String USER_ID = "test_" + System.currentTimeMillis();
-
-    @BeforeAll
-    static void setup() throws Exception {
-        startServer(Map.of(
-            "im.redis.host", "127.0.0.1",
-            "im.db.enabled", "true"
-        ));
-    }
-
-    @AfterAll
-    static void teardown() {
-        cleanupRedis(USER_ID);
-        stopServer();
-    }
-
-    @Test
-    void testSomething() throws Exception {
-        BlockingQueue<String> in = new LinkedBlockingQueue<>();
-        WebSocket ws = connectWs(in);
-        try {
-            String resp = sendAndWait(ws, in,
-                "{\"op\":\"login\",\"userId\":\"" + USER_ID + "\"}");
-            assertNotNull(resp);
-            assertEquals("login_ack", readJson(resp).get("op"));
-        } finally {
-            closeWs(ws);
-        }
-    }
-}
-```
-
-### 常见配置项
-
-| 配置键 | 默认值 | 说明 |
-|--------|--------|------|
-| `im.redis.host` | (无) | Redis 地址，填了才启用 RedisRouteTable |
-| `im.redis.port` | 6379 | Redis 端口 |
-| `im.db.enabled` | false | 是否启用数据库 |
-| `im.login.multi-strategy` | ALLOW_MULTIPLE | 多端登录策略 |
-| `im.ws.port` | 自动分配 | WS 端口，通常无需手动设置 |
-| `im.http.enabled` | false | 是否启用 HTTP |
+- Server entry loads classpath `application.yml` and optional `application-{im.env}.yml`.
+- Root `config/` is a deployment template directory and is not automatically loaded by `Main.loadConfig()`.
+- Current code priority is `IM_*` env vars > `-Dim.*` system properties > env YAML > default YAML > properties.
+- Local dev usually uses `macbook-dev`.

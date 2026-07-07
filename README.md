@@ -1,178 +1,133 @@
-# IM System — 轻量级即时通讯系统
+# IM System Netty
 
-基于 Netty 的纯 Java 即时通讯系统，支持 WebSocket + HTTP REST 接入，面向单机开发与集群扩展设计。
+一个集群优先的全栈即时通讯系统。后端是 Java 21 + Netty，提供 WebSocket 消息通道和 HTTP REST 管理接口；前端是 React/Vite 工作台；TypeScript SDK 和场景测试用于真实客户端接入与多用户验证。
+
+如果你是 AI 或刚接手项目的开发者，先读 [docs/ai-project-guide.md](docs/ai-project-guide.md)。那里按“部署架构、模块职责、启动脚本、配置、消息链路、测试入口”整理了当前项目事实。
 
 ## 项目结构
 
-```
-im-system/
-├── im-api/              接口定义层（15+ 接口 + DTO + 枚举）
-├── im-server/           服务端实现（handler、transport、session、Netty、main()）
-├── im-infrastructure/   基础设施（序列化、缓存、配置、消息队列封装）
-└── pom.xml              父 POM（模块聚合）
-```
+| 路径 | 说明 |
+|------|------|
+| `im-api/` | Java 接口、DTO、Operation 枚举和协议契约。 |
+| `im-server/` | 服务端实现，包含启动、Netty 传输、Dispatcher、handler、use case、Redis/MySQL/RocketMQ/MinIO 装配。 |
+| `im-infrastructure/` | 基础设施子模块，包括配置、缓存、序列化、对象存储、幂等、Kafka/RocketMQ 抽象与实现。 |
+| `im-sdk/` | TypeScript SDK，封装 WS、HTTP、token、重连同步、消息批处理和业务 API。 |
+| `im-web/` | React + Vite 前端，默认连接本地开发后端 `8083/8084`。 |
+| `im-scenario-tests/` | 多用户真实 HTTP/WS 场景脚本，覆盖冒烟、群聊、跨节点投递、通话等流程。 |
+| `bin/` | 本地启动、重启、停止脚本。 |
+| `config/` | 部署配置模板；服务端默认从 classpath 的 `application*.yml` 加载配置。 |
+| `docs/` | 运维、文件存储、RocketMQ 集成测试和 AI 快速指南。 |
 
-### 模块依赖
+## 当前架构
 
+生产组合根在 `im-server/src/main/java/com/im/bootstrap/ServerComponentsFactory.java`。它会强制要求 Redis 和数据库：
+
+- Redis: 路由表、在线状态、节点发现、集群 Pub/Sub、消息序号、缓存、上传会话、通话状态。
+- MySQL: 用户、好友、群组、会话、消息、幂等记录、失败补偿、文件元数据、系统消息。
+- MQ: `im.mq.type=redis` 使用 Redis Streams，`im.mq.type=rocketmq` 使用 RocketMQ。
+- Netty: WebSocket 和 HTTP 共用 `ApiDispatcher`、拦截器和 handler。
+
+高层链路：
+
+```text
+im-web / im-sdk
+  |
+  |-- WebSocket /ws: login, heartbeat, chat.send, chat.send.group, push
+  |-- HTTP /api/*: user, friend, group, conversation, message pull/search, file, system
+  v
+TransportServer
+  v
+ApiDispatcher -> AuthInterceptor -> Handler -> UseCase
+  |
+  |-- Redis: route, online, seq, node discovery, cache, cluster bus
+  |-- MySQL: durable business data
+  |-- Redis Streams / RocketMQ: persist + deliver topics
+  |-- MinIO: object storage
+  |-- LiveKit: call room/token provider
 ```
-im-server → im-api
-im-server → im-infrastructure
-```
-
-## 技术栈
-
-| 组件 | 技术选型 |
-|------|---------|
-| 网络层 | Netty 4.1 (WebSocket + HTTP REST) |
-| 序列化 | JSON (Jackson) |
-| 认证 | HMAC-SHA256 自签 Token（不依赖外部 JWT 库） |
-| 消息队列 | Redis Streams / MemoryMQ（可替换） |
-| 缓存 | ConcurrentHashCache / Redis（可替换） |
-| 日志 | SLF4J + Logback + OpenTelemetry |
-| 构建 | Maven + JDK 21 |
-| 并发模型 | Netty EventLoop + 虚拟线程业务池 |
 
 ## 快速启动
 
-```bash
-# 编译
-mvn clean package -DskipTests
-
-# 启动服务端
-cd im-server
-java --enable-preview -jar target/im-server-1.0.0-SNAPSHOT.jar
-```
-
-或使用集成脚本：
+先构建后端：
 
 ```bash
-bash start-cluster.sh
+mvn -pl im-api,im-server -am package -DskipTests
 ```
 
-## 核心特性
+启动单节点开发后端，默认 `WS=8083`、`HTTP=8084`：
 
-### 已完成
-- [x] WebSocket + HTTP REST 接入（统一 ApiDispatcher 管线）
-- [x] 用户认证：Token 签发/验证（HMAC-SHA256）
-- [x] 单聊消息收发 + ACK 确认
-- [x] 群聊消息收发 + 成员展开多播
-- [x] 消息序号（Sequence）生成
-- [x] 消息历史拉取（按 seq 范围）
-- [x] 消息搜索（关键字、类型、时间、发送者过滤）
-- [x] 消息队列模式（MQ 解耦收发）
-- [x] 多端登录策略（允许多端/踢旧/拒新）
-- [x] 会话管理（Conversation，含未读/置顶/免打扰）
-- [x] 好友关系链（申请/审批/删除/拉黑/列表/申请管理）
-- [x] 群组管理（创建/加入/退出/踢人/解散/全员禁言）
-- [x] Webhook/Callback 机制（发送前阻断、发送后异步通知）
-- [x] 缓存抽象层（支持 TTL + 安全降级）
-- [x] 全链路追踪（OpenTelemetry）
-
-### 待实现
-- [ ] 集群化（服务发现 + 路由共享 + 跨节点转发）
-- [ ] 离线推送（APNs/FCM）
-- [ ] 消息已读回执
-- [ ] 端到端加密
-
-## 架构概述
-
-```
-┌──────────────┐   ┌────────────────┐
-│  WS Client   │   │ HTTP Client    │
-└──────┬───────┘   └───────┬────────┘
-       │                   │
-       ▼                   ▼
-┌──────────────────────────────────────────────┐
-│         Netty Server (WS/HTTP REST)          │
-│  ┌────────────────────────────────────────┐  │
-│  │  WsRequestAdapter / HttpRequestAdapter │  │
-│  │  (WS frame ↔ ApiRequest)              │  │
-│  └──────────────┬─────────────────────────┘  │
-│                 ▼                            │
-│  ┌────────────────────────────────────────┐  │
-│  │           ApiDispatcher                │  │
-│  │  ┌─────────────────────────────────┐  │  │
-│  │  │  Interceptor Chain              │  │  │
-│  │  │  ├─ TelemetryInterceptor       │  │  │
-│  │  │  └─ AuthInterceptor            │  │  │
-│  │  └──────────┬──────────────────────┘  │  │
-│  │             ▼                         │  │
-│  │  ┌─────────────────────────────────┐  │  │
-│  │  │  Handler (操作名 → handler)     │  │  │
-│  │  │  ├─ LoginHandler               │  │  │
-│  │  │  ├─ ChatHandler                │  │  │
-│  │  │  ├─ MessageHandler             │  │  │
-│  │  │  ├─ FriendHandler/GroupHandler │  │  │
-│  │  │  └─ ...                        │  │  │
-│  │  └─────────────────────────────────┘  │  │
-│  └────────────────────────────────────────┘  │
-└──────────────────────┬───────────────────────┘
-                       │
-              ┌────────┴────────┐
-              ▼                  ▼
-┌─────────────────────┐  ┌──────────────────────┐
-│  PersistenceConsumer│  │  DeliveryConsumer    │
-│  (虚拟线程)          │  │  (虚拟线程)          │
-│                     │  │                      │
-│  MessageStore.save  │  │  local→Session推送    │
-│  Conversation更新   │  │  remote→Cluster转发   │
-└─────────────────────┘  └──────────────────────┘
+```bash
+bin/restart-backend.sh
 ```
 
-## 通信协议
+启动本地双节点集群，默认 `node-1 WS=8081 HTTP=8088`，`node-2 WS=8084 HTTP=8089`：
 
-### WebSocket JSON 协议
-
-客户端与服务端通过 WebSocket 发送 JSON 文本帧通信：
-
-```json
-{
-  "op": "user.search",
-  "seq": 12345,
-  "keyword": "abc",
-  "limit": 10
-}
+```bash
+bin/start-cluster.sh
 ```
 
-响应格式：
+停止本地集群：
 
-```json
-{
-  "op": "user.search_ack",
-  "seq": 12345,
-  "code": 0,
-  "data": { ... }
-}
+```bash
+bin/stop-cluster.sh
 ```
 
-错误响应：
+启动前端：
 
-```json
-{
-  "op": "user.search_ack",
-  "seq": 12345,
-  "code": 400,
-  "msg": "bad request",
-  "detail": "keyword is required"
-}
+```bash
+cd im-web
+pnpm dev
 ```
 
-| 字段 | 说明 |
-|------|------|
-| `op` | 操作名（如 `user.search`），响应自动追加 `_ack` |
-| `seq` | 客户端请求序号，服务端原样回传 |
-| `code` | 状态码（0=成功，4xx=客户端错误，5xx=服务端错误） |
-| `data` | 业务数据（成功时） |
-| `msg` | 错误消息（失败时） |
-| `detail` | 错误详情（失败时） |
+前端默认访问后端：
 
-## 测试
+```text
+VITE_WS_URL=ws://127.0.0.1:8083/ws
+VITE_HTTP_URL=http://127.0.0.1:8084
+```
+
+如需连集群节点，显式覆盖 `VITE_WS_URL` 和 `VITE_HTTP_URL`。
+
+## 常用验证
+
+后端单元和集成边界测试：
 
 ```bash
 mvn test
-# 需要本地 Redis 运行 E2E 测试
 ```
 
-## License
+前端构建：
 
-MIT License
+```bash
+pnpm --dir im-web build
+```
+
+SDK 测试：
+
+```bash
+npm --prefix im-sdk test
+```
+
+场景测试：
+
+```bash
+pnpm --dir im-scenario-tests scenario:smoke
+pnpm --dir im-scenario-tests scenario:cluster-ha
+```
+
+RocketMQ 真实 broker 测试见 [docs/rocketmq-integration-tests.md](docs/rocketmq-integration-tests.md)。
+
+## 关键文档
+
+| 文档 | 用途 |
+|------|------|
+| [docs/ai-project-guide.md](docs/ai-project-guide.md) | AI 和新开发者的项目快读入口。 |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | 后端架构、生命周期、集群消息链路。 |
+| [AGENTS.md](AGENTS.md) | AI 写代码必须遵守的集群部署约束和工作入口。 |
+| [docs/logging-guide.md](docs/logging-guide.md) | requestId、trace、日志排查方法。 |
+| [docs/file-storage.md](docs/file-storage.md) | MinIO 文件上传/下载说明。 |
+| [im-scenario-tests/README.md](im-scenario-tests/README.md) | 多用户场景测试说明。 |
+
+## 集群开发原则
+
+这个项目按多节点部署写代码。任何跨节点共享状态都不能放在本地内存里。路由、在线状态、消息序号、会话、消息、幂等、节点发现、失败补偿必须落 Redis 或 MySQL。Local/in-memory 实现只允许作为单元测试或开发兜底，不允许进入生产装配路径。

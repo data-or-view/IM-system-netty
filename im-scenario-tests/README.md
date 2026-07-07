@@ -29,25 +29,25 @@ IM_SCENARIO_TIMEOUT_MS=5000
 ```bash
 IM_SCENARIO_HTTP_URL=http://127.0.0.1:18084 \
 IM_SCENARIO_WS_URL=ws://127.0.0.1:18081/ws \
-npm run scenario:smoke
+pnpm --dir im-scenario-tests scenario:smoke
 ```
 
 ## 命令
 
 ```bash
-npm run test --prefix im-scenario-tests
+pnpm --dir im-scenario-tests test
 ```
 
 编译并运行测试基座单元测试。
 
 ```bash
-npm run scenario:smoke --prefix im-scenario-tests
+pnpm --dir im-scenario-tests scenario:smoke
 ```
 
 注册 1 个用户，WebSocket 登录，然后通过 HTTP 拉取用户资料。
 
 ```bash
-npm run scenario:group-chat --prefix im-scenario-tests -- --users=3 --messages=1
+pnpm --dir im-scenario-tests scenario:group-chat -- --users=3 --messages=1
 ```
 
 注册多个用户，全部 WebSocket 登录，创建群，发送群消息，并检查其它在线成员收到推送。

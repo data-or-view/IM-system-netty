@@ -1,212 +1,286 @@
 # 架构设计文档
 
-## 设计哲学
+本文描述当前代码的真实运行架构。快速入口和常用命令见 [docs/ai-project-guide.md](docs/ai-project-guide.md)。
 
-**接口先行，实现可替换。** 所有业务能力以 Java 接口定义在 `im-api` 模块，`im-server` 提供单机内存实现和 Redis/DB 实现，不改一行业务代码。
+## 设计原则
 
-```
-im-api             (契约层 — 接口 + DTO)
-im-server          (实现 + 装配 — handler、transport、session、Netty、main())
-im-infrastructure  (基础设施 — 序列化、缓存、配置、消息队列)
-```
+1. 接口先行：`im-api` 定义接口、DTO、`Operation` 和协议契约。
+2. 集群优先：生产组合根强制要求 Redis 和 MySQL，不能依赖本地内存保存跨节点状态。
+3. 单管线：WebSocket 和 HTTP 请求都进入 `ApiDispatcher`，共享认证、追踪、异常处理和 handler。
+4. 持久化优先：消息、会话、用户、好友、群组、幂等和失败补偿都落 MySQL。
+5. Redis 做协调：路由、在线状态、节点发现、消息序号、集群 Pub/Sub、缓存、上传会话和通话状态都走 Redis。
 
 ## 模块职责
 
-### im-api — 接口层
+```text
+im-api
+  接口、DTO、Operation、错误码、消息内容类型、集群协议对象
 
-纯接口与 DTO，零外部依赖。定义整个系统的能力边界：
+im-server
+  Main / IMServer / ServerRuntime
+  TransportServer / WsServerBootstrap / HttpServerBootstrap
+  ApiDispatcher / Interceptor / unified handlers
+  usecase、manager、Redis/MySQL/RocketMQ/MinIO/LiveKit 实现
 
-| 类别 | 接口/类 | 职责 |
-|------|---------|------|
-| **会话** | `ISessionManager` | 连接会话管理（绑定/解绑/查找） |
-| **路由** | `IRouteTable` | 用户到节点的路由表 |
-| **节点** | `INodeDiscovery` | 节点发现与注册 |
-| **集群** | `IClusterMessageBus` | 跨节点消息转发 |
-| **状态** | `IClusterStateStore` | 分布式状态存储 |
-| **消息** | `IMessageQueue` | 消息队列抽象 |
-| **序号** | `ISequenceManager` | 消息序号生成 |
-| **存储** | `IMessageStore` | 消息持久化存储 |
-| **认证** | `IAuthenticator` | Token 签发/验证 |
-| **用户** | `IUserManager` | 用户注册/查询/在线 |
-| **群组** | `IGroupManager` | 群聊管理 |
-| **好友** | `IFriendManager` | 好友关系链 |
-| **会话** | `IConversationManager` | 会话列表/未读/置顶 |
-| **回调** | `IWebhookManager` | Webhook 回调 |
-| **通话** | `ICallManager` | RTC 信令 |
-| **推送** | `IOfflinePush` | 离线推送 |
-| **文件** | `IFileStorageService` | 文件存储 |
-| **撤回** | `IMessageRevoke` | 消息撤回 |
-| **内容** | `IMessageContent` | 消息内容类型（文本/图片/文件/信令） |
+im-infrastructure
+  config、common、cache、serialization、storage、idempotency、message queue
 
-### im-server — 服务端实现
+im-sdk
+  TypeScript 客户端 SDK，封装 WebSocket、HTTP、token、重连同步和业务 API
 
-#### 统一调度管线
+im-web
+  React/Vite 聊天工作台，消费 im-sdk
 
-WS 和 HTTP 请求都经过 `ApiDispatcher` 这一条管线：
-
+im-scenario-tests
+  多用户真实协议场景测试
 ```
+
+## 启动生命周期
+
+入口是 `com.im.bootstrap.Main`：
+
+```text
+Main
+  -> loadConfig()
+  -> new IMServer(config)
+  -> ServerComponentsFactory.create(config)
+  -> ServerRuntime.start()
+```
+
+`ServerRuntime.start()` 的顺序很重要：
+
+```text
+1. RedisNodeDiscovery.start()
+2. RedisNodeDiscovery.register(node)
+3. RedisClusterMessageBus.start()
+4. IMessageQueue.start()
+5. PersistenceConsumer.start()
+6. DeliveryConsumer.start()
+7. BusinessMessageDlqCompensator.start()
+8. TransportServer.start()
+9. RequestAdmission.open()
+```
+
+传输层最后打开，避免节点还没注册、队列还没订阅时客户端请求已经进来。
+
+停止顺序相反：先关闭请求入口并等待请求排空，再停消费者、队列、集群总线、节点发现，最后清理本地连接和 Redis 资源。
+
+## 运行时组件装配
+
+生产装配集中在 `ServerComponentsFactory`：
+
+| 能力 | 当前实现 | 说明 |
+|------|----------|------|
+| Session | `RedisSessionManager` | JVM 本地保存 Channel 引用；多端登录策略写 Redis。 |
+| RouteTable | `RedisRouteTable` | 用户在线路由、平台在线状态和节点反向索引写 Redis。 |
+| NodeDiscovery | `RedisNodeDiscovery` | 节点注册到 Redis，10s 心跳，30s TTL。 |
+| ClusterMessageBus | `RedisClusterMessageBus` | Redis Pub/Sub，节点专属频道和广播频道。 |
+| Sequence | `RedisSequenceManager` | `INCR im:seq:{conversationId}` 保证多节点递增。 |
+| MessageStore | `DbMessageStore` | MySQL `im_messages` 等表。 |
+| Conversation | `CachedConversationManager` + `DbConversationManager` | Redis cache + MySQL 用户会话视图。 |
+| User | `CachedUserManager` + `DbUserManager` | Redis cache + MySQL 用户资料和路由查询。 |
+| Friend | `DbFriendManager` | MySQL 好友、黑名单、申请。 |
+| Group | `CachedGroupManager` + `DbGroupManager` | Redis cache + MySQL 群资料、成员、申请。 |
+| MQ | `RedisMessageQueue` 或 `RocketMqMessageQueue` | 由 `im.mq.type` 选择。 |
+| Idempotency | `WzgSendMessageIdempotency` | MySQL 记录 `clientMsgId` 幂等。 |
+| File | `MinioFileStorageService` + MySQL metadata | 直传签名、分片上传、文件元数据。 |
+| Call | `LiveKitCallManager` + Redis call state | 单聊/群聊通话信令状态。 |
+
+`ServerComponentsFactory` 会在 Redis 或数据库未配置时直接启动失败。这是生产安全边界，不要为了“本地方便”绕回 Local 实现。
+
+## 请求管线
+
+```text
 WebSocket Text Frame / HTTP Request
-       │
-       ▼
-┌──────────────────────────────┐
-│  WsRequestAdapter /          │
-│  HttpRequestAdapter          │
-│  (协议帧 → ApiRequest)       │
-└──────────┬───────────────────┘
-           │
-           ▼
-┌──────────────────────────────────────────────┐
-│              ApiDispatcher                    │
-│                                              │
-│  ┌──────────────────────────────────────┐    │
-│  │  Interceptor Chain                   │    │
-│  │  ├─ TelemetryInterceptor (order=MIN) │    │
-│  │  └─ AuthInterceptor    (order=MIN)   │    │
-│  └──────────┬───────────────────────────┘    │
-│             ▼                                │
-│  ┌──────────────────────────────────────┐    │
-│  │  RequestHandler (按 op 分发)          │    │
-│  │  ├─ LoginHandler                     │    │
-│  │  ├─ ChatHandler (chat.send/group)    │    │
-│  │  ├─ MessageHandler (pull/seq/sync/search)│
-│  │  ├─ FriendHandler                    │    │
-│  │  ├─ GroupHandler                     │    │
-│  │  ├─ UserHandler                      │    │
-│  │  ├─ ConversationHandler              │    │
-│  │  ├─ FileUploadHandler                │    │
-│  │  ├─ FileMultipartHandler             │    │
-│  │  ├─ RevokeHandler                    │    │
-│  │  └─ HeartbeatHandler                 │    │
-│  └──────────────────────────────────────┘    │
-│                                              │
-│  ┌──────────────────────────────────────┐    │
-│  │  全局异常处理: ImException → 错误响应  │    │
-│  └──────────────────────────────────────┘    │
-└──────────────────┬───────────────────────────┘
-                   │
-          ┌────────┴────────┐
-          ▼                  ▼
-┌─────────────────┐  ┌──────────────────┐
-│ PersistConsumer │  │ DeliveryConsumer │
-│ (虚拟线程)      │  │ (虚拟线程)       │
-│                 │  │                  │
-│ 更新 Conversation│  │ local→write     │
-│ 存储消息索引     │  │ remote→cluster  │
-└─────────────────┘  └──────────────────┘
+  -> WsRequestAdapter / HttpRequestAdapter
+  -> ApiDispatcher
+     -> TelemetryInterceptor
+     -> AuthInterceptor
+     -> RequestHandler
+  -> WsResponseWriter / HttpResponseWriter
 ```
 
-#### 认证流程
+`Operation` 是协议单点真理：
 
-```
-Client → LOGIN(seq=1, userId=alice)
-  → LoginHandler 签发 Token(HMAC-SHA256)
-  → 返回 {op:"login_ack", code:0, data:{token:"...", platformId:1}}
+- WS 根据 JSON 帧里的 `op` 查找。
+- HTTP 根据 method + path 查找。
+- 是否需要认证由 `Operation.requireAuth()` 决定。
 
-后续请求:
-  Client → 业务消息(Authorization: Bearer <token>)
-  → AuthInterceptor 验证 token → 注入 currentUserId
-  → 放行到业务 Handler
-```
+主要 handler：
 
-#### 消息队列模式
+| Handler | Operations |
+|---------|------------|
+| `LoginHandler` / `RegisterHandler` | `login`, `register` |
+| `UserHandler` | 用户注册、搜索、资料查询、更新 |
+| `FriendHandler` | 好友申请、审批、删除、黑名单、申请列表 |
+| `GroupHandler` | 建群、入群、退群、成员、申请、禁言、解散 |
+| `ConversationHandler` | 会话列表、设置、已读 |
+| `ChatHandler` | `chat.send`, `chat.send.group` |
+| `MessageHandler` | 拉历史、拉 seq、增量同步、搜索 |
+| `RevokeHandler` | 消息撤回 |
+| `FileUploadHandler` / `FileDirectTransferHandler` / `FileMultipartHandler` | 文件上传、下载签名、分片上传 |
+| `SystemMessageHandler` | 系统频道、站内信、管理员发布 |
+| `GroupCallHandler` | 群通话开始、加入、离开、结束、活跃查询 |
+| `HeartbeatHandler` | WS 心跳和在线状态续期 |
 
-```
-ChatHandler → SendMessageUseCase       DeliveryConsumer
-     │                                        ▲
-     │  1. sequenceManager.nextSeq()          │
-     │  2. webhookService.beforeSend()        │
-     │  3. mq.publish("persist", msg) ────────┤
-     │  4. mq.publish("deliver", msg) ────────┤
-     │  5. webhookService.afterSend()         │
-     │  6. ack to client                      │
-     ▼                                        │
-  (虚拟线程) 异步消费                          │
-     │                                        │
-     ├─ PersistConsumer: store.save + conv更新 │
-     │                                        │
-     └─ DeliveryConsumer:                     │
-          ├─ lookupAll(userId) → 路由节点列表   │
-          ├─ 本地 → sessionManager.push        │
-          ├─ 远程 → clusterMessageBus.send      │
-          └─ 离线 → (跳过，store 保底)          │
-```
+## 消息发送链路
 
-#### 关键设计决策
-
-| 决策 | 原因 |
-|------|------|
-| **统一 ApiDispatcher** | WS 和 HTTP 共享同一套 handler 和拦截器，避免两套逻辑维护 |
-| **虚拟线程业务池** | 每个请求创建虚拟线程，不阻塞 Netty EventLoop，简化编程模型 |
-| **双层持久化** | ChatHandler write-ahead save + PersistenceConsumer 最终存储，防止消费者丢消息 |
-| **字典序 conversationId** | Alice→Bob 和 Bob→Alice 映射到同一 conversationId，双方看到同一个会话 |
-
-### im-infrastructure — 基础设施
-
-| 子模块 | 职责 |
-|--------|------|
-| `im-infrastructure-common` | 通用工具（错误码、异常、生命周期、重试、线程池） |
-| `im-infrastructure-config` | 配置抽象（YAML/环境变量/系统属性/组合源） |
-| `im-infrastructure-serialization` | 序列化接口 + Jackson 实现 |
-| `im-infrastructure-cache` | 缓存抽象（ICache + CacheStats） |
-| `im-infrastructure-cache-redis` | Redis 缓存实现 |
-| `im-infrastructure-message` | 消息总线抽象（MessageBus） |
-| `im-infrastructure-message-kafka` | Kafka 消息总线实现 |
-| `im-infrastructure-storage` | 文件存储（MinIO SDK + 分片上传） |
-| `im-infrastructure-spi` | SPI 加载器 |
-
-## 缓存架构
-
-```
-Manager (业务层)
-    │
-    ▼
-SafeCache (安全装饰器 — 任何异常降级不传播)
-    │
-    ▼
-ICache 实现 (ConcurrentHashCache / RedisCache)
-    │
-    ▼
-ConcurrentHashMap / Redis (数据源)
-
-失效策略: 写操作 → delete cache key → 下次读触发 reload
-TTL 兜底: 即使不主动失效，过期后自动清理
-安全设计: SafeCache + try-catch(Throwable)，缓存崩溃不影响业务
+```text
+Client
+  -> WS chat.send / chat.send.group
+  -> ChatHandler
+  -> SendMessageUseCase
+     -> require clientMsgId
+     -> send policy check
+     -> webhook beforeSend
+     -> RedisSequenceManager.nextSequence(conversationId)
+     -> publish persist topic
+     -> publish deliver topic
+     -> webhook afterSend
+  -> ACK {status, messageId, conversationId, seq}
 ```
 
-## Webhook 回调
+`clientMsgId` 必填，格式为 `[A-Za-z0-9._:-]{8,64}`。幂等 key 是：
 
-```
-BeforeSend: 同步 + 5s 超时 → 非 2xx 阻断消息
-AfterSend:  异步虚拟线程 + 2s 超时 → 不阻塞主流程
-
-URL 格式: {baseUrl}/{eventName_toLowerCase}
-请求头: Content-Type: application/json
-异常策略: 超时/网络异常 → fail-open（放行）
+```text
+send:{fromUserId}:{conversationId}:{clientMsgId}
 ```
 
-## 错误码
+`persist` 是强依赖，发布失败会返回错误；`deliver` 是可恢复依赖，发布失败会写业务失败表，由 `BusinessMessageDlqCompensator` 后续补偿。
 
-| 区间 | 含义 | 示例 |
-|------|------|------|
-| 0 | 成功 | OK |
-| 4xx | 客户端错误 | 400 BAD_REQUEST, 401 UNAUTHORIZED, 404 NOT_FOUND, 409 CONFLICT, 429 RATE_LIMITED |
-| 5xx | 服务端错误 | 500 INTERNAL_ERROR, 503 SERVICE_UNAVAILABLE |
+## 持久化与投递
 
-所有业务异常通过 `ImException` (RuntimeException) 抛出，`ApiDispatcher` 全局捕获后返回统一错误响应：
+```text
+persist topic
+  -> PersistenceConsumer
+     -> SingleMessageStore / GroupMessageStore
+     -> DbMessageStore
+     -> ConversationManager.updateOnMessage()
 
-```json
-WS: {"op":"xxx_ack","seq":123,"code":401,"msg":"unauthorized","detail":"token expired"}
-HTTP: {"code":401,"message":"unauthorized"}  // HTTP 401
+deliver topic
+  -> DeliveryConsumer
+     -> RedisRouteTable.lookupAllBindings(userId)
+     -> local session: write to Channel
+     -> remote session: RedisClusterMessageBus.sendToNode()
 ```
 
-## 集群演进路径
+单聊投递按目标用户的所有在线绑定精确推送。群聊先从 `IGroupManager.getMemberIds(groupId)` 展开成员，再逐个查路由并行推送。离线用户不走本地内存队列，消息已在 MySQL 持久化，后续通过拉取/同步补齐。
 
-所有接口已设计为可替换实现，集群化只需新增实现类：
+## Redis 数据模型
 
+| Key | 用途 |
+|-----|------|
+| `route:{userId}` | Hash，字段为 `platformId:sessionId`，值含 nodeId 和过期时间。 |
+| `online:{userId}` | ZSet，平台在线状态，score 是过期时间。 |
+| `route_node:{nodeId}` | Set，节点反向路由索引，用于节点下线清理。 |
+| `im:node:{nodeId}` | 节点信息，TTL 30s。 |
+| `im:nodes:alive` | 当前活跃节点集合。 |
+| `im:node:{nodeId}:msgs` | Redis Pub/Sub 节点专属频道。 |
+| `im:bus:broadcast` | Redis Pub/Sub 广播频道。 |
+| `im:seq:{conversationId}` | 会话消息序号。 |
+| `im:mq:stream:{topic}` | Redis Streams 业务消息流。 |
+| `im:mq:group:{topic}` | Redis Streams consumer group。 |
+| `cache:*` | 用户、群、会话等业务缓存。 |
+
+## MySQL 数据模型
+
+Schema 在 `im-server/src/main/resources/db/schema.sql`。
+
+主要表：
+
+```text
+im_users
+im_friends
+im_friend_requests
+im_blacklist
+im_refresh_tokens
+im_groups
+im_group_members
+im_group_requests
+im_conversations
+im_messages
+im_message_read_states
+im_message_visibility
+im_idempotency_records
+im_message_send_failures
+im_sequences
+im_seq_users
+im_objects
+im_sync_versions
+im_sync_changes
+im_system_channels
+im_system_messages
+im_system_message_inbox
 ```
-D1: RedisNodeDiscovery + RedisRouteTable（服务发现 + 路由共享）
-D2: RedisClusterMessageBus（跨节点转发）
-D3: DB-backed MessageStore + Manager（持久化存储）
+
+`im_conversations` 是用户视图，每个用户有自己的会话行。置顶、免打扰、未读、删除等操作不共享。
+
+`im_messages` 对 `(conversation_id, seq)` 和 `client_msg_id` 做唯一约束。消费者重复执行时应视为幂等。
+
+## 配置加载
+
+`Main.loadConfig()` 根据 `-Dim.env` 或 `IM_ENV` 注册 `classpath:application-{env}.yml`，然后调用 `ConfigLoader.load()`。
+
+按当前代码，优先级是：
+
+```text
+1. IM_* 环境变量
+2. -Dim.* 系统属性
+3. classpath:application-{env}.yml
+4. classpath:application.yml
+5. application.properties
 ```
 
-详见 `AGENTS.md` 集群部署约束。
+注意：根目录 `config/` 是部署模板/配置副本，不会被 `Main.loadConfig()` 自动读取。当前 jar 运行时读取的是 classpath 内的 `im-server/src/main/resources/application*.yml`，再被环境变量和 `-D` 覆盖。
+
+## 本地运行模式
+
+单节点开发：
+
+```text
+bin/restart-backend.sh
+  env=macbook-dev
+  nodeId=macbook-dev
+  WS=8083
+  HTTP=8084
+  log=logs/backend.log
+  pid=bin/pids/backend.pid
+```
+
+双节点集群：
+
+```text
+bin/start-cluster.sh
+  node-1 WS=8081 HTTP=8088 log=logs/node-1.log
+  node-2 WS=8084 HTTP=8089 log=logs/node-2.log
+```
+
+前端：
+
+```text
+im-web pnpm dev
+  dev server=39073
+  default WS=ws://127.0.0.1:8083/ws
+  default HTTP=http://127.0.0.1:8084
+```
+
+## 新增 API 的落点
+
+新增一个业务能力时，通常要改这些地方：
+
+1. `im-api/src/main/java/com/im/api/Operation.java` 增加 op / HTTP path / 认证要求。
+2. `im-api` 增加或更新 DTO、接口、枚举。
+3. `im-server/src/main/java/com/im/core/handler/unified/` 增加 handler 或扩展现有 handler。
+4. `DispatcherFactory` 注册 handler。
+5. 如果涉及共享状态，写 Redis 或 MySQL，不写本地内存。
+6. `im-sdk/src/api/` 增加 TS API。
+7. `im-web/src/` 接 UI 或状态。
+8. 增加单元测试、E2E 或 `im-scenario-tests` 场景。
+
+## 参考文档
+
+- [docs/ai-project-guide.md](docs/ai-project-guide.md)
+- [AGENTS.md](AGENTS.md)
+- [docs/logging-guide.md](docs/logging-guide.md)
+- [docs/file-storage.md](docs/file-storage.md)
+- [docs/rocketmq-integration-tests.md](docs/rocketmq-integration-tests.md)
