@@ -6,33 +6,16 @@ import {
   useMemo,
   useRef,
   useState,
-  type MutableRefObject,
   type ReactNode,
 } from "react";
 import {
-  AudioPresets,
-  ConnectionQuality,
   Room,
-  RoomEvent,
-  Track,
-  VideoPresets,
-  createLocalAudioTrack,
-  createLocalVideoTrack,
   type LocalAudioTrack,
   type LocalVideoTrack,
-  type Participant,
-  type RemoteAudioTrack,
-  type RemoteTrack,
-  type RemoteTrackPublication,
-  type RemoteVideoTrack,
-  type RemoteParticipant,
-  type RoomOptions,
-  type TrackPublishOptions,
 } from "livekit-client";
 import {
   SignalingAction,
   type CallSignalEvent,
-  type GroupCallParticipant,
   type SignalingActionName,
 } from "im-sdk";
 import { toast } from "sonner";
@@ -40,127 +23,13 @@ import { im } from "@/sdk/im-sdk";
 import { useStore } from "@/store/store";
 import { DEV_LIVEKIT_URL } from "@/config/runtime";
 import { toOptimisticMessage } from "@/lib/messages";
+import { startIncomingAttention, stopIncomingAttention } from "@/components/call/call-attention";
+import { ensureMediaPermission } from "@/components/call/call-config";
+import { callErrorText } from "@/components/call/call-errors";
+import { EMPTY_CALL, type CallContextValue, type CallPeer, type CallState, type JoinGroupCallInput, type StartCallInput, type StartGroupCallInput } from "@/components/call/call-types";
+import { useLiveKitRoom } from "@/components/call/useLiveKitRoom";
 
-export type CallType = "voice" | "video";
-export type CallPhase = "idle" | "dialing" | "ringing" | "incoming" | "accepted" | "connectingMedia" | "connected" | "reconnecting" | "ending" | "ended";
-export type CallMode = "single" | "group";
-
-export type CallPeer = {
-  userId: string;
-  name?: string;
-  faceUrl?: string;
-};
-
-export type GroupCallTarget = {
-  groupId: string;
-  name?: string;
-  faceUrl?: string;
-  canEnd?: boolean;
-};
-
-export type RemoteMedia = {
-  participantId: string;
-  name?: string;
-  audioTrack?: RemoteAudioTrack;
-  videoTrack?: RemoteVideoTrack;
-};
-
-export type CallState = {
-  phase: CallPhase;
-  mode: CallMode;
-  callType: CallType;
-  direction?: "incoming" | "outgoing";
-  peer?: CallPeer;
-  group?: GroupCallTarget;
-  roomId?: string;
-  startedAt?: number;
-  muted: boolean;
-  cameraOff: boolean;
-  localVideoTrack?: LocalVideoTrack;
-  remoteAudioTrack?: RemoteAudioTrack;
-  remoteVideoTrack?: RemoteVideoTrack;
-  remoteMedias: RemoteMedia[];
-  initiatorUserId?: string;
-  participantCount?: number;
-  participants?: GroupCallParticipant[];
-  endReason?: string;
-};
-
-type StartCallInput = {
-  peer: CallPeer;
-  callType: CallType;
-};
-
-type StartGroupCallInput = {
-  group: GroupCallTarget;
-  callType?: CallType;
-};
-
-type JoinGroupCallInput = {
-  group: GroupCallTarget;
-  mediaPermissionChecked?: boolean;
-};
-
-type CallContextValue = {
-  call: CallState;
-  startCall: (input: StartCallInput) => Promise<void>;
-  startGroupCall: (input: StartGroupCallInput) => Promise<void>;
-  joinGroupCall: (input: JoinGroupCallInput) => Promise<void>;
-  acceptCall: () => Promise<void>;
-  rejectCall: () => Promise<void>;
-  cancelCall: () => Promise<void>;
-  hangupCall: () => Promise<void>;
-  endGroupCall: () => Promise<void>;
-  toggleMute: () => Promise<void>;
-  toggleCamera: () => Promise<void>;
-};
-
-const AUDIO_CAPTURE_OPTIONS = {
-  echoCancellation: true,
-  noiseSuppression: true,
-  autoGainControl: true,
-  channelCount: 1,
-} as const;
-const VIDEO_CAPTURE_OPTIONS = {
-  resolution: VideoPresets.h540.resolution,
-  frameRate: 24,
-} as const;
-const AUDIO_PUBLISH_OPTIONS: TrackPublishOptions = {
-  source: Track.Source.Microphone,
-  audioPreset: AudioPresets.speech,
-  dtx: true,
-  red: true,
-};
-const VIDEO_PUBLISH_OPTIONS: TrackPublishOptions = {
-  source: Track.Source.Camera,
-  videoEncoding: VideoPresets.h540.encoding,
-  videoSimulcastLayers: [VideoPresets.h180, VideoPresets.h360],
-  simulcast: true,
-  degradationPreference: "maintain-framerate",
-};
-const LIVEKIT_ROOM_OPTIONS: RoomOptions = {
-  adaptiveStream: true,
-  dynacast: true,
-  audioCaptureDefaults: AUDIO_CAPTURE_OPTIONS,
-  videoCaptureDefaults: VIDEO_CAPTURE_OPTIONS,
-  publishDefaults: {
-    audioPreset: AudioPresets.speech,
-    videoEncoding: VideoPresets.h540.encoding,
-    videoSimulcastLayers: [VideoPresets.h180, VideoPresets.h360],
-    simulcast: true,
-    dtx: true,
-    red: true,
-    degradationPreference: "maintain-framerate",
-  },
-};
-const EMPTY_CALL: CallState = {
-  phase: "idle",
-  mode: "single",
-  callType: "voice",
-  muted: false,
-  cameraOff: false,
-  remoteMedias: [],
-};
+export type { CallState, RemoteMedia } from "@/components/call/call-types";
 
 const CallContext = createContext<CallContextValue | null>(null);
 
@@ -202,128 +71,14 @@ export function CallProvider({ children }: { children: ReactNode }) {
     setCall(EMPTY_CALL);
   }, [disconnectCurrentRoom]);
 
-  const connectRoom = useCallback(async (url: string, token: string, nextCallType: CallType) => {
-    await disconnectCurrentRoom();
-
-    // Group calls can grow quickly, so let LiveKit stop unused layers instead of
-    // forcing every browser to send and receive the highest quality stream.
-    const room = new Room(LIVEKIT_ROOM_OPTIONS);
-    roomRef.current = room;
-
-    const upsertRemote = (participant: RemoteParticipant, patch: Partial<RemoteMedia>) => {
-      setCall((prev) => {
-        const id = participant.identity;
-        const existing = prev.remoteMedias.find((item) => item.participantId === id);
-        const nextItem: RemoteMedia = {
-          participantId: id,
-          name: participant.name || id,
-          ...existing,
-          ...patch,
-        };
-        const remoteMedias = existing
-          ? prev.remoteMedias.map((item) => item.participantId === id ? nextItem : item)
-          : [...prev.remoteMedias, nextItem];
-        return {
-          ...prev,
-          remoteMedias,
-          remoteAudioTrack: nextItem.audioTrack ?? prev.remoteAudioTrack,
-          remoteVideoTrack: nextItem.videoTrack ?? prev.remoteVideoTrack,
-        };
-      });
-    };
-
-    const handleTrackSubscribed = (
-      track: RemoteTrack,
-      _publication: RemoteTrackPublication,
-      participant: RemoteParticipant,
-    ) => {
-      if (track.kind === Track.Kind.Audio) {
-        upsertRemote(participant, { audioTrack: track as RemoteAudioTrack });
-      } else if (track.kind === Track.Kind.Video) {
-        upsertRemote(participant, { videoTrack: track as RemoteVideoTrack });
-      }
-    };
-
-    const handleTrackUnsubscribed = (track: RemoteTrack, _publication: RemoteTrackPublication, participant: RemoteParticipant) => {
-      setCall((prev) => {
-        const remoteMedias = prev.remoteMedias.map((item) => {
-          if (item.participantId !== participant.identity) return item;
-          return {
-            ...item,
-            audioTrack: item.audioTrack === track ? undefined : item.audioTrack,
-            videoTrack: item.videoTrack === track ? undefined : item.videoTrack,
-          };
-        });
-        return {
-          ...prev,
-          remoteMedias,
-          remoteAudioTrack: prev.remoteAudioTrack === track ? undefined : prev.remoteAudioTrack,
-          remoteVideoTrack: prev.remoteVideoTrack === track ? undefined : prev.remoteVideoTrack,
-        };
-      });
-    };
-
-    room.on(RoomEvent.TrackSubscribed, handleTrackSubscribed);
-    room.on(RoomEvent.TrackUnsubscribed, handleTrackUnsubscribed);
-    room.on(RoomEvent.ConnectionQualityChanged, (quality: ConnectionQuality, participant: Participant) => {
-      if (!participant.isLocal) return;
-      if (quality === ConnectionQuality.Poor || quality === ConnectionQuality.Lost) {
-        if (!weakNetworkNotifiedRef.current) {
-          toast("当前网络较弱，视频会自动降低清晰度以保证通话");
-          weakNetworkNotifiedRef.current = true;
-        }
-      } else if (weakNetworkNotifiedRef.current && (quality === ConnectionQuality.Good || quality === ConnectionQuality.Excellent)) {
-        toast("网络已恢复");
-        weakNetworkNotifiedRef.current = false;
-      }
-    });
-    room.on(RoomEvent.Reconnecting, () => {
-      setCall((prev) => prev.phase === "connected" ? { ...prev, phase: "reconnecting" } : prev);
-      toast("媒体连接正在恢复...");
-    });
-    room.on(RoomEvent.Reconnected, () => {
-      setCall((prev) => prev.phase === "reconnecting" ? { ...prev, phase: "connected" } : prev);
-      toast("媒体连接已恢复");
-    });
-    room.on(RoomEvent.MediaDevicesError, (_error, kind) => {
-      toast(kind === "videoinput" ? "摄像头不可用，请检查浏览器权限" : "麦克风不可用，请检查浏览器权限");
-    });
-    room.on(RoomEvent.ParticipantDisconnected, (participant) => {
-      setCall((prev) => ({
-        ...prev,
-        remoteMedias: prev.remoteMedias.filter((item) => item.participantId !== participant.identity),
-      }));
-    });
-    room.on(RoomEvent.Disconnected, () => {
-      localAudioRef.current = null;
-      localVideoRef.current = null;
-      roomRef.current = null;
-      weakNetworkNotifiedRef.current = false;
-      setCall((prev) => (
-        prev.phase === "idle"
-          ? prev
-          : { ...prev, localVideoTrack: undefined, remoteAudioTrack: undefined, remoteVideoTrack: undefined, remoteMedias: [] }
-      ));
-    });
-
-    await room.connect(url, token, {
-      autoSubscribe: true,
-      peerConnectionTimeout: 15000,
-      websocketTimeout: 8000,  // fail fast — 3 × 15s was 45s
-      maxRetries: 1,
-    });
-
-    const audioTrack = await createLocalAudioTrack(AUDIO_CAPTURE_OPTIONS);
-    localAudioRef.current = audioTrack;
-    await room.localParticipant.publishTrack(audioTrack, AUDIO_PUBLISH_OPTIONS);
-
-    if (nextCallType === "video") {
-      const videoTrack = await createLocalVideoTrack(VIDEO_CAPTURE_OPTIONS);
-      localVideoRef.current = videoTrack;
-      await room.localParticipant.publishTrack(videoTrack, VIDEO_PUBLISH_OPTIONS);
-      setCall((prev) => ({ ...prev, localVideoTrack: videoTrack }));
-    }
-  }, [disconnectCurrentRoom]);
+  const connectRoom = useLiveKitRoom({
+    setCall,
+    roomRef,
+    localAudioRef,
+    localVideoRef,
+    weakNetworkNotifiedRef,
+    disconnectCurrentRoom,
+  });
 
   const startCall = useCallback(async ({ peer, callType }: StartCallInput) => {
     if (!peer.userId || callRef.current.phase !== "idle") return;
@@ -637,97 +392,4 @@ function handleRemoteSignal(action: SignalingActionName, reason: string | undefi
     toast("无人接听");
     void resetCall();
   }
-}
-
-function callErrorText(err: unknown, fallback: string, sfuUrl?: string): string {
-  const text = err instanceof Error ? err.message : String(err ?? "");
-  const lower = text.toLowerCase();
-  if (lower.includes("permission") || lower.includes("notallowed") || lower.includes("denied")) {
-    return "摄像头或麦克风权限不可用，请检查浏览器权限";
-  }
-  if (lower.includes("timeout") || lower.includes("websocket") || lower.includes("connect")) {
-    if (sfuUrl && (sfuUrl.includes("localhost") || sfuUrl.includes("127.0.0.1"))) {
-      return `媒体服务地址配置为 ${sfuUrl}（仅限本机）。跨机器通话需将服务端 im.call.sfu-endpoint 改为公网 IP`;
-    }
-    return `媒体服务连接失败（${sfuUrl ?? "unknown"}），请确认 LiveKit 已启动且地址可访问`;
-  }
-  if (lower.includes("blocked by target user")) {
-    return "对方已将你拉黑，无法发起通话";
-  }
-  if (lower.includes("对方已删除你") || lower.includes("forbidden") || lower.includes("403")) {
-    return "当前关系不允许发起通话，请先确认好友或群成员状态";
-  }
-  if (lower.includes("not a group member")) {
-    return "你已不在该群聊中，无法加入群视频";
-  }
-  if (lower.includes("not found") || lower.includes("not_active") || lower.includes("inactive")) {
-    return "通话已结束或对方尚未接入";
-  }
-  if (lower.includes("conflict") || lower.includes("busy") || lower.includes("409")) {
-    return "当前已有通话或对方正在通话中";
-  }
-  return fallback;
-}
-
-async function ensureMediaPermission(callType: CallType): Promise<void> {
-  if (!navigator.mediaDevices?.getUserMedia) return;
-  const stream = await navigator.mediaDevices.getUserMedia({
-    audio: AUDIO_CAPTURE_OPTIONS,
-    video: callType === "video" ? VIDEO_CAPTURE_OPTIONS : false,
-  });
-  stream.getTracks().forEach((track) => track.stop());
-}
-
-function startIncomingAttention(
-  titleTimerRef: MutableRefObject<number | null>,
-  ringtoneRef: MutableRefObject<AudioContext | null>,
-  originalTitle: string,
-  title: string,
-) {
-  stopIncomingAttention(titleTimerRef, ringtoneRef, originalTitle);
-  if (typeof document !== "undefined") {
-    let visible = false;
-    titleTimerRef.current = window.setInterval(() => {
-      visible = !visible;
-      document.title = visible ? title : originalTitle;
-    }, 900);
-  }
-  try {
-    const AudioCtor = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!AudioCtor) return;
-    const ctx = new AudioCtor();
-    ringtoneRef.current = ctx;
-    const ring = () => {
-      if (ringtoneRef.current !== ctx) return;
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.frequency.value = 880;
-      gain.gain.value = 0.04;
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start();
-      window.setTimeout(() => osc.stop(), 180);
-      window.setTimeout(ring, 1200);
-    };
-    void ctx.resume().then(ring).catch(() => undefined);
-  } catch {
-    // Browser autoplay rules may block audio until user gesture; title blinking still works.
-  }
-}
-
-function stopIncomingAttention(
-  titleTimerRef: MutableRefObject<number | null>,
-  ringtoneRef: MutableRefObject<AudioContext | null>,
-  originalTitle: string,
-) {
-  if (titleTimerRef.current !== null) {
-    window.clearInterval(titleTimerRef.current);
-    titleTimerRef.current = null;
-  }
-  if (typeof document !== "undefined") {
-    document.title = originalTitle;
-  }
-  const ctx = ringtoneRef.current;
-  ringtoneRef.current = null;
-  void ctx?.close().catch(() => undefined);
 }

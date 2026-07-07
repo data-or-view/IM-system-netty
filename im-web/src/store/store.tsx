@@ -1,592 +1,67 @@
 /**
- * IM 应用状态管理 —— 基于 React Context + useReducer。
+ * IM 应用状态管理 —— React Context + useReducer 的 Provider 编排层。
  *
- * 底层使用 im-sdk 的 Promise API，向上提供与旧版兼容的 useStore 接口。
- * SDK 事件（新消息、连接状态等）自动同步到 React state。
+ * 纯状态结构、reducer 和缓存/存储 helper 已拆到相邻模块，避免 Provider
+ * 同时承担类型定义、领域合并和 SDK 副作用细节。
  */
 
-import React, {
+import {
   createContext,
-  useContext,
-  useReducer,
   useCallback,
+  useContext,
   useEffect,
+  useReducer,
   useRef,
   type ReactNode,
 } from "react";
+import { createClientMsgId } from "im-sdk";
 import { im } from "@/sdk/im-sdk";
-import { ConversationType, MessageReceiveOption, createClientMsgId } from "im-sdk";
-import type { SystemMessageInboxItem, SystemMessageSummary, TokenPair, UserInfo as SDKUserInfo, FriendInfo as SDKFriendInfo, FriendApply as SDKFriendApply, GroupInfo as SDKGroupInfo, GroupMember as SDKGroupMember, GroupApply as SDKGroupApply, Conversation as SDKConversation, GroupJoinResponse } from "im-sdk";
-import {
-  AUTH_REFRESH_TOKEN_KEY,
-  AUTH_TOKEN_KEY,
-  AUTH_USER_ID_KEY,
-  clearStoredSyncCursors,
-  getStoredAuthUserId,
-  syncCursorsKey,
-} from "@/config/storage-keys";
 import { APP_BEHAVIOR } from "@/config/app-behavior";
-import { toOptimisticMessage, toViewMessage, type ViewMessage } from "@/lib/messages";
+import { AUTH_USER_ID_KEY } from "@/config/storage-keys";
+import { toOptimisticMessage } from "@/lib/messages";
 import {
-  applyDomainEvent,
-  latestMessage,
-  mergeConversationMessages,
   normalizeConversation,
-  setConversationsKeepingActive,
-  sortConversations,
-  upsertConversation,
   type PushRefreshTask,
 } from "@/store/domain";
-
-// ========== 类型（与 SDK 类型一致） ==========
-
-export type Conversation = SDKConversation;
-export type UserInfo = SDKUserInfo;
-export type FriendInfo = SDKFriendInfo;
-export type GroupInfo = SDKGroupInfo;
-export type GroupMember = SDKGroupMember;
-export type GroupApply = SDKGroupApply;
-
-export type Message = ViewMessage;
-
-// ========== State ==========
-
-export const SYSTEM_CONVERSATION_ID = "__system_notifications__";
-export const FRIEND_APPLY_UPDATED_EVENT = "im:friend-apply-updated";
-export const GROUP_APPLY_UPDATED_EVENT = "im:group-apply-updated";
-
-interface State {
-  token: string | null;
-  refreshToken: string | null;
-  userId: string | null;
-  connected: boolean;
-
-  conversations: Conversation[];
-  messages: Record<string, Message[]>;
-  friends: FriendInfo[];
-
-  myGroups: GroupInfo[];
-  searchUsers: UserInfo[];
-  searchGroups: GroupInfo[];
-  unhandledApplyCount: number;
-  unhandledGroupApplyCount: number;
-
-  activeConversationId: string | null;
-  systemMessages: SystemMessageInboxItem[];
-  systemUnreadCount: number;
-  latestSystemMessage: SystemMessageSummary | null;
-  groupMembers: Record<string, GroupMember[]>;
-  groupInfoCache: Record<string, GroupInfo>;
-  userProfileCache: Record<string, UserInfo>;
-  groupMembersCachedAt: Record<string, number>;
-  groupInfoCachedAt: Record<string, number>;
-  userProfileCachedAt: Record<string, number>;
-}
-
-const initialState: State = {
-  token: localStorage.getItem(AUTH_TOKEN_KEY),
-  refreshToken: localStorage.getItem(AUTH_REFRESH_TOKEN_KEY),
-  userId: getStoredAuthUserId(),
-  connected: false,
-  conversations: [],
-  messages: {},
-  friends: [],
-  myGroups: [],
-  searchUsers: [],
-  searchGroups: [],
-  unhandledApplyCount: 0,
-  unhandledGroupApplyCount: 0,
-  activeConversationId: null,
-  systemMessages: [],
-  systemUnreadCount: 0,
-  latestSystemMessage: null,
-  groupMembers: {},
-  groupInfoCache: {},
-  userProfileCache: {},
-  groupMembersCachedAt: {},
-  groupInfoCachedAt: {},
-  userProfileCachedAt: {},
-};
-
-// ========== Actions ==========
-
-type Action =
-  | { type: "SET_CONNECTED"; connected: boolean }
-  | { type: "SET_AUTH"; userId: string; token: string; refreshToken?: string | null }
-  | { type: "SET_TOKENS"; token?: string | null; refreshToken?: string | null }
-  | { type: "LOGOUT" }
-  | { type: "SET_CONVERSATIONS"; list: Conversation[] }
-  | { type: "APPEND_MESSAGE"; conversationId: string; msg: Message }
-  | { type: "ADD_MESSAGES"; conversationId: string; msgs: Message[] }
-  | { type: "REVOKE_MESSAGE"; conversationId: string; seq: number }
-  | { type: "SET_FRIENDS"; list: FriendInfo[] }
-  | { type: "SET_MY_GROUPS"; list: GroupInfo[] }
-  | { type: "SET_SEARCH_USERS"; list: UserInfo[] }
-  | { type: "SET_SEARCH_GROUPS"; list: GroupInfo[] }
-  | { type: "SET_UNHANDLED_APPLY_COUNT"; count: number }
-  | { type: "SET_UNHANDLED_GROUP_APPLY_COUNT"; count: number }
-  | { type: "SET_ACTIVE_CONVERSATION"; conversationId: string | null }
-  | { type: "SET_SYSTEM_MESSAGES"; messages: SystemMessageInboxItem[]; unreadCount: number }
-  | { type: "ADD_FRIEND"; friend: FriendInfo }
-  | { type: "REMOVE_FRIEND"; friendUserId: string }
-  | { type: "ADD_CONVERSATION"; conversation: Conversation }
-  | { type: "REMOVE_CONVERSATION"; conversationId: string }
-  | { type: "OPEN_SINGLE_CHAT"; input: OpenSingleChatInput }
-  | { type: "OPEN_GROUP_CHAT"; input: OpenGroupChatInput }
-  | { type: "MARK_READ_LOCAL"; conversationId: string }
-  | { type: "UPSERT_SENT_MESSAGE"; previousConversationId?: string; conversation: Conversation; msg: Message }
-  | { type: "UPDATE_CONVERSATION_LATEST"; conversationId: string; latestMsg: string; latestMsgSendTime: number; incoming?: boolean }
-  | { type: "UPDATE_CONVERSATION_UNREAD"; conversationId: string; unreadCount: number }
-  | { type: "SET_GROUP_MEMBERS"; groupId: string; members: GroupMember[] }
-  | { type: "SET_GROUP_INFO"; groupId: string; info: GroupInfo }
-  | { type: "SET_USER_PROFILE"; userId: string; info: UserInfo }
-  | { type: "REPLACE_DOMAIN_STATE"; state: Pick<State, "userId" | "activeConversationId" | "conversations" | "messages" | "systemMessages" | "systemUnreadCount" | "latestSystemMessage"> };
-
-function reducer(state: State, action: Action): State {
-  switch (action.type) {
-    case "SET_CONNECTED":
-      return { ...state, connected: action.connected };
-    case "SET_AUTH":
-      return {
-        ...state,
-        userId: action.userId,
-        token: action.token,
-        refreshToken: action.refreshToken ?? state.refreshToken,
-      };
-    case "SET_TOKENS":
-      return {
-        ...state,
-        token: action.token !== undefined ? action.token : state.token,
-        refreshToken: action.refreshToken !== undefined ? action.refreshToken : state.refreshToken,
-      };
-    case "LOGOUT":
-      return { ...initialState, token: null, refreshToken: null, userId: null, connected: false };
-    case "SET_CONVERSATIONS": {
-      return mergeProfileCaches(
-        setConversationsKeepingActive(state, action.list) as State,
-        profilesFromConversations(action.list),
-        groupsFromConversations(action.list),
-      );
-    }
-    case "APPEND_MESSAGE": {
-      const existing = state.messages[action.conversationId] || [];
-      const merged = mergeConversationMessages(existing, [action.msg]);
-      if (merged === existing) return state;
-      return {
-        ...state,
-        messages: { ...state.messages, [action.conversationId]: merged },
-      };
-    }
-    case "ADD_MESSAGES": {
-      const existing = state.messages[action.conversationId] || [];
-      const merged = mergeConversationMessages(existing, action.msgs);
-      if (merged === existing) return state;
-      return {
-        ...state,
-        messages: {
-          ...state.messages,
-          [action.conversationId]: merged,
-        },
-      };
-    }
-    case "REVOKE_MESSAGE": {
-      const existing = state.messages[action.conversationId] || [];
-      if (existing.length === 0) return state;
-      return {
-        ...state,
-        messages: {
-          ...state.messages,
-          [action.conversationId]: existing.map((m) =>
-            m.seq === action.seq ? { ...m, contentType: 101, content: "消息已撤回" } : m
-          ),
-        },
-      };
-    }
-    case "SET_FRIENDS":
-      return mergeProfileCaches({ ...state, friends: action.list }, profilesFromFriends(action.list), []);
-    case "SET_MY_GROUPS":
-      return mergeProfileCaches({ ...state, myGroups: action.list }, [], action.list);
-    case "SET_SEARCH_USERS":
-      return mergeProfileCaches({ ...state, searchUsers: action.list }, action.list, []);
-    case "SET_SEARCH_GROUPS":
-      return mergeProfileCaches({ ...state, searchGroups: action.list }, [], action.list);
-    case "SET_UNHANDLED_APPLY_COUNT":
-      return { ...state, unhandledApplyCount: action.count };
-    case "SET_UNHANDLED_GROUP_APPLY_COUNT":
-      return { ...state, unhandledGroupApplyCount: action.count };
-    case "SET_ACTIVE_CONVERSATION": {
-      const cleared = action.conversationId
-        ? state.conversations.map((c) =>
-            c.conversationId === action.conversationId ? { ...c, unreadCount: 0 } : c
-          )
-        : state.conversations;
-      return { ...state, activeConversationId: action.conversationId, conversations: cleared };
-    }
-    case "SET_SYSTEM_MESSAGES":
-      return {
-        ...state,
-        systemMessages: action.messages,
-        systemUnreadCount: action.unreadCount,
-        latestSystemMessage: action.messages[0] ?? state.latestSystemMessage,
-      };
-    case "ADD_FRIEND": {
-      if (state.friends.some((f) => f.friendUserId === action.friend.friendUserId)) return state;
-      return { ...state, friends: [...state.friends, action.friend] };
-    }
-    case "REMOVE_FRIEND":
-      return { ...state, friends: state.friends.filter((f) => f.friendUserId !== action.friendUserId) };
-    case "ADD_CONVERSATION": {
-      return { ...state, conversations: upsertConversation(state.conversations, { conversation: action.conversation }) };
-    }
-    case "REMOVE_CONVERSATION": {
-      const messages = { ...state.messages };
-      delete messages[action.conversationId];
-      return {
-        ...state,
-        conversations: state.conversations.filter((c) => c.conversationId !== action.conversationId),
-        messages,
-        activeConversationId: state.activeConversationId === action.conversationId ? null : state.activeConversationId,
-      };
-    }
-    case "OPEN_SINGLE_CHAT": {
-      const existing = state.conversations.find(
-        (conv) => conv.conversationType === ConversationType.SINGLE && conv.userId === action.input.userId,
-      );
-      const conversation = existing
-        ? normalizeConversation({
-            ...existing,
-            userId: existing.userId || action.input.userId,
-            showName: existing.showName || action.input.nickname || action.input.userId,
-            faceUrl: existing.faceUrl || action.input.faceUrl,
-          })
-        : createSingleConversation(state.userId || "", action.input);
-      return {
-        ...state,
-        conversations: upsertConversation(state.conversations, { conversation }),
-        activeConversationId: conversation.conversationId,
-      };
-    }
-    case "OPEN_GROUP_CHAT": {
-      const existing = state.conversations.find(
-        (conv) => conv.conversationType === ConversationType.GROUP
-          && (conv.groupId === action.input.groupId || conv.conversationId === groupConversationId(action.input.groupId)),
-      );
-      const conversation = existing ?? createGroupConversation(state.userId || "", action.input);
-      return {
-        ...state,
-        conversations: upsertConversation(state.conversations, { conversation }),
-        activeConversationId: conversation.conversationId,
-      };
-    }
-    case "MARK_READ_LOCAL":
-      return {
-        ...state,
-        conversations: state.conversations.map((c) =>
-          c.conversationId === action.conversationId ? { ...c, unreadCount: 0 } : c
-        ),
-      };
-    case "UPSERT_SENT_MESSAGE": {
-      const nextId = action.conversation.conversationId;
-      const previousId = action.previousConversationId;
-      const carriedMessages = previousId && previousId !== nextId ? state.messages[previousId] || [] : [];
-      const merged = mergeConversationMessages(
-        state.messages[nextId] || [],
-        [...carriedMessages, action.msg],
-      );
-      const messages = { ...state.messages, [nextId]: merged };
-      if (previousId && previousId !== nextId) {
-        delete messages[previousId];
-      }
-      return {
-        ...state,
-        messages,
-        conversations: upsertConversation(state.conversations, {
-          conversation: {
-            ...action.conversation,
-            latestMsg: action.msg.content,
-            latestMsgSendTime: action.msg.createTime,
-            unreadCount: 0,
-          },
-        }),
-        activeConversationId: previousId && state.activeConversationId === previousId ? nextId : state.activeConversationId,
-      };
-    }
-    case "UPDATE_CONVERSATION_LATEST": {
-      const convExists = state.conversations.some((c) => c.conversationId === action.conversationId);
-      if (!convExists) return state;
-      const isActive = state.activeConversationId === action.conversationId;
-      return {
-        ...state,
-        conversations: sortConversations(state.conversations.map((c) =>
-          c.conversationId === action.conversationId
-            ? {
-                ...c,
-                latestMsg: action.latestMsg,
-                latestMsgSendTime: action.latestMsgSendTime,
-                unreadCount: action.incoming && !isActive ? c.unreadCount + 1 : c.unreadCount,
-              }
-            : c
-        )),
-      };
-    }
-    case "UPDATE_CONVERSATION_UNREAD":
-      return {
-        ...state,
-        conversations: state.conversations.map((c) =>
-          c.conversationId === action.conversationId
-            ? { ...c, unreadCount: action.unreadCount }
-            : c
-        ),
-      };
-    case "SET_GROUP_MEMBERS":
-      return mergeProfileCaches({
-        ...state,
-        groupMembers: { ...state.groupMembers, [action.groupId]: action.members },
-        groupMembersCachedAt: { ...state.groupMembersCachedAt, [action.groupId]: Date.now() },
-      }, profilesFromGroupMembers(action.members), []);
-    case "SET_GROUP_INFO":
-      return mergeProfileCaches({
-        ...state,
-        groupInfoCache: { ...state.groupInfoCache, [action.groupId]: action.info },
-        groupInfoCachedAt: { ...state.groupInfoCachedAt, [action.groupId]: Date.now() },
-      }, [], [action.info]);
-    case "SET_USER_PROFILE":
-      return mergeProfileCaches(state, [action.info], []);
-    case "REPLACE_DOMAIN_STATE":
-      return {
-        ...state,
-        userId: action.state.userId,
-        activeConversationId: action.state.activeConversationId,
-        conversations: action.state.conversations,
-        messages: action.state.messages,
-        systemMessages: action.state.systemMessages,
-        systemUnreadCount: action.state.systemUnreadCount,
-        latestSystemMessage: action.state.latestSystemMessage,
-      };
-    default:
-      return state;
-  }
-}
-
-// ========== Context ==========
-
-interface StoreContextType {
-  state: State;
-  dispatch: React.Dispatch<Action>;
-  login: (userId: string, password?: string) => Promise<void>;
-  register: (params: { password?: string; nickname?: string; faceUrl?: string }) => Promise<string>;
-  logout: () => void;
-  sendMessage: (toUserId: string, content: string) => Promise<Message | undefined>;
-  fetchConversations: () => Promise<void>;
-  fetchFriends: () => Promise<void>;
-  searchUser: (keyword: string, limit?: number) => Promise<void>;
-  applyFriend: (targetUserId: string, reqMsg?: string) => Promise<void>;
-  removeFriend: (targetUserId: string) => Promise<void>;
-  searchGroup: (keyword: string, limit?: number) => Promise<void>;
-  joinGroup: (groupId: string, reqMsg?: string) => Promise<GroupJoinResponse>;
-  quitGroup: (groupId: string) => Promise<void>;
-  fetchMyGroups: () => Promise<void>;
-  approveFriend: (fromUserId: string, agreed: boolean) => Promise<void>;
-  fetchUnhandledApplyCount: () => Promise<void>;
-  approveGroupApply: (groupId: string, userId: string, agreed: boolean) => Promise<void>;
-  fetchUnhandledGroupApplyCount: () => Promise<void>;
-  fetchGroupMembers: (groupId: string, options?: { force?: boolean }) => Promise<void>;
-  fetchGroupInfo: (groupId: string, options?: { force?: boolean }) => Promise<void>;
-  fetchUserProfile: (userId: string, options?: { force?: boolean }) => Promise<void>;
-  markConversationRead: (conversationId: string, seq?: number) => Promise<void>;
-  refreshSystemMessages: () => Promise<void>;
-  openSingleChat: (input: OpenSingleChatInput) => void;
-  openGroupChat: (input: OpenGroupChatInput) => void;
-  removeConversationLocal: (conversationId: string) => void;
-  refreshAfterMembershipChanged: () => Promise<void>;
-}
+import { initialState, reducer } from "@/store/store-reducer";
+import {
+  cacheFresh,
+  clearStoredAuth,
+  currentStoredUserId,
+  groupConversationId,
+  groupInfoFromConversation,
+  persistSyncCursors,
+  persistTokens,
+} from "@/store/store-helpers";
+import { useStoreSdkEvents } from "@/store/useStoreSdkEvents";
+import type {
+  Conversation,
+  FriendInfo,
+  GroupInfo,
+  GroupMember,
+  OpenGroupChatInput,
+  OpenSingleChatInput,
+  StoreContextType,
+  UserInfo,
+} from "@/store/store-types";
+export {
+  FRIEND_APPLY_UPDATED_EVENT,
+  GROUP_APPLY_UPDATED_EVENT,
+  SYSTEM_CONVERSATION_ID,
+} from "@/store/store-types";
+export type {
+  Conversation,
+  FriendInfo,
+  GroupApply,
+  GroupInfo,
+  GroupMember,
+  Message,
+  OpenGroupChatInput,
+  OpenSingleChatInput,
+  UserInfo,
+} from "@/store/store-types";
 
 const StoreContext = createContext<StoreContextType | null>(null);
-
-export interface OpenSingleChatInput {
-  userId: string;
-  nickname?: string;
-  faceUrl?: string;
-}
-
-export interface OpenGroupChatInput {
-  groupId: string;
-  groupName?: string;
-  faceUrl?: string;
-}
-
-function persistTokens(tokens: TokenPair) {
-  if (tokens.token) localStorage.setItem(AUTH_TOKEN_KEY, tokens.token);
-  if (tokens.refreshToken) localStorage.setItem(AUTH_REFRESH_TOKEN_KEY, tokens.refreshToken);
-}
-
-function currentStoredUserId(stateUserId?: string | null): string | null {
-  return getStoredAuthUserId() || stateUserId || null;
-}
-
-function clearStoredAuth(userId?: string | null) {
-  clearStoredSyncCursors(userId ?? getStoredAuthUserId());
-  localStorage.removeItem(AUTH_USER_ID_KEY);
-  localStorage.removeItem(AUTH_TOKEN_KEY);
-  localStorage.removeItem(AUTH_REFRESH_TOKEN_KEY);
-  im.clearTokens();
-}
-
-function persistSyncCursors(userId: string | null | undefined, messages: Record<string, Message[]>): void {
-  if (!userId) return;
-  const cursors = Object.entries(messages)
-    .map(([conversationId, list]) => ({
-      conversationId,
-      lastSeq: list.reduce((max, msg) => Math.max(max, msg.seq || 0), 0),
-    }))
-    .filter((cursor) => cursor.lastSeq > 0);
-  sessionStorage.setItem(syncCursorsKey(userId), JSON.stringify(cursors));
-}
-
-function cacheFresh(cachedAt: number | undefined, ttlMs: number): boolean {
-  return cachedAt !== undefined && Date.now() - cachedAt < ttlMs;
-}
-
-function mergeUserProfile(existing: UserInfo | undefined, next: UserInfo): UserInfo {
-  return {
-    ...existing,
-    ...next,
-    nickname: next.nickname || existing?.nickname,
-    faceUrl: next.faceUrl || existing?.faceUrl,
-  };
-}
-
-function mergeGroupInfo(existing: GroupInfo | undefined, next: GroupInfo): GroupInfo {
-  return {
-    ...existing,
-    ...next,
-    groupName: next.groupName || existing?.groupName || next.groupId,
-    faceUrl: next.faceUrl || existing?.faceUrl,
-  };
-}
-
-function mergeProfileCaches(state: State, users: UserInfo[], groups: GroupInfo[]): State {
-  const now = Date.now();
-  let userProfileCache = state.userProfileCache;
-  let userProfileCachedAt = state.userProfileCachedAt;
-  let groupInfoCache = state.groupInfoCache;
-  let groupInfoCachedAt = state.groupInfoCachedAt;
-
-  for (const user of users) {
-    if (!user.userId) continue;
-    if (userProfileCache === state.userProfileCache) userProfileCache = { ...state.userProfileCache };
-    if (userProfileCachedAt === state.userProfileCachedAt) userProfileCachedAt = { ...state.userProfileCachedAt };
-    userProfileCache[user.userId] = mergeUserProfile(userProfileCache[user.userId], user);
-    userProfileCachedAt[user.userId] = now;
-  }
-
-  for (const group of groups) {
-    if (!group.groupId) continue;
-    if (groupInfoCache === state.groupInfoCache) groupInfoCache = { ...state.groupInfoCache };
-    if (groupInfoCachedAt === state.groupInfoCachedAt) groupInfoCachedAt = { ...state.groupInfoCachedAt };
-    groupInfoCache[group.groupId] = mergeGroupInfo(groupInfoCache[group.groupId], group);
-    groupInfoCachedAt[group.groupId] = now;
-  }
-
-  if (
-    userProfileCache === state.userProfileCache &&
-    userProfileCachedAt === state.userProfileCachedAt &&
-    groupInfoCache === state.groupInfoCache &&
-    groupInfoCachedAt === state.groupInfoCachedAt
-  ) {
-    return state;
-  }
-  return { ...state, userProfileCache, userProfileCachedAt, groupInfoCache, groupInfoCachedAt };
-}
-
-function profilesFromFriends(friends: FriendInfo[]): UserInfo[] {
-  return friends.map((friend) => ({
-    userId: friend.friendUserId,
-    nickname: friend.remark || friend.nickname,
-    faceUrl: friend.faceUrl,
-  }));
-}
-
-function profilesFromGroupMembers(members: GroupMember[]): UserInfo[] {
-  return members.map((member) => ({
-    userId: member.userId,
-    nickname: member.nickname,
-    faceUrl: member.faceUrl,
-  }));
-}
-
-function profilesFromConversations(conversations: Conversation[]): UserInfo[] {
-  return conversations
-    .filter((conversation) => conversation.conversationType === ConversationType.SINGLE && conversation.userId)
-    .map((conversation) => ({
-      userId: conversation.userId || "",
-      nickname: conversation.showName || conversation.userId,
-      faceUrl: conversation.faceUrl,
-    }));
-}
-
-function groupsFromConversations(conversations: Conversation[]): GroupInfo[] {
-  return conversations
-    .filter((conversation) => conversation.conversationType === ConversationType.GROUP && (conversation.groupId || conversation.conversationId))
-    .map((conversation) => ({
-      groupId: conversation.groupId || conversation.conversationId.replace(/^group_/, ""),
-      groupName: conversation.groupName || conversation.showName || conversation.groupId || conversation.conversationId,
-      faceUrl: conversation.faceUrl,
-    }));
-}
-
-function groupInfoFromConversation(list: Conversation[]): GroupInfo[] {
-  return list
-    .filter((c) => c.conversationType === ConversationType.GROUP)
-    .map((c) => ({
-      groupId: c.groupId || c.conversationId.replace(/^group_/, ""),
-      groupName: c.groupName || c.showName,
-      faceUrl: c.faceUrl,
-    }));
-}
-
-function singleConversationId(currentUserId: string, friendUserId: string): string {
-  return `single_${[currentUserId, friendUserId].sort().join("_")}`;
-}
-
-function groupConversationId(groupId: string): string {
-  return `group_${groupId}`;
-}
-
-function createSingleConversation(currentUserId: string, input: OpenSingleChatInput): Conversation {
-  return normalizeConversation({
-    conversationId: singleConversationId(currentUserId, input.userId),
-    ownerUserId: currentUserId,
-    conversationType: ConversationType.SINGLE,
-    userId: input.userId,
-    showName: input.nickname || input.userId,
-    faceUrl: input.faceUrl,
-    latestMsg: "",
-    latestMsgSendTime: 0,
-    unreadCount: 0,
-    recvMsgOpt: MessageReceiveOption.NORMAL,
-    isPinned: false,
-  });
-}
-
-function createGroupConversation(currentUserId: string, input: OpenGroupChatInput): Conversation {
-  return normalizeConversation({
-    conversationId: groupConversationId(input.groupId),
-    ownerUserId: currentUserId,
-    conversationType: ConversationType.GROUP,
-    groupId: input.groupId,
-    groupName: input.groupName || input.groupId,
-    showName: input.groupName || input.groupId,
-    faceUrl: input.faceUrl,
-    latestMsg: "",
-    latestMsgSendTime: 0,
-    unreadCount: 0,
-    recvMsgOpt: MessageReceiveOption.NORMAL,
-    isPinned: false,
-  });
-}
-
-// ========== Provider ==========
 
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initialState);
@@ -610,10 +85,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const markConversationRead = useCallback(async (conversationId: string, seq?: number) => {
     const currentState = stateRef.current;
-    const conversation = currentState.conversations.find((c) => c.conversationId === conversationId);
-    if (!conversation) {
-      return;
-    }
+    const conversation = currentState.conversations.find((item) => item.conversationId === conversationId);
+    if (!conversation) return;
+
     const nextSeq = seq ?? (currentState.messages[conversationId] || []).reduce(
       (max, msg) => Math.max(max, msg.seq || 0),
       0,
@@ -622,12 +96,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       dispatch({ type: "MARK_READ_LOCAL", conversationId });
       return;
     }
+
     const lastSeq = lastReadSeqRef.current[conversationId] ?? -1;
-    if (nextSeq <= lastSeq && conversation.unreadCount === 0) {
-      return;
-    }
+    if (nextSeq <= lastSeq && conversation.unreadCount === 0) return;
     lastReadSeqRef.current[conversationId] = nextSeq;
     dispatch({ type: "MARK_READ_LOCAL", conversationId });
+
     try {
       const result = await im.conversation.read(conversationId, nextSeq || undefined);
       dispatch({
@@ -752,90 +226,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     ]);
   }, [fetchConversations, fetchFriends, fetchMyGroups, fetchUnhandledApplyCount, fetchUnhandledGroupApplyCount, fetchUserProfile, refreshSystemMessages, state.userId]);
 
-  // ── SDK 事件监听 ──
-  useEffect(() => {
-    const unsubConnection = im.on("connectionStateChanged", (s) => {
-      dispatch({ type: "SET_CONNECTED", connected: s === "connected" });
-      if (s === "connected" && localStorage.getItem(AUTH_TOKEN_KEY)) {
-        void hydrateAfterAuth();
-      }
-    });
-
-    const unsubMessageBatch = im.on("messageBatch", (sdkMsgs) => {
-      const currentState = stateRef.current;
-      const activeConversationId = currentState.activeConversationId;
-      const currentUserId = currentStoredUserId(currentState.userId);
-      const result = applyDomainEvent(currentState, {
-        type: "MESSAGE_RECEIVED",
-        messages: sdkMsgs,
-        currentUserId,
-        activeConversationId,
-      });
-      dispatch({ type: "REPLACE_DOMAIN_STATE", state: result.state });
-      runRefreshTasks(result.refreshTasks);
-
-      const grouped = new Map<string, Message[]>();
-      for (const sdkMsg of sdkMsgs) {
-        const msg = toViewMessage(sdkMsg);
-        if (!msg.conversationId) continue;
-        grouped.set(msg.conversationId, [...(grouped.get(msg.conversationId) || []), msg]);
-      }
-      for (const [conversationId, msgs] of grouped) {
-        if (activeConversationId === conversationId) {
-          const latest = latestMessage(msgs);
-          if (latest) void markConversationRead(conversationId, latest.seq);
-        }
-      }
-    });
-
-    const unsubRevoke = im.on("messageRevoked", (event) => {
-      const result = applyDomainEvent(stateRef.current, { type: "MESSAGE_REVOKED", event });
-      dispatch({ type: "REPLACE_DOMAIN_STATE", state: result.state });
-      runRefreshTasks(result.refreshTasks);
-    });
-
-    const unsubFriendRequest = im.on("friendRequest", (apply: SDKFriendApply) => {
-      const result = applyDomainEvent(stateRef.current, { type: "FRIEND_APPLY_UPDATED", apply });
-      dispatch({ type: "REPLACE_DOMAIN_STATE", state: result.state });
-      runRefreshTasks(result.refreshTasks);
-      window.dispatchEvent(new CustomEvent(FRIEND_APPLY_UPDATED_EVENT, { detail: apply }));
-    });
-
-    const unsubGroupApply = im.on("groupApply", (apply: SDKGroupApply) => {
-      const result = applyDomainEvent(stateRef.current, { type: "GROUP_APPLY_UPDATED", apply });
-      dispatch({ type: "REPLACE_DOMAIN_STATE", state: result.state });
-      runRefreshTasks(result.refreshTasks);
-      window.dispatchEvent(new CustomEvent(GROUP_APPLY_UPDATED_EVENT, { detail: apply }));
-    });
-
-    const unsubSystemMessage = im.on("systemMessage", (message: SystemMessageSummary) => {
-      const result = applyDomainEvent(stateRef.current, { type: "SYSTEM_MESSAGE_RECEIVED", message });
-      dispatch({ type: "REPLACE_DOMAIN_STATE", state: result.state });
-      runRefreshTasks(result.refreshTasks);
-    });
-
-    const unsubReconnectSync = im.on("reconnectSync", () => {
-      const result = applyDomainEvent(stateRef.current, { type: "RECONNECTED_SYNCED" });
-      dispatch({ type: "REPLACE_DOMAIN_STATE", state: result.state });
-      runRefreshTasks(result.refreshTasks);
-    });
-
-    const unsubTokenChanged = im.on("tokenChanged", (tokens) => {
-      persistTokens(tokens);
-      dispatch({ type: "SET_TOKENS", token: tokens.token, refreshToken: tokens.refreshToken });
-    });
-
-    return () => {
-      unsubConnection();
-      unsubMessageBatch();
-      unsubRevoke();
-      unsubFriendRequest();
-      unsubGroupApply();
-      unsubSystemMessage();
-      unsubReconnectSync();
-      unsubTokenChanged();
-    };
-  }, [hydrateAfterAuth, markConversationRead, runRefreshTasks]);
+  useStoreSdkEvents({
+    stateRef,
+    dispatch,
+    hydrateAfterAuth,
+    markConversationRead,
+    runRefreshTasks,
+  });
 
   useEffect(() => {
     const conversationId = state.activeConversationId;
@@ -863,8 +260,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // ── Actions ──
-
   const login = useCallback(async (userId: string, password?: string) => {
     localStorage.setItem(AUTH_USER_ID_KEY, userId);
     const tokens = await im.login(userId, password);
@@ -884,7 +279,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     clearStoredAuth(state.userId);
     im.disconnect();
     dispatch({ type: "LOGOUT" });
-  }, []);
+  }, [state.userId]);
 
   const sendMessage = useCallback(async (toUserId: string, content: string) => {
     const messageContent = { text: content };

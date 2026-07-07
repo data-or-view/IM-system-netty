@@ -150,3 +150,33 @@ test("ChatArea stays an orchestration component with chat responsibilities split
     assert.equal(fs.existsSync(path.join(root, file)), true, `${file} should exist`);
   }
 });
+
+test("large frontend modules are split by responsibility", () => {
+  for (const [file, maxLines] of [
+    ["src/store/store.tsx", 520],
+    ["src/components/Sidebar.tsx", 300],
+    ["src/components/call/CallProvider.tsx", 420],
+    ["src/pages/GroupInfoPage.tsx", 360],
+  ]) {
+    assert.ok(lineCount(file) <= maxLines, `${file} should stay below ${maxLines} lines`);
+  }
+
+  for (const file of [
+    "src/store/store-types.ts",
+    "src/store/store-reducer.ts",
+    "src/store/store-helpers.ts",
+    "src/components/sidebar/SidebarRail.tsx",
+    "src/components/sidebar/SidebarLists.tsx",
+    "src/components/sidebar/SidebarItems.tsx",
+    "src/components/call/call-types.ts",
+    "src/components/call/call-config.ts",
+    "src/components/call/call-attention.ts",
+    "src/components/call/call-errors.ts",
+    "src/pages/group-info/group-info-utils.ts",
+    "src/pages/group-info/useGroupManagement.ts",
+    "src/pages/group-info/GroupMemberList.tsx",
+    "src/pages/group-info/GroupEditDialogs.tsx",
+  ]) {
+    assert.equal(fs.existsSync(path.join(root, file)), true, `${file} should exist`);
+  }
+});

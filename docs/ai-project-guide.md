@@ -306,13 +306,20 @@ src/config/app-behavior.ts
 src/lib/app-errors.ts
 src/sdk/im-sdk.ts
 src/store/store.tsx
+src/store/store-types.ts
+src/store/store-reducer.ts
+src/store/store-helpers.ts
+src/store/useStoreSdkEvents.ts
 src/store/domain.ts
 src/components/GlobalErrorHandler.tsx
 src/pages/ChatLayout.tsx
 src/components/ChatArea.tsx
 src/components/chat/*
 src/components/Sidebar.tsx
+src/components/sidebar/*
 src/components/call/*
+src/pages/GroupInfoPage.tsx
+src/pages/group-info/*
 ```
 
 前端工程约束：
@@ -321,6 +328,7 @@ src/components/call/*
 - 缓存 TTL、刷新 debounce、搜索/分页数量等非视觉行为数值放在 `src/config/app-behavior.ts`。
 - 登录态校验只在明确 token 失效时 `logout()`；连接失败、超时、5xx 等临时错误要保留登录状态。
 - 全局错误入口是 `src/components/GlobalErrorHandler.tsx` 和 `src/lib/app-errors.ts`，会监听 SDK `error`、`window.error`、`unhandledrejection` 和 `im:app-error`。
+- 大型前端文件保持编排层职责：`store/store.tsx` 只做 Provider 编排，reducer/types/helpers/SDK 事件桥接在相邻 store 模块；`Sidebar.tsx` 的列表和 rail 在 `components/sidebar/*`；`CallProvider.tsx` 的配置、错误、注意力和 LiveKit room 逻辑在 `components/call/*`；`GroupInfoPage.tsx` 的管理 hook、成员列表和编辑弹窗在 `pages/group-info/*`。
 - 改前端工程约束后运行 `pnpm --dir im-web test:engineering`；交付前至少运行 `pnpm --dir im-web build`。
 
 ## 场景测试

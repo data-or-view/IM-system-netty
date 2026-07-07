@@ -36,7 +36,7 @@ pnpm --dir im-web build
 pnpm --dir im-web test:engineering
 ```
 
-这组轻量测试用于守住前端工程约束：路由集中配置、鉴权错误分类、错误边界导航、行为常量收敛、旧示例入口清理。
+这组轻量测试用于守住前端工程约束：路由集中配置、鉴权错误分类、错误边界导航、行为常量收敛、旧示例入口清理，以及大模块按职责拆分。
 
 ## 关键文件
 
@@ -52,10 +52,17 @@ pnpm --dir im-web test:engineering
 | `src/pages/ChatLayout.tsx` | 聊天工作台布局。 |
 | `src/components/ChatArea.tsx` | 消息区编排层，具体展示和副作用拆到 `src/components/chat/*`。 |
 | `src/components/chat/*` | 消息头部、消息列表、输入区、历史加载和群通话状态。 |
-| `src/components/Sidebar.tsx` | 会话、好友、群组入口。 |
-| `src/store/store.tsx` | 全局状态容器。 |
+| `src/components/Sidebar.tsx` | 左侧栏外壳和弹窗编排，列表/条目/功能 rail 在 `src/components/sidebar/*`。 |
+| `src/components/sidebar/*` | 会话、好友、群组列表项和侧栏工具入口。 |
+| `src/store/store.tsx` | 全局状态 Provider 编排层。 |
+| `src/store/store-types.ts` | Store 公共状态、action 和 context 类型。 |
+| `src/store/store-reducer.ts` | Store 初始状态和 reducer。 |
+| `src/store/store-helpers.ts` | Store 缓存、持久化和会话派生 helper。 |
+| `src/store/useStoreSdkEvents.ts` | SDK push/event 到 store 的副作用桥接。 |
 | `src/store/domain.ts` | 会话、消息、推送事件的领域合并逻辑。 |
-| `src/components/call/*` | LiveKit 通话 UI 和状态。 |
+| `src/components/call/*` | LiveKit 通话 UI、Provider、配置、错误和房间连接逻辑。 |
+| `src/pages/GroupInfoPage.tsx` | 群资料页编排层。 |
+| `src/pages/group-info/*` | 群资料表单、成员列表、群管理操作 hook 和群资料文案工具。 |
 
 ## 前端约束
 
@@ -63,6 +70,7 @@ pnpm --dir im-web test:engineering
 - 非视觉行为数值优先放进 `src/config/app-behavior.ts`，例如缓存 TTL、请求数量、debounce。
 - 登录态校验只有明确 token 失效才 logout；连接失败、超时、服务端 5xx 要保留当前登录态。
 - 业务主动 catch 的错误要么本地明确展示，要么通过 `notifyAppError()` 交给全局错误处理。
+- `ChatArea`、`Sidebar`、`CallProvider`、`GroupInfoPage` 和 `store` 保持编排层职责；新增复杂逻辑优先放到相邻子目录、hook、reducer 或 helper。
 
 ## 与后端的关系
 
