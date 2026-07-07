@@ -27,6 +27,8 @@ im:
   http:
     enabled: true                # 启用 HTTP REST API
     port: 8082                   # HTTP REST 端口
+    trusted-proxy-enabled: false # 只有服务部署在可信反向代理/LB 后面时才设为 true；否则客户端可伪造 X-Forwarded-For 绕过 IP 限流。
+    client-ip-header: "X-Forwarded-For" # trusted-proxy-enabled=true 时读取的真实客户端 IP Header，取逗号分隔的第一个地址。
 
   # ── 节点 ──
   node:
@@ -82,6 +84,80 @@ im:
   # ── 幂等性 ──
   idempotency:
     send-expire-seconds: 86400   # 发送消息 clientMsgId 幂等记录保留 24 小时
+
+  # ── Redis 集群限流 ──
+  # 所有限流 key 都写 Redis，集群多节点共享；不要在生产路径改成本地内存限流。
+  # fail-open=false 表示 Redis 限流不可用时拒绝高风险请求，企业默认优先保护系统。
+  rate-limit:
+    enabled: true
+    fail-open: false
+    key-prefix: "im:rl:"          # 建议按环境隔离，如 im:rl:prod: / im:rl:staging:
+
+    # 登录：同时限制来源 IP 和提交的账号，避免单 IP 爆破与分布式撞库。
+    login:
+      ip:
+        limit: 10
+        window-seconds: 60
+      user:
+        limit: 5
+        window-seconds: 60
+
+    # 注册：按 IP 控制批量注册。
+    register:
+      ip:
+        limit: 5
+        window-seconds: 300
+
+    # 单聊发送：限制单个用户总发送速率和对同一目标用户的发送速率。
+    chat-send:
+      user:
+        limit: 120
+        window-seconds: 60
+      user-target:
+        limit: 60
+        window-seconds: 60
+
+    # 群聊发送：限制单个用户总发送速率和同一用户在同一群的发送速率。
+    chat-send-group:
+      user:
+        limit: 120
+        window-seconds: 60
+      user-group:
+        limit: 60
+        window-seconds: 60
+
+    # 好友申请：限制单用户总申请量，也限制对同一目标用户反复申请。
+    friend-apply:
+      user:
+        limit: 30
+        window-seconds: 3600
+      user-target:
+        limit: 3
+        window-seconds: 86400
+
+    # 入群申请：限制单用户总申请量，也限制对同一群反复申请。
+    group-join:
+      user:
+        limit: 30
+        window-seconds: 3600
+      user-group:
+        limit: 3
+        window-seconds: 86400
+
+    # 文件上传：覆盖上传、上传签名、完成、分片初始化、分片签名、分片上传、分片完成和分片中止接口。
+    file-upload:
+      user:
+        limit: 120
+        window-seconds: 600
+
+    # 管理员系统消息：同时限制单管理员和全局发布频率，避免误操作刷屏。
+    admin-system-message:
+      user:
+        limit: 20
+        window-seconds: 60
+      global:
+        limit: 60
+        window-seconds: 60
 
   # ── Webhook ──
   webhook:

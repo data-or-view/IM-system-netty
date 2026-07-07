@@ -2,6 +2,7 @@ package com.im.bootstrap.http;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.im.api.ApiRequest;
 import com.im.core.dispatcher.ApiDispatcher;
 import com.im.bootstrap.RequestAdmission;
 import com.im.bootstrap.RequestScope;
@@ -64,6 +65,30 @@ class HttpRequestAdapterTest {
         assertEquals("ok", body.get("msg"));
         assertEquals("req-http-1", body.get("requestId"));
         assertEquals(Map.of("ok", true), body.get("data"));
+    }
+
+    @Test
+    void trustedProxyClientIpHeaderIsExposedAsRequestAttribute() {
+        ApiDispatcher dispatcher = new ApiDispatcher();
+        ExecutorService directExecutor = new DirectExecutorService();
+        dispatcher.registerHandler(com.im.api.Operation.USER_INFO, req -> {
+            assertEquals("203.0.113.9", req.attribute(ApiRequest.ATTR_CLIENT_IP));
+            return java.util.Map.of("ok", true);
+        });
+        EmbeddedChannel channel = new EmbeddedChannel(new HttpRequestAdapter(
+                dispatcher, directExecutor, null, null, true, "X-Forwarded-For"));
+        DefaultFullHttpRequest request = new DefaultFullHttpRequest(
+                HttpVersion.HTTP_1_1,
+                HttpMethod.GET,
+                "/api/user/info"
+        );
+        request.headers().set("X-Forwarded-For", "203.0.113.9, 10.0.0.12");
+
+        assertFalse(channel.writeInbound(request));
+
+        FullHttpResponse response = channel.readOutbound();
+        assertNotNull(response);
+        assertEquals(HttpResponseStatus.OK, response.status());
     }
 
     @Test

@@ -1,5 +1,6 @@
 package com.im.bootstrap.ws;
 
+import com.im.api.ApiRequest;
 import com.im.bootstrap.RequestAdmission;
 import com.im.bootstrap.RequestScope;
 import com.im.common.enums.ImErrorCode;
@@ -27,6 +28,7 @@ class WsRequestAdapterTest {
         dispatcher.registerHandler(com.im.api.Operation.HEARTBEAT, req -> {
             assertEquals("req-ws-1", req.attribute("_requestId"));
             assertEquals(Integer.valueOf(7), req.attribute("_wsSeq"));
+            assertNotNull(req.attribute(ApiRequest.ATTR_CLIENT_IP));
             return java.util.Map.of("ok", true);
         });
         EmbeddedChannel channel = new EmbeddedChannel(new WsRequestAdapter(dispatcher, new DirectExecutorService()));

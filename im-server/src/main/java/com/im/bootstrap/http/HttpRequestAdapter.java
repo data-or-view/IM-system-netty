@@ -6,6 +6,7 @@ import com.im.api.ApiRequest;
 import com.im.api.ImHeaders;
 import com.im.api.Operation;
 import com.im.api.ResponseWriter;
+import com.im.bootstrap.ClientIpResolver;
 import com.im.bootstrap.DispatchSubmitter;
 import com.im.bootstrap.RequestAdmission;
 import com.im.bootstrap.health.HealthProbeHandler;
@@ -51,6 +52,8 @@ public class HttpRequestAdapter extends SimpleChannelInboundHandler<FullHttpRequ
     private final ExecutorService virtualExecutor;
     private final RequestAdmission requestAdmission;
     private final HealthProbeHandler healthProbeHandler;
+    private final boolean trustedProxyEnabled;
+    private final String clientIpHeader;
 
     public HttpRequestAdapter(ApiDispatcher dispatcher, ExecutorService virtualExecutor) {
         this(dispatcher, virtualExecutor, null);
@@ -66,10 +69,21 @@ public class HttpRequestAdapter extends SimpleChannelInboundHandler<FullHttpRequ
                               ExecutorService virtualExecutor,
                               RequestAdmission requestAdmission,
                               String nodeId) {
+        this(dispatcher, virtualExecutor, requestAdmission, nodeId, false, ClientIpResolver.DEFAULT_PROXY_HEADER);
+    }
+
+    public HttpRequestAdapter(ApiDispatcher dispatcher,
+                              ExecutorService virtualExecutor,
+                              RequestAdmission requestAdmission,
+                              String nodeId,
+                              boolean trustedProxyEnabled,
+                              String clientIpHeader) {
         this.dispatcher = dispatcher;
         this.virtualExecutor = virtualExecutor;
         this.requestAdmission = requestAdmission;
         this.healthProbeHandler = new HealthProbeHandler(nodeId, requestAdmission);
+        this.trustedProxyEnabled = trustedProxyEnabled;
+        this.clientIpHeader = clientIpHeader;
     }
 
     @Override
@@ -167,6 +181,8 @@ public class HttpRequestAdapter extends SimpleChannelInboundHandler<FullHttpRequ
         ResponseWriter responseWriter = new HttpResponseWriter(ctx, requestId);
         ApiRequest request = new ApiRequest(operation, params, headers, responseWriter, bodyRaw);
         request.setAttribute(ApiRequest.ATTR_REQUEST_ID, requestId);
+        request.setAttribute(ApiRequest.ATTR_CLIENT_IP, ClientIpResolver.fromHttpRequest(
+                req, ctx.channel().remoteAddress(), trustedProxyEnabled, clientIpHeader));
         if (requestAdmission == null) {
             DispatchSubmitter.submit(dispatcher, virtualExecutor, request, log);
         } else {

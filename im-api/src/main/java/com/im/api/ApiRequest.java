@@ -21,6 +21,7 @@ public class ApiRequest {
 
     public static final String ATTR_USER_ID = "_uid";
     public static final String ATTR_CONNECTION_ID = "_connectionId";
+    public static final String ATTR_CLIENT_IP = "_clientIp";
     public static final String ATTR_REQUEST_ID = "_requestId";
     public static final String ATTR_TRACE_ID = "_traceId";
     public static final String ATTR_WS_SEQ = "_wsSeq";

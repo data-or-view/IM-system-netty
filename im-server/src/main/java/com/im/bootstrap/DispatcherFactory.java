@@ -1,6 +1,5 @@
 package com.im.bootstrap;
 
-import com.im.api.IAuthenticator;
 import com.im.api.IChatSendPolicy;
 import com.im.api.Operation;
 import com.im.config.Config;
@@ -26,6 +25,8 @@ import com.im.core.handler.unified.SystemMessageHandler;
 import com.im.core.handler.unified.TelemetryInterceptor;
 import com.im.core.handler.unified.UserHandler;
 import com.im.core.group.DefaultGroupSystemMessagePublisher;
+import com.im.core.ratelimit.RateLimitInterceptor;
+import com.im.core.ratelimit.RateLimitPolicy;
 import com.im.core.usecase.HeartbeatUseCase;
 import com.im.core.usecase.LoginUseCase;
 import com.im.core.usecase.RegisterUseCase;
@@ -80,7 +81,7 @@ final class DispatcherFactory {
                 dependencies.storage().messageStore(), dependencies.business().groupManager(), conversationAccessChecker);
 
         ApiDispatcher dispatcher = new ApiDispatcher();
-        registerInterceptors(dispatcher, dependencies.business().authenticator());
+        registerInterceptors(dispatcher, config, dependencies);
         registerBusinessHandlers(dispatcher, dependencies, loginUseCase, registerUseCase,
                 conversationAccessChecker, sendMessageUseCase, systemMessagePublishUseCase);
         registerMessagingHandlers(dispatcher, dependencies, sendMessageUseCase, revokeUseCase, conversationAccessChecker, chatSendPolicy);
@@ -88,9 +89,17 @@ final class DispatcherFactory {
         return dispatcher;
     }
 
-    private static void registerInterceptors(ApiDispatcher dispatcher, IAuthenticator authenticator) {
+    private static void registerInterceptors(ApiDispatcher dispatcher,
+                                             Config config,
+                                             DispatcherDependencies dependencies) {
         dispatcher.addInterceptor(new TelemetryInterceptor());
-        dispatcher.addInterceptor(new AuthInterceptor(authenticator));
+        dispatcher.addInterceptor(new AuthInterceptor(dependencies.business().authenticator()));
+        if (config.getBoolean("im.rate-limit.enabled", true)) {
+            dispatcher.addInterceptor(new RateLimitInterceptor(
+                    RateLimitPolicy.fromConfig(config),
+                    dependencies.rateLimiter(),
+                    config.getBoolean("im.rate-limit.fail-open", false)));
+        }
     }
 
     private static void registerBusinessHandlers(ApiDispatcher dispatcher,

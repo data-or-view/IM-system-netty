@@ -138,7 +138,9 @@ final class TransportServer implements Lifecycle {
                         dispatcher,
                         virtualExecutor,
                         requestAdmission,
-                        config.getString("im.node.id", BootstrapDefaults.NODE_ID)));
+                        config.getString("im.node.id", BootstrapDefaults.NODE_ID),
+                        config.getBoolean("im.http.trusted-proxy-enabled", false),
+                        config.getString("im.http.client-ip-header", ClientIpResolver.DEFAULT_PROXY_HEADER)));
     }
 
     private void closeChannels() {

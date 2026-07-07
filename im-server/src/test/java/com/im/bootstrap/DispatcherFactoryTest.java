@@ -32,7 +32,8 @@ import com.im.core.file.FileObjectMetadata;
 import com.im.core.file.FileObjectMetadataStore;
 import com.im.core.file.UploadSession;
 import com.im.core.file.UploadSessionStore;
-import com.im.core.redis.RedisConfiguration;
+import com.im.core.ratelimit.RateLimitDecision;
+import com.im.core.ratelimit.RateLimiter;
 import com.im.api.BusinessMessageDlqStore;
 import com.im.api.SendMessageIdempotency;
 import com.im.core.session.SessionManager;
@@ -47,6 +48,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DispatcherFactoryTest {
@@ -62,6 +64,22 @@ class DispatcherFactoryTest {
         Arrays.stream(Operation.values())
                 .map(Operation::opName)
                 .forEach(op -> assertTrue(registered.contains(op), "missing handler for operation: " + op));
+    }
+
+    @Test
+    void registersRateLimitInterceptorByDefault() {
+        ApiDispatcher dispatcher = DispatcherFactory.create(new EmptyConfig(), dependencies());
+
+        assertTrue(interceptorNames(dispatcher).contains("rate-limit"));
+    }
+
+    @Test
+    void rateLimitInterceptorCanBeDisabledForFocusedTests() {
+        ApiDispatcher dispatcher = DispatcherFactory.create(
+                new ValuesConfig(Map.of("im.rate-limit.enabled", "false")),
+                dependencies());
+
+        assertFalse(interceptorNames(dispatcher).contains("rate-limit"));
     }
 
     private static DispatcherDependencies dependencies() {
@@ -107,7 +125,24 @@ class DispatcherFactoryTest {
                         fake(ICallManager.class),
                         (CallStateManager) null,
                         new GroupCallManager(fake(IGroupManager.class), fake(ICallManager.class),
-                                new NoopGroupCallStateStore(), 16)));
+                                new NoopGroupCallStateStore(), 16)),
+                allowingLimiter());
+    }
+
+    private static RateLimiter allowingLimiter() {
+        return (key, limit, window) -> RateLimitDecision.allowed(1, Math.max(limit - 1L, 0L), window);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<String> interceptorNames(ApiDispatcher dispatcher) {
+        try {
+            java.lang.reflect.Field field = ApiDispatcher.class.getDeclaredField("interceptors");
+            field.setAccessible(true);
+            List<com.im.api.ApiInterceptor> interceptors = (List<com.im.api.ApiInterceptor>) field.get(dispatcher);
+            return interceptors.stream().map(com.im.api.ApiInterceptor::name).toList();
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError(e);
+        }
     }
 
     private static final class NoopGroupCallStateStore implements GroupCallStateStore {
@@ -259,6 +294,38 @@ class DispatcherFactoryTest {
         @Override
         public boolean hasKey(String key) {
             return false;
+        }
+    }
+
+    private record ValuesConfig(Map<String, String> values) implements Config {
+        @Override
+        public Optional<String> getString(String key) {
+            return Optional.ofNullable(values.get(key));
+        }
+
+        @Override
+        public Optional<Integer> getInt(String key) {
+            return Optional.ofNullable(values.get(key)).map(Integer::parseInt);
+        }
+
+        @Override
+        public Optional<Long> getLong(String key) {
+            return Optional.ofNullable(values.get(key)).map(Long::parseLong);
+        }
+
+        @Override
+        public Optional<Boolean> getBoolean(String key) {
+            return Optional.ofNullable(values.get(key)).map(Boolean::parseBoolean);
+        }
+
+        @Override
+        public Optional<Duration> getDuration(String key) {
+            return Optional.empty();
+        }
+
+        @Override
+        public boolean hasKey(String key) {
+            return values.containsKey(key);
         }
     }
 }

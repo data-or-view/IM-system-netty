@@ -43,6 +43,7 @@ import com.im.core.group.DbGroupManager;
 import com.im.core.group.GroupMemberIdsSnapshot;
 import com.im.core.group.GroupMemberListSnapshot;
 import com.im.core.handler.ConnectionEventHandler;
+import com.im.core.ratelimit.RedisRateLimiter;
 import com.im.core.redis.RedisConfiguration;
 import com.im.core.retry.FailsafeRetryExecutor;
 import com.im.core.serialization.jackson.JacksonSerializer;
@@ -94,7 +95,7 @@ final class ServerComponentsFactory {
                 runtime.sessionManager(), runtime.pendingAcknowledgementManager(), cluster.routeTable(), nodeId);
         RequestAdmission requestAdmission = new DefaultRequestAdmission();
         ApiDispatcher dispatcher = DispatcherFactory.create(config, new DispatcherDependencies(
-                nodeId, runtime, cluster, business, storage, call));
+                nodeId, runtime, cluster, business, storage, call, new RedisRateLimiter(redisConfig)));
         TransportServer transportServer = new TransportServer(
                 config, runtime.sessionManager(), connectionEventHandler, dispatcher,
                 runtime.virtualExecutor(), requestAdmission);

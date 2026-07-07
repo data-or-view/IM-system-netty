@@ -7,6 +7,7 @@ import com.im.api.ImHeaders;
 import com.im.api.Operation;
 import com.im.api.ProtocolFields;
 import com.im.api.ResponseWriter;
+import com.im.bootstrap.ClientIpResolver;
 import com.im.bootstrap.DispatchSubmitter;
 import com.im.bootstrap.RequestAdmission;
 import com.im.common.trace.RequestIds;
@@ -142,6 +143,7 @@ public class WsRequestAdapter extends SimpleChannelInboundHandler<WebSocketFrame
         ResponseWriter responseWriter = new WsResponseWriter(ctx, seq, operation.opName(), requestId);
         ApiRequest request = new ApiRequest(operation, params, headers, responseWriter, null);
         request.setAttribute(ApiRequest.ATTR_CONNECTION_ID, NettyConnectionRef.connectionId(ctx.channel()));
+        request.setAttribute(ApiRequest.ATTR_CLIENT_IP, ClientIpResolver.fromRemoteAddress(ctx.channel().remoteAddress()));
         request.setAttribute(ApiRequest.ATTR_REQUEST_ID, requestId);
         request.setAttribute(ApiRequest.ATTR_WS_SEQ, seq);
         if (requestAdmission == null) {

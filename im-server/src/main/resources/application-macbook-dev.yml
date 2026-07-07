@@ -15,6 +15,20 @@ im:
     port: 8083
   http:
     port: 8084
+    trusted-proxy-enabled: false  # 本地直连开发不信任代理 Header；如本地经 Nginx/LB 转发再按实际链路开启。
+
+  # ── Redis 集群限流 ──
+  rate-limit:
+    key-prefix: "im:rl:macbook-dev:" # 本地开发独立限流命名空间，避免与其他环境共用 Redis 时互相影响。
+    # 本地场景测试会在短时间内批量创建/登录测试用户；生产环境不要照搬这组放宽值。
+    login:
+      ip:
+        limit: 300
+        window-seconds: 60
+    register:
+      ip:
+        limit: 300
+        window-seconds: 60
 
   # ── 数据库 (MySQL 容器 root/123456) ──
   db:
