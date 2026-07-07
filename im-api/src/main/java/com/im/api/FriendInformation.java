@@ -12,6 +12,7 @@ public class FriendInformation {
 
     private String ownerUserId;
     private String friendUserId;
+    private String nickname;
     private String remark;
     private String faceUrl;
 
@@ -34,6 +35,9 @@ public class FriendInformation {
     public String getFriendUserId() { return friendUserId; }
     public void setFriendUserId(String friendUserId) { this.friendUserId = friendUserId; }
 
+    public String getNickname() { return nickname; }
+    public void setNickname(String nickname) { this.nickname = nickname; }
+
     public String getRemark() { return remark; }
     public void setRemark(String remark) { this.remark = remark; }
 
@@ -43,6 +47,10 @@ public class FriendInformation {
     public ApplySource getAddSource() { return addSource; }
     public void setAddSource(ApplySource addSource) {
         this.addSource = addSource != null ? addSource : ApplySource.UNKNOWN;
+    }
+
+    public void setAddSourceCode(int addSourceCode) {
+        setAddSource(ApplySource.fromCode(addSourceCode));
     }
 
     public String getEx() { return ex; }

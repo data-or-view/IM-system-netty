@@ -1,10 +1,14 @@
 package com.im.core.db.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.im.api.FriendInformation;
 import com.im.core.db.entity.FriendEntity;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
+
+import java.util.List;
 
 /**
  * 好友关系 Mapper。
@@ -26,4 +30,43 @@ public interface FriendMapper extends BaseMapper<FriendEntity> {
                      @Param("addSource") int addSource,
                      @Param("operatorUserId") String operatorUserId,
                      @Param("createdAt") long createdAt);
+
+    @Select("""
+            SELECT
+                f.owner_user_id AS ownerUserId,
+                f.friend_user_id AS friendUserId,
+                u.nickname AS nickname,
+                f.remark AS remark,
+                u.face_url AS faceUrl,
+                f.add_source AS addSourceCode,
+                f.ex AS ex,
+                f.is_pinned AS pinned,
+                f.created_at AS createTime,
+                0 AS deleted
+            FROM im_friends f
+            LEFT JOIN im_users u ON u.user_id = f.friend_user_id
+            WHERE f.owner_user_id = #{ownerUserId}
+            ORDER BY f.is_pinned DESC, f.created_at DESC, f.friend_user_id ASC
+            """)
+    List<FriendInformation> selectFriendInformationList(@Param("ownerUserId") String ownerUserId);
+
+    @Select("""
+            SELECT
+                f.owner_user_id AS ownerUserId,
+                f.friend_user_id AS friendUserId,
+                u.nickname AS nickname,
+                f.remark AS remark,
+                u.face_url AS faceUrl,
+                f.add_source AS addSourceCode,
+                f.ex AS ex,
+                f.is_pinned AS pinned,
+                f.created_at AS createTime,
+                0 AS deleted
+            FROM im_friends f
+            LEFT JOIN im_users u ON u.user_id = f.friend_user_id
+            WHERE f.owner_user_id = #{ownerUserId}
+              AND f.friend_user_id = #{friendUserId}
+            """)
+    FriendInformation selectFriendInformation(@Param("ownerUserId") String ownerUserId,
+                                              @Param("friendUserId") String friendUserId);
 }

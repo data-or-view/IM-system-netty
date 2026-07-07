@@ -82,7 +82,8 @@ public class DirectFileTransferUseCase {
         String fileId = IdGenerator.fileId();
         String objectKey = objectKey(fileId, fileName);
         String mimeType = normalizeContentType(contentType);
-        String fileUrl = fileStorage.upload(bucket, objectKey, data, mimeType);
+        fileStorage.upload(bucket, objectKey, data, mimeType);
+        String fileUrl = fileStorage.presignGetObject(bucket, objectKey, presignExpiresSeconds);
         FileObjectMetadata metadata = new FileObjectMetadata(fileId, userId, bucket, objectKey, fileName,
                 data.length, mimeType, hash != null ? hash : "", DEFAULT_ENGINE,
                 normalizeFileGroup(fileGroup), System.currentTimeMillis());
@@ -174,7 +175,7 @@ public class DirectFileTransferUseCase {
         if (!metadata.userId().equals(userId)) {
             throw new ImException(ImErrorCode.FORBIDDEN, "file does not belong to current user");
         }
-        String url = fileStorage.getUrl(metadata.bucket(), metadata.objectKey());
+        String url = fileStorage.presignGetObject(metadata.bucket(), metadata.objectKey(), presignExpiresSeconds);
         return new FileDownloadSignResult(metadata.fileId(), metadata.fileName(), url,
                 metadata.fileSize(), metadata.contentType());
     }
@@ -190,7 +191,8 @@ public class DirectFileTransferUseCase {
                 System.currentTimeMillis());
         metadataStore.save(metadata);
         uploadSessionStore.delete(session);
-        return new FileUploadCompleteResult(fileStorage.getUrl(session.bucket(), session.objectKey()),
+        return new FileUploadCompleteResult(fileStorage.presignGetObject(
+                session.bucket(), session.objectKey(), presignExpiresSeconds),
                 session.fileId(), session.objectKey(), session.fileName(), session.contentType(), session.fileSize());
     }
 

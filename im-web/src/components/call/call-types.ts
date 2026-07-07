@@ -65,6 +65,7 @@ export type StartGroupCallInput = {
 export type JoinGroupCallInput = {
   group: GroupCallTarget;
   mediaPermissionChecked?: boolean;
+  suppressFailureToast?: boolean;
 };
 
 export type CallContextValue = {

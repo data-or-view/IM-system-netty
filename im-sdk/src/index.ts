@@ -120,7 +120,7 @@ export class IMSDK {
       requestTimeout: opts.requestTimeout,
       requestIdFactory: opts.requestIdFactory,
     });
-    this.httpTransport = opts.httpUrl ? new HttpTransport({
+    this.httpTransport = opts.httpUrl !== undefined ? new HttpTransport({
       baseUrl: opts.httpUrl,
       getToken: this.getToken,
       requestIdFactory: opts.requestIdFactory,
@@ -414,12 +414,15 @@ export function createIM(opts: IMOptions): IMSDK {
 }
 
 function messageDedupeKey(msg: Message): string | null {
-  if (msg.messageId) {
-    return `id:${msg.messageId}`;
-  }
   const seq = msg.messageSeq ?? msg.sequenceId;
   if (msg.conversationId && seq && seq > 0) {
     return `seq:${msg.conversationId}:${seq}`;
+  }
+  if (msg.conversationId && msg.messageId) {
+    return `id:${msg.conversationId}:${msg.messageId}`;
+  }
+  if (msg.messageId) {
+    return `id:${msg.messageId}`;
   }
   return null;
 }

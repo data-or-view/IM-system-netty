@@ -68,6 +68,8 @@ public class ChatHandler implements RequestHandler {
             throw new ValidationException("content type (_ct) is required");
         }
 
+        SignalingContent trackedSignal = null;
+
         // ── 音视频通话信令处理 ──
         if (content.getContentType() == ContentType.SIGNAL && callManager != null) {
             SignalingContent signal = (SignalingContent) content;
@@ -77,9 +79,9 @@ public class ChatHandler implements RequestHandler {
                 }
                 return handleInvite(req.params(), uid, toUserId, signal);
             }
-            // 非 INVITE 信令（ACCEPT/REJECT/CANCEL/HANGUP）追踪超时
             if (callStateManager != null) {
-                handleSignalTracking(signal);
+                callStateManager.requireCanSendSignal(uid, toUserId, signal);
+                trackedSignal = signal;
             }
         }
 
@@ -89,6 +91,10 @@ public class ChatHandler implements RequestHandler {
 
         if (result == null) {
             throw new ForbiddenException("message sending blocked");
+        }
+
+        if (trackedSignal != null) {
+            callStateManager.onSignalDelivered(uid, trackedSignal);
         }
 
         return Map.of("status", result.status(),
@@ -143,23 +149,6 @@ public class ChatHandler implements RequestHandler {
                 "roomId", room.getRoomId(),
                 "token", room.getCallerToken(),
                 "sfuEndpoint", room.getSfuEndpoint());
-    }
-
-    /**
-     * 追踪非 INVITE 信令用于超时取消。
-     * ACCEPT/REJECT/CANCEL/HANGUP 到达时取消超时定时器。
-     */
-    private void handleSignalTracking(SignalingContent signal) {
-        String roomId = signal.getRoomId();
-        if (roomId == null || roomId.isBlank()) return;
-
-        switch (signal.getAction()) {
-            case ACCEPT -> callStateManager.onAccept(roomId);
-            case REJECT -> callStateManager.onReject(roomId);
-            case CANCEL -> callStateManager.onCancel(roomId);
-            case HANGUP -> callStateManager.onHangup(roomId);
-            default -> {} // INVITE/CALLING/TIMEOUT/ICE: 无需处理
-        }
     }
 
     private String normalizeCallType(String callType) {

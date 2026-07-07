@@ -162,6 +162,25 @@ public final class SchemaInitializer {
                 "ALTER TABLE im_users ADD COLUMN password_hash VARCHAR(255) NOT NULL DEFAULT '' AFTER global_recv_msg_opt");
         ensureColumnType(conn, stmt, "im_messages", "revoke_role", "smallint",
                 "ALTER TABLE im_messages MODIFY COLUMN revoke_role SMALLINT NOT NULL DEFAULT 0 COMMENT '撤回者角色'");
+        ensureMessageClientMsgIdIsConversationScoped(conn, stmt);
+    }
+
+    private static void ensureMessageClientMsgIdIsConversationScoped(Connection conn, Statement stmt) throws Exception {
+        if (!tableExists(conn, "im_messages")) {
+            return;
+        }
+        if (indexExists(conn, "im_messages", "uk_client_msg")) {
+            stmt.execute("DROP INDEX uk_client_msg ON im_messages");
+            log.info("Schema migrated: dropped global im_messages.uk_client_msg");
+        }
+        if (!indexExists(conn, "im_messages", "uk_conversation_client_msg")) {
+            stmt.execute("ALTER TABLE im_messages ADD UNIQUE KEY uk_conversation_client_msg (conversation_id, client_msg_id)");
+            log.info("Schema migrated: added im_messages.uk_conversation_client_msg");
+        }
+        if (!indexExists(conn, "im_messages", "idx_client_msg")) {
+            stmt.execute("ALTER TABLE im_messages ADD INDEX idx_client_msg (client_msg_id)");
+            log.info("Schema migrated: added im_messages.idx_client_msg");
+        }
     }
 
     private static void ensureColumn(Connection conn, Statement stmt, String table, String column, String ddl) throws Exception {
@@ -205,6 +224,19 @@ public final class SchemaInitializer {
             }
         }
         return null;
+    }
+
+    private static boolean indexExists(Connection conn, String table, String indexName) throws Exception {
+        DatabaseMetaData meta = conn.getMetaData();
+        try (ResultSet rs = meta.getIndexInfo(conn.getCatalog(), null, table, false, false)) {
+            while (rs.next()) {
+                String actual = rs.getString("INDEX_NAME");
+                if (actual != null && indexName.equalsIgnoreCase(actual)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private static Map<String, String> loadCreateTableSql() throws Exception {

@@ -53,14 +53,17 @@ public class ConversationAccessChecker implements IConversationAccessChecker {
     }
 
     private boolean canRead(String userId, String conversationId) {
+        String groupId = groupIdFromConversation(conversationId);
+        if (groupId != null) {
+            return groupManager != null && groupManager.isMember(groupId, userId);
+        }
         if (conversationManager != null && conversationManager.getConversation(userId, conversationId) != null) {
             return true;
         }
         if (isSingleParticipant(userId, conversationId)) {
             return true;
         }
-        String groupId = groupIdFromConversation(conversationId);
-        return groupId != null && groupManager != null && groupManager.isMember(groupId, userId);
+        return false;
     }
 
     private boolean isSingleParticipant(String userId, String conversationId) {

@@ -33,11 +33,11 @@ try {
   reporter.step("connecting sender to node-1 and receiver to node-2");
   await Promise.all([sender.connectAndLogin(), receiverPrimary.connectAndLogin()]);
 
-  reporter.step("opening a second receiver websocket session on node-2");
+  reporter.step("opening a second receiver websocket session on node-1");
   const receiverSecondary = createExistingUser(
     "Receiver Secondary",
-    node2HttpUrl,
-    node2WsUrl,
+    node1HttpUrl,
+    node1WsUrl,
     receiverPrimary.userId,
     receiverPrimary.token,
     receiverPrimary.refreshToken,
@@ -64,9 +64,34 @@ try {
     _ct: "text",
     content: { text: singleText },
   });
-  assertOk(singleAck.data?.conversationId, "single chat did not return conversationId");
+  const singleAckData = singleAck.data;
+  assertOk(singleAckData?.conversationId, "single chat did not return conversationId");
   await assertMessagePush(receiverPrimary, singleText, "primary single push");
   await assertMessagePush(receiverSecondary, singleText, "secondary single push");
+
+  reporter.step("revoking cross-node single chat and checking all receiver sessions");
+  const primaryRevokeCursor = receiverPrimary.ws.markPushCursor();
+  const secondaryRevokeCursor = receiverSecondary.ws.markPushCursor();
+  await sender.http.post("/api/msg/revoke", {
+    conversationId: singleAckData.conversationId,
+    messageSeq: singleAckData.seq,
+  });
+  await assertRevokePushAfter(
+    receiverPrimary,
+    primaryRevokeCursor,
+    singleAckData.conversationId,
+    singleAckData.seq,
+    sender.userId,
+    "primary revoke push",
+  );
+  await assertRevokePushAfter(
+    receiverSecondary,
+    secondaryRevokeCursor,
+    singleAckData.conversationId,
+    singleAckData.seq,
+    sender.userId,
+    "secondary revoke push",
+  );
 
   reporter.step("creating group on node-1 with receiver on node-2");
   const group = await sender.http.post<GroupInfo>("/api/group/create", {
@@ -142,6 +167,23 @@ async function assertGroupPush(
   await user.ws.waitForPush((push) => {
     const data = push.data as MessagePush | undefined;
     return push.op === "message" && data?.groupId === groupId && messageContains(data, expectedText);
+  }, description);
+}
+
+async function assertRevokePushAfter(
+  user: ScenarioUser,
+  cursor: number,
+  conversationId: string,
+  seq: number,
+  revokerId: string,
+  description: string,
+): Promise<void> {
+  await user.ws.waitForPushAfter(cursor, (push) => {
+    const data = push.data as { conversationId?: string; seq?: number; revokerId?: string } | undefined;
+    return push.op === "msg_revoke" &&
+      data?.conversationId === conversationId &&
+      data?.seq === seq &&
+      data?.revokerId === revokerId;
   }, description);
 }
 

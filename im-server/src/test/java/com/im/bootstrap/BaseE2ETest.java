@@ -235,6 +235,22 @@ public abstract class BaseE2ETest {
         return readJson(response.body());
     }
 
+    /** 发送 HTTP GET 并返回统一响应体。 */
+    protected static Map<String, Object> httpGet(String path, String token) throws Exception {
+        HttpRequest.Builder builder = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:" + httpPort + path))
+                .timeout(java.time.Duration.ofSeconds(5))
+                .GET();
+        if (token != null && !token.isBlank()) {
+            builder.header("Authorization", "Bearer " + token);
+        }
+
+        HttpResponse<String> response = HttpClient.newHttpClient()
+                .send(builder.build(), HttpResponse.BodyHandlers.ofString());
+        assertNotNull(response.body(), "http response body");
+        return readJson(response.body());
+    }
+
     /** 注册测试用户，返回服务端真实生成的 userId。 */
     protected static E2EUser registerUser(WebSocket ws, BlockingQueue<String> incoming, String nickname)
             throws Exception {

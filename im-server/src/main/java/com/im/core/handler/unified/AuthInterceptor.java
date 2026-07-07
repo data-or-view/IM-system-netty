@@ -71,7 +71,7 @@ public class AuthInterceptor implements ApiInterceptor {
 
         // 验证
         try {
-            String userId = authenticator.authenticate(token);
+            String userId = authenticator.authenticateAccessToken(token);
             request.setAttribute(ApiRequest.ATTR_USER_ID, userId);
             MDC.put("app.user.id", userId);
             log.debug("AUTH OK: userId={}, op={}", userId, request.operation());

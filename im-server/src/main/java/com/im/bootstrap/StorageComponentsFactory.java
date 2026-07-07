@@ -49,10 +49,18 @@ final class StorageComponentsFactory {
                 new MyBatisPlusPersistenceStore(MyBatisPlusFactory.getSqlSessionFactory()),
                 Duration.ofSeconds(config.getLong("im.idempotency.send-expire-seconds", 24 * 60 * 60L)));
         BusinessMessageDlqStore businessMessageDlqStore = new DbBusinessMessageDlqStore();
+        String minioAccessKey = config.getString("im.minio.access-key")
+                .orElse(BootstrapSecurityChecks.DEFAULT_MINIO_ACCESS_KEY);
+        String minioSecretKey = config.getString("im.minio.secret-key")
+                .orElse(BootstrapSecurityChecks.DEFAULT_MINIO_SECRET_KEY);
+        BootstrapSecurityChecks.requireSafeSecret(config, "im.minio.access-key", minioAccessKey,
+                BootstrapSecurityChecks.DEFAULT_MINIO_ACCESS_KEY);
+        BootstrapSecurityChecks.requireSafeSecret(config, "im.minio.secret-key", minioSecretKey,
+                BootstrapSecurityChecks.DEFAULT_MINIO_SECRET_KEY);
         IFileStorageService fileStorage = new MinioFileStorageService(
                 config.getString("im.minio.endpoint").orElse("http://127.0.0.1:9000"),
-                config.getString("im.minio.access-key").orElse("minioadmin"),
-                config.getString("im.minio.secret-key").orElse("minioadmin"));
+                minioAccessKey,
+                minioSecretKey);
         String fileBucket = config.getString("im.minio.bucket").orElse("im-system");
         DirectFileTransferUseCase directFileTransferUseCase = new DirectFileTransferUseCase(
                 fileStorage,

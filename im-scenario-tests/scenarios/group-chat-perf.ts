@@ -1,5 +1,5 @@
 import { performance } from "node:perf_hooks";
-import { assertOk } from "../src/assertions.js";
+import { assertOk, waitFor } from "../src/assertions.js";
 import { nextClientMsgId } from "../src/client-msg-id.js";
 import { readNumberArg, readStringArg } from "../src/cli.js";
 import { loadScenarioConfig } from "../src/config.js";
@@ -51,7 +51,7 @@ try {
     user,
     cursor: user.ws.markPushCursor(),
   }));
-  const finalMessageText = `perf message ${messageCount}/${messageCount}`;
+  const expectedTexts = Array.from({ length: messageCount }, (_, index) => `perf message ${index + 1}/${messageCount}`);
   reporter.step(`sending ${messageCount} group messages with concurrency=${concurrency}`);
   const started = performance.now();
   let nextMessage = 0;
@@ -62,7 +62,7 @@ try {
         groupId: group.groupId,
         clientMsgId: nextClientMsgId("scenario-perf"),
         _ct: "text",
-        content: { text: `perf message ${current}/${messageCount}` },
+          content: { text: expectedTexts[current - 1] },
       });
       assertOk(ack.data?.seq !== undefined, `message ${current} did not return seq`);
     }
@@ -75,14 +75,27 @@ try {
   reporter.metric("durationMs", durationMs);
   reporter.metric("throughputMsgPerSec", throughput);
 
-  reporter.step("checking every online member receives the final perf message");
-  await Promise.all(receiverCursors.map(({ user, cursor }) => user.ws.waitForPushAfter(cursor, (push) => {
-    const data = push.data as MessagePush | undefined;
-    return push.op === "message" &&
-      data?.groupId === group.groupId &&
-      data.fromUserId === owner.userId &&
-      hasTextContent(data.content, finalMessageText);
-  }, `final perf group message push for ${user.userId}`)));
+  reporter.step("checking every online member receives every perf message");
+  await Promise.all(receiverCursors.map(({ user, cursor }) => waitFor(() => {
+    const received = new Set<string>();
+    for (const push of user.ws.pushesAfter(cursor)) {
+      const data = push.data as MessagePush | undefined;
+      if (push.op !== "message" || data?.groupId !== group.groupId || data.fromUserId !== owner.userId) {
+        continue;
+      }
+      for (const text of expectedTexts) {
+        if (hasTextContent(data.content, text)) {
+          received.add(text);
+          break;
+        }
+      }
+    }
+    return received.size === expectedTexts.length ? received : undefined;
+  }, {
+    timeoutMs: config.requestTimeoutMs,
+    intervalMs: 100,
+    description: `all perf group message pushes for ${user.userId}`,
+  })));
   reporter.metric("verifiedReceivers", receivers.length);
   reporter.finish();
 } finally {

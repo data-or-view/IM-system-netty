@@ -4,6 +4,7 @@ import com.im.api.ApiRequest;
 import com.im.api.GroupApply;
 import com.im.api.GroupInformation;
 import com.im.api.GroupJoinResult;
+import com.im.api.GroupMemberInfoVisibility;
 import com.im.api.GroupMemberInformation;
 import com.im.api.GroupMemberRole;
 import com.im.api.IConversationManager;
@@ -11,6 +12,7 @@ import com.im.api.IGroupManager;
 import com.im.api.RequestPreconditions;
 import com.im.api.RequestHandler;
 import com.im.common.exception.ValidationException;
+import com.im.common.exception.ForbiddenException;
 import com.im.common.exception.NotFoundException;
 import com.im.common.validation.Preconditions;
 import com.im.api.GroupApplyNotifier;
@@ -202,9 +204,45 @@ public class GroupHandler implements RequestHandler {
 
     private Object handleMembers(ApiRequest req) {
         String groupId = req.getString("groupId");
+        String userId = RequestPreconditions.requireUser(req);
         groupId = Preconditions.requireText(groupId, "groupId");
+        requireCanViewMembers(groupId, userId);
         List<GroupMemberInformation> members = groupManager.getMemberList(groupId);
         return Map.of("groupId", groupId, "members", members, "count", members.size());
+    }
+
+    private void requireCanViewMembers(String groupId, String userId) {
+        GroupInformation info = groupManager.getGroupInformation(groupId);
+        if (info == null) {
+            throw new NotFoundException("group not found");
+        }
+        if (!groupManager.isMember(groupId, userId)) {
+            throw new ForbiddenException("only group members can view members");
+        }
+        if (info.getLookMemberInfo() == GroupMemberInfoVisibility.ADMIN_ONLY) {
+            GroupMemberRole role = roleFromString(groupManager.getRole(groupId, userId));
+            if (!role.isAdminOrOwner()) {
+                throw new ForbiddenException("only group owner or admin can view members");
+            }
+        }
+    }
+
+    private GroupMemberRole roleFromString(String value) {
+        if (value == null || value.isBlank()) {
+            return GroupMemberRole.REMOVED;
+        }
+        return switch (value.toLowerCase()) {
+            case "owner" -> GroupMemberRole.OWNER;
+            case "admin" -> GroupMemberRole.ADMIN;
+            case "member" -> GroupMemberRole.MEMBER;
+            default -> {
+                try {
+                    yield GroupMemberRole.fromCode(Integer.parseInt(value));
+                } catch (NumberFormatException ignored) {
+                    yield GroupMemberRole.REMOVED;
+                }
+            }
+        };
     }
 
     private Object handleMuteAll(ApiRequest req) {

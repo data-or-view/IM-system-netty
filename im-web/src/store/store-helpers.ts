@@ -22,6 +22,11 @@ import type {
 } from "@/store/store-types";
 
 export function persistTokens(tokens: TokenPair) {
+  if (!tokens.token && !tokens.refreshToken) {
+    localStorage.removeItem(AUTH_TOKEN_KEY);
+    localStorage.removeItem(AUTH_REFRESH_TOKEN_KEY);
+    return;
+  }
   if (tokens.token) localStorage.setItem(AUTH_TOKEN_KEY, tokens.token);
   if (tokens.refreshToken) localStorage.setItem(AUTH_REFRESH_TOKEN_KEY, tokens.refreshToken);
 }

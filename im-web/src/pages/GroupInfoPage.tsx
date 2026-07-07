@@ -85,8 +85,8 @@ export default function GroupInfoPage() {
     setLoading(true);
     setLoadError("");
     Promise.all([
-      fetchGroupInfo(groupId),
-      fetchGroupMembers(groupId),
+      fetchGroupInfo(groupId, { silent: false }),
+      fetchGroupMembers(groupId, { silent: false }),
     ])
       .catch((err) => setLoadError(getErrorText(err)))
       .finally(() => setLoading(false));

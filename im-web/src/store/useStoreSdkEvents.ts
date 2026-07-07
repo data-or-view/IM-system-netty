@@ -99,7 +99,11 @@ export function useStoreSdkEvents({
 
     const unsubTokenChanged = im.on("tokenChanged", (tokens) => {
       persistTokens(tokens);
-      dispatch({ type: "SET_TOKENS", token: tokens.token, refreshToken: tokens.refreshToken });
+      dispatch({
+        type: "SET_TOKENS",
+        token: tokens.token ?? null,
+        refreshToken: tokens.refreshToken ?? null,
+      });
     });
 
     return () => {

@@ -97,10 +97,10 @@ public class SessionManager implements ISessionManager {
         }
 
         IConnectionSession kicked = null;
-        session.authenticate(userId, platformId);
 
         switch (loginStrategy) {
             case KICK_OLD -> {
+                session.authenticate(userId, platformId);
                 // 踢掉所有旧端
                 CopyOnWriteArrayList<ConnectionSession> oldSessions = userSessions.put(userId, new CopyOnWriteArrayList<>());
                 if (oldSessions != null) {
@@ -117,6 +117,7 @@ public class SessionManager implements ISessionManager {
                 userSessions.get(userId).add(session);
             }
             case SAME_TERM_KICK -> {
+                session.authenticate(userId, platformId);
                 // 仅踢同平台旧端
                 int newPlatformId = platformId;
                 CopyOnWriteArrayList<ConnectionSession> sessions = userSessions.get(userId);
@@ -141,10 +142,14 @@ public class SessionManager implements ISessionManager {
                     log.warn("Reject new login: userId={}, already online", userId);
                     return null; // 调用方应关闭连接
                 }
+                session.authenticate(userId, platformId);
                 userSessions.computeIfAbsent(userId, k -> new CopyOnWriteArrayList<>()).add(session);
             }
             default -> // ALLOW_MULTIPLE
-                    userSessions.computeIfAbsent(userId, k -> new CopyOnWriteArrayList<>()).add(session);
+            {
+                session.authenticate(userId, platformId);
+                userSessions.computeIfAbsent(userId, k -> new CopyOnWriteArrayList<>()).add(session);
+            }
         }
 
         log.info("User bound: userId={}, sessionId={}, strategy={}",

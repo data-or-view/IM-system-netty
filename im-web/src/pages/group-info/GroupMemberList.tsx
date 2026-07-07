@@ -56,6 +56,7 @@ export function GroupMemberList({
       <div className="divide-y divide-slate-100">
         {members.map((member) => {
           const label = roleLabel(member.roleLevel);
+          const memberName = member.nickname || member.userId;
           const canKick =
             isOwner ||
             (isAdmin && groupMemberRoleRank(member.roleLevel) < groupMemberRoleRank(GroupMemberRole.ADMIN));
@@ -69,6 +70,7 @@ export function GroupMemberList({
               key={member.userId}
               role="button"
               tabIndex={0}
+              aria-label={`查看成员资料：${memberName}，用户 ID：${member.userId}`}
               className="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-slate-50"
               onClick={() => onOpenUser(member.userId)}
               onKeyDown={(event) => {
@@ -80,16 +82,16 @@ export function GroupMemberList({
             >
               <div className="flex min-w-0 items-center gap-3">
                 <Avatar className="h-10 w-10 border border-white shadow-sm">
-                  <AvatarImage src={member.faceUrl} alt={member.nickname || member.userId} />
+                  <AvatarImage src={member.faceUrl} alt={memberName} />
                   <AvatarFallback className="bg-slate-100 text-sm font-semibold text-slate-700">
-                    {(member.nickname || member.userId).charAt(0).toUpperCase()}
+                    {memberName.charAt(0).toUpperCase()}
                   </AvatarFallback>
                 </Avatar>
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <span
                       className="truncate text-sm font-semibold text-slate-900"
-                      title={member.nickname || member.userId}
+                      title={memberName}
                     >
                       {member.nickname || shortId(member.userId)}
                     </span>
@@ -114,6 +116,8 @@ export function GroupMemberList({
                     <Button
                       variant="ghost"
                       size="sm"
+                      aria-label={`${member.roleLevel === GroupMemberRole.ADMIN ? "取消管理员" : "设为管理员"}：${memberName}`}
+                      title={member.roleLevel === GroupMemberRole.ADMIN ? "取消管理员" : "设为管理员"}
                       className="text-slate-600 hover:bg-slate-100"
                       onClick={(event) => {
                         event.stopPropagation();
@@ -138,6 +142,8 @@ export function GroupMemberList({
                     <Button
                       variant="ghost"
                       size="sm"
+                      aria-label={`转让群主给：${memberName}`}
+                      title="转让群主"
                       className="text-amber-700 hover:bg-amber-50"
                       onClick={(event) => {
                         event.stopPropagation();
@@ -156,6 +162,8 @@ export function GroupMemberList({
                     <Button
                       variant="ghost"
                       size="sm"
+                      aria-label={`移出群聊：${memberName}`}
+                      title="移出群聊"
                       className="text-red-600 hover:bg-red-50 hover:text-red-700"
                       onClick={(event) => {
                         event.stopPropagation();

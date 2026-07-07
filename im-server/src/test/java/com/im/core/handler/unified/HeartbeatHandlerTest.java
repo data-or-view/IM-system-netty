@@ -8,6 +8,7 @@ import com.im.api.IRouteTable;
 import com.im.api.Operation;
 import com.im.api.PlatformID;
 import com.im.api.RouteNode;
+import com.im.api.MultiLoginStrategy;
 import com.im.common.exception.UnauthorizedException;
 import com.im.core.session.NettyConnectionRef;
 import com.im.core.session.SessionManager;
@@ -52,6 +53,44 @@ class HeartbeatHandlerTest {
         assertEquals("u1", session.getUserId());
         assertEquals("u1|node-a|" + PlatformID.WEB + "|" + session.getSessionId(), routeTable.lastOnline);
         assertEquals("u1|" + PlatformID.WEB, routeTable.lastSetOnline);
+
+        sessionManager.clear();
+    }
+
+    @Test
+    void heartbeatRouteRestoreHonorsRejectNewStrategy() {
+        SessionManager sessionManager = new SessionManager();
+        sessionManager.setLoginStrategy(MultiLoginStrategy.REJECT_NEW);
+        RecordingRouteTable routeTable = new RecordingRouteTable();
+        HeartbeatHandler handler = new HeartbeatHandler(
+                new HeartbeatUseCase(routeTable),
+                sessionManager,
+                new StubAuthenticator(),
+                routeTable,
+                "node-a");
+
+        EmbeddedChannel oldChannel = new EmbeddedChannel();
+        NettyConnectionRef oldConnection = new NettyConnectionRef(oldChannel);
+        sessionManager.createSession(oldConnection);
+        sessionManager.bindUser(oldConnection.connectionId(), "u1", PlatformID.WEB);
+
+        EmbeddedChannel newChannel = new EmbeddedChannel();
+        NettyConnectionRef newConnection = new NettyConnectionRef(newChannel);
+        IConnectionSession rejectedSession = sessionManager.createSession(newConnection);
+        ApiRequest request = new ApiRequest(
+                Operation.HEARTBEAT,
+                Map.of("platformId", PlatformID.WEB),
+                Map.of("Authorization", "token-u1"),
+                null,
+                null);
+        request.setAttribute("_connectionId", newConnection.connectionId());
+
+        handler.handle(request);
+
+        assertTrue(sessionManager.getSessionsByUserId("u1").stream()
+                .noneMatch(session -> session.getSessionId().equals(rejectedSession.getSessionId())));
+        assertEquals(false, rejectedSession.isAuthenticated());
+        assertEquals(null, routeTable.lastOnline);
 
         sessionManager.clear();
     }

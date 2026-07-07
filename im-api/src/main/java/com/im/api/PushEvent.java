@@ -19,6 +19,8 @@ public record PushEvent(String op, Object data) {
     public Map<String, Object> toEnvelope() {
         Map<String, Object> envelope = new LinkedHashMap<>();
         envelope.put("op", op);
+        envelope.put("code", 0);
+        envelope.put("msg", "ok");
         envelope.put("data", data);
         return envelope;
     }

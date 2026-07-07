@@ -77,7 +77,8 @@ class DispatcherFactoryTest {
                         fake(ExecutorService.class),
                         null,
                         null,
-                        null),
+                        null,
+                        new ServerComponentsFactory.RuntimeMessageRevokeNotifier("node-test", sessionManager)),
                 new ServerComponentsFactory.ClusterDependencies(
                         fake(IRouteTable.class),
                         fake(IClusterMessageBus.class),

@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class JwtAuthenticatorTest {
@@ -24,5 +25,14 @@ class JwtAuthenticatorTest {
         String accessToken = authenticator.issueToken("alice", Duration.ofHours(1));
 
         assertThrows(UnauthorizedException.class, () -> authenticator.refreshAccessToken(accessToken));
+    }
+
+    @Test
+    void accessAuthenticationRejectsRefreshToken() {
+        JwtAuthenticator authenticator = new JwtAuthenticator(SECRET);
+        String refreshToken = authenticator.issueRefreshToken("alice", Duration.ofDays(30), 1);
+
+        assertThrows(UnauthorizedException.class, () -> authenticator.authenticateAccessToken(refreshToken));
+        assertEquals(0, authenticator.getAppManagerLevel(refreshToken));
     }
 }

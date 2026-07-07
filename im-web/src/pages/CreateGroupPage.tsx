@@ -82,6 +82,8 @@ export default function CreateGroupPage() {
 
           <button
             type="button"
+            role="switch"
+            aria-checked={needVerification}
             onClick={() => setNeedVerification((prev) => !prev)}
             className="flex w-full items-center justify-between gap-3 rounded-md bg-white px-4 py-3 text-left text-sm ring-1 ring-slate-200 transition-colors hover:border-slate-300 hover:bg-slate-50"
           >
@@ -119,6 +121,9 @@ export default function CreateGroupPage() {
                   return (
                     <button
                       key={uid}
+                      type="button"
+                      aria-pressed={selected}
+                      aria-label={`${selected ? "取消选择" : "选择"}初始成员：${friend.nickname || uid}，用户 ID：${uid}`}
                       onClick={() => toggleMember(uid)}
                       className={cn(
                         "flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-slate-50",

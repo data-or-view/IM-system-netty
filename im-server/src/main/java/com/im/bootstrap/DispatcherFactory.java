@@ -168,7 +168,7 @@ final class DispatcherFactory {
                     Operation.GROUP_CALL_END, Operation.GROUP_CALL_ACTIVE);
         }
         dispatcher.registerHandler(Operation.CHAT_REVOKE,
-                new RevokeHandler(revokeUseCase, dependencies.runtime().sessionManager()));
+                new RevokeHandler(revokeUseCase, dependencies.runtime().messageRevokeNotifier()::notify));
     }
 
     private static void registerFileHandlers(ApiDispatcher dispatcher,

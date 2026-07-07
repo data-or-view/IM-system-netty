@@ -51,6 +51,7 @@ import com.im.core.group.DbGroupManager;
 import com.im.core.group.GroupMemberIdsSnapshot;
 import com.im.core.group.GroupMemberListSnapshot;
 import com.im.core.handler.ConnectionEventHandler;
+import com.im.core.message.ClusterAwareMessageRevokeNotifier;
 import com.im.core.redis.RedisConfiguration;
 import com.im.core.retry.FailsafeRetryExecutor;
 import com.im.core.serialization.jackson.JacksonSerializer;
@@ -96,6 +97,7 @@ final class ServerComponentsFactory {
         runtime.friendApplyNotifier().bindCluster(cluster.routeTable(), cluster.clusterMessageBus());
         runtime.groupApplyNotifier().bindCluster(cluster.routeTable(), cluster.clusterMessageBus());
         runtime.systemMessageNotifier().bindCluster(cluster.routeTable(), cluster.clusterMessageBus());
+        runtime.messageRevokeNotifier().bindCluster(cluster.routeTable(), cluster.clusterMessageBus());
         BusinessDependencies business = createBusiness(config, redisConfig, cluster.routeTable());
         StorageDependencies storage = StorageComponentsFactory.createStorage(config, redisConfig, nodeId, business.retryExecutor());
         CallDependencies call = createCall(config, storage.messageQueue(), business.groupManager(), redisConfig);
@@ -138,15 +140,19 @@ final class ServerComponentsFactory {
                 IMExecutors.newVirtualThreadExecutor("im-dispatch"),
                 new RuntimeFriendApplyNotifier(nodeId, sessionManager),
                 new RuntimeGroupApplyNotifier(nodeId, sessionManager),
-                new RuntimeSystemMessageNotifier(nodeId, sessionManager));
+                new RuntimeSystemMessageNotifier(nodeId, sessionManager),
+                new RuntimeMessageRevokeNotifier(nodeId, sessionManager));
     }
 
     private static BusinessDependencies createBusiness(Config config,
                                                        RedisConfiguration redisConfig,
                                                        IRouteTable routeTable) {
         RetryExecutor retryExecutor = new FailsafeRetryExecutor();
+        String tokenSecret = config.getString("im.token.secret", BootstrapSecurityChecks.DEFAULT_TOKEN_SECRET);
+        BootstrapSecurityChecks.requireSafeSecret(config, "im.token.secret", tokenSecret,
+                BootstrapSecurityChecks.DEFAULT_TOKEN_SECRET);
         JwtAuthenticator authenticator = new JwtAuthenticator(
-                config.getString("im.token.secret", "im-system-dev-secret-change-in-production"),
+                tokenSecret,
                 new DbRefreshTokenStore(retryExecutor));
         IGroupManager groupManager = new CachedGroupManager(
                 new DbGroupManager(retryExecutor),
@@ -216,9 +222,14 @@ final class ServerComponentsFactory {
         ICallManager callManager = null;
         if (config.getBoolean("im.call.enabled", false)) {
             String sfuEndpoint = config.getString("im.call.sfu-endpoint", "ws://localhost:7880");
+            String apiKey = config.getString("im.call.api-key", BootstrapSecurityChecks.DEFAULT_CALL_API_KEY);
+            String apiSecret = config.getString("im.call.api-secret", "");
+            BootstrapSecurityChecks.requireSafeSecret(config, "im.call.api-key", apiKey,
+                    BootstrapSecurityChecks.DEFAULT_CALL_API_KEY);
+            BootstrapSecurityChecks.requireSafeSecret(config, "im.call.api-secret", apiSecret, "");
             callManager = new LiveKitCallManager(
-                    config.getString("im.call.api-key", "devkey"),
-                    config.getString("im.call.api-secret", ""),
+                    apiKey,
+                    apiSecret,
                     sfuEndpoint);
             log.info("LiveKitCallManager enabled: endpoint={}", sfuEndpoint);
             if (sfuEndpoint.contains("localhost") || sfuEndpoint.contains("127.0.0.1")) {
@@ -333,12 +344,36 @@ final class ServerComponentsFactory {
         }
     }
 
+    static final class RuntimeMessageRevokeNotifier {
+        private final String nodeId;
+        private final SessionManager sessionManager;
+        private volatile ClusterAwareMessageRevokeNotifier delegate;
+
+        RuntimeMessageRevokeNotifier(String nodeId, SessionManager sessionManager) {
+            this.nodeId = nodeId;
+            this.sessionManager = sessionManager;
+        }
+
+        void bindCluster(IRouteTable routeTable, IClusterMessageBus clusterMessageBus) {
+            this.delegate = new ClusterAwareMessageRevokeNotifier(nodeId, sessionManager, routeTable, clusterMessageBus);
+        }
+
+        void notify(com.im.core.usecase.RevokeResult result) {
+            if (delegate != null) delegate.notify(result);
+        }
+
+        void handleClusterPush(com.im.api.ClusterMessage message) {
+            if (delegate != null) delegate.handleClusterPush(message);
+        }
+    }
+
     record RuntimeDependencies(SessionManager sessionManager,
                                PendingAcknowledgementManager pendingAcknowledgementManager,
                                ExecutorService virtualExecutor,
                                RuntimeFriendApplyNotifier friendApplyNotifier,
                                RuntimeGroupApplyNotifier groupApplyNotifier,
-                               RuntimeSystemMessageNotifier systemMessageNotifier) {
+                               RuntimeSystemMessageNotifier systemMessageNotifier,
+                               RuntimeMessageRevokeNotifier messageRevokeNotifier) {
     }
 
     record ClusterDependencies(IRouteTable routeTable,

@@ -31,6 +31,7 @@ export class WsTransport {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private intentionalClose = false;
+  private connectionGeneration = 0;
 
   private _state: ConnectionState = "disconnected";
   private reqManager: RequestManager;
@@ -81,11 +82,13 @@ export class WsTransport {
     this.url = url;
     this.intentionalClose = false;
     this.reconnectAttempts = 0;
-    this.doConnect();
+    this.connectionGeneration++;
+    this.doConnect(this.connectionGeneration);
   }
 
   disconnect(): void {
     this.intentionalClose = true;
+    this.connectionGeneration++;
     this.stopHeartbeat();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
@@ -137,28 +140,41 @@ export class WsTransport {
 
   // ── 内部 ──
 
-  private doConnect(): void {
+  private doConnect(generation = this.connectionGeneration): void {
+    if (generation !== this.connectionGeneration) {
+      return;
+    }
     this.setState("connecting");
-    this.ws = new WebSocket(this.url);
-    this.ws.onopen = () => {
+    const ws = new WebSocket(this.url);
+    this.ws = ws;
+    ws.onopen = () => {
+      if (!this.isCurrentConnection(ws, generation)) return;
       this.setState("connected");
       this.reconnectAttempts = 0;
       this.startHeartbeat();
+      this.sendHeartbeat();
     };
-    this.ws.onclose = () => {
+    ws.onclose = () => {
+      if (!this.isCurrentConnection(ws, generation)) return;
       this.setState("disconnected");
       this.stopHeartbeat();
       if (!this.intentionalClose) {
-        this.tryReconnect();
+        this.tryReconnect(generation);
       }
     };
-    this.ws.onerror = () => {
+    ws.onerror = () => {
+      if (!this.isCurrentConnection(ws, generation)) return;
       // onclose will fire after onerror
     };
-    this.ws.onmessage = (event) => {
+    ws.onmessage = (event) => {
+      if (!this.isCurrentConnection(ws, generation)) return;
       if (typeof event.data !== "string") return;
       this.handleMessage(event.data);
     };
+  }
+
+  private isCurrentConnection(ws: WebSocket, generation: number): boolean {
+    return generation === this.connectionGeneration && this.ws === ws && !this.intentionalClose;
   }
 
   private handleMessage(raw: string): void {
@@ -216,19 +232,25 @@ export class WsTransport {
     }
   }
 
-  private tryReconnect(): void {
+  private tryReconnect(generation = this.connectionGeneration): void {
+    if (generation !== this.connectionGeneration) return;
     if (this.reconnectAttempts >= this.maxReconnect) return;
     this.reconnectAttempts++;
     this.reqManager.rejectAll(`Reconnecting (attempt ${this.reconnectAttempts})`);
     this.setState("reconnecting");
     const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
-    this.reconnectTimer = setTimeout(() => this.doConnect(), delay);
+    this.reconnectTimer = setTimeout(() => this.doConnect(generation), delay);
   }
 
   private startHeartbeat(): void {
+    this.stopHeartbeat();
     this.heartbeatTimer = setInterval(() => {
-      this.send({ op: "heartbeat", seq: 0, _requestId: this.reqManager.nextRequestId() });
+      this.sendHeartbeat();
     }, this.heartbeatInterval);
+  }
+
+  private sendHeartbeat(): void {
+    this.send({ op: "heartbeat", seq: 0, _requestId: this.reqManager.nextRequestId() });
   }
 
   private stopHeartbeat(): void {

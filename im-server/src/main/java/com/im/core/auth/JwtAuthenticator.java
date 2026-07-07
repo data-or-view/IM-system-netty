@@ -131,9 +131,17 @@ public class JwtAuthenticator implements IAuthenticator {
 
     @Override
     public String authenticate(String token) {
+        return authenticateAccessToken(token);
+    }
+
+    @Override
+    public String authenticateAccessToken(String token) {
         Claims claims = parseToken(token);
         if (claims == null) {
             throw new UnauthorizedException("invalid token");
+        }
+        if (REFRESH_TYP.equals(claims.get(CLAIM_TYP, String.class))) {
+            throw new UnauthorizedException("refresh token cannot access business APIs");
         }
         String userId = claims.get(CLAIM_UID, String.class);
         if (userId == null) {
@@ -146,6 +154,9 @@ public class JwtAuthenticator implements IAuthenticator {
     public int getAppManagerLevel(String token) {
         Claims claims = parseToken(token);
         if (claims == null) return 0;
+        if (REFRESH_TYP.equals(claims.get(CLAIM_TYP, String.class))) {
+            return 0;
+        }
         Integer lvl = claims.get(CLAIM_LVL, Integer.class);
         return lvl != null ? lvl : 0;
     }

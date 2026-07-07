@@ -110,7 +110,13 @@ export default function UserSearchDialog({ open, onOpenChange }: Props) {
               ) : applied[user.userId] ? (
                 <span className="shrink-0 rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-500">已申请</span>
               ) : (
-                <Button variant="outline" size="sm" onClick={() => void handleApply(user)} disabled={!!applying[user.userId]}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  aria-label={`向 ${user.nickname || user.userId} 发送好友申请`}
+                  onClick={() => void handleApply(user)}
+                  disabled={!!applying[user.userId]}
+                >
                   <UserPlus className="h-3.5 w-3.5" />
                   {applying[user.userId] ? "发送中" : "加好友"}
                 </Button>

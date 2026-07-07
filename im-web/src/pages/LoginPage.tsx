@@ -97,6 +97,7 @@ export default function LoginPage({ onLogin, onRegister, connecting, statusMsg }
           <div className="mb-6 grid grid-cols-2 rounded-xl bg-slate-100 p-1">
             <button
               type="button"
+              aria-pressed={isLogin}
               onClick={() => setMode("login")}
               className={cn(
                 "rounded-lg py-2 text-sm font-medium transition-all",
@@ -109,6 +110,7 @@ export default function LoginPage({ onLogin, onRegister, connecting, statusMsg }
             </button>
             <button
               type="button"
+              aria-pressed={!isLogin}
               onClick={() => setMode("register")}
               className={cn(
                 "rounded-lg py-2 text-sm font-medium transition-all",
@@ -125,8 +127,9 @@ export default function LoginPage({ onLogin, onRegister, connecting, statusMsg }
           <form onSubmit={handleSubmit} className="space-y-4">
             {isLogin ? (
               <div className="space-y-1">
-                <label className="text-xs font-medium text-slate-600">用户 ID</label>
+                <label htmlFor="login-user-id" className="text-xs font-medium text-slate-600">用户 ID</label>
                 <Input
+                  id="login-user-id"
                   placeholder="输入您的用户 ID"
                   value={userId}
                   onChange={(e) => setUserId(e.target.value)}
@@ -136,8 +139,9 @@ export default function LoginPage({ onLogin, onRegister, connecting, statusMsg }
               </div>
             ) : (
               <div className="space-y-1">
-                <label className="text-xs font-medium text-slate-600">昵称（可选）</label>
+                <label htmlFor="register-nickname" className="text-xs font-medium text-slate-600">昵称（可选）</label>
                 <Input
+                  id="register-nickname"
                   placeholder="显示名称，可留空"
                   value={nickname}
                   onChange={(e) => setNickname(e.target.value)}
@@ -148,10 +152,11 @@ export default function LoginPage({ onLogin, onRegister, connecting, statusMsg }
             )}
 
             <div className="space-y-1">
-              <label className="text-xs font-medium text-slate-600">
+              <label htmlFor="auth-password" className="text-xs font-medium text-slate-600">
                 密码{!isLogin && <span className="ml-1 text-red-500">*</span>}
               </label>
               <Input
+                id="auth-password"
                 type="password"
                 placeholder={isLogin ? "密码（可选）" : "设置密码"}
                 value={password}

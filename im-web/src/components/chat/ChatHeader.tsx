@@ -50,6 +50,7 @@ export default function ChatHeader({
                 variant="ghost"
                 size="icon"
                 className="h-9 w-9 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+                aria-label="语音通话"
                 title="语音通话"
                 onClick={() => onStartCall("voice")}
               >
@@ -60,6 +61,7 @@ export default function ChatHeader({
                 variant="ghost"
                 size="icon"
                 className="h-9 w-9 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+                aria-label="视频通话"
                 title="视频通话"
                 onClick={() => onStartCall("video")}
               >
@@ -73,6 +75,7 @@ export default function ChatHeader({
               variant="ghost"
               size="icon"
               className="h-9 w-9 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+              aria-label={activeGroupCall ? "加入群视频" : "发起群视频"}
               title={activeGroupCall ? "加入群视频" : "发起群视频"}
               onClick={activeGroupCall ? onJoinGroupCall : onStartGroupCall}
               disabled={groupCallBusy}
@@ -84,6 +87,7 @@ export default function ChatHeader({
             type="button"
             onClick={onShowInfo}
             className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700"
+            aria-label="查看资料"
             title="查看资料"
           >
             <Info className="h-4 w-4" />

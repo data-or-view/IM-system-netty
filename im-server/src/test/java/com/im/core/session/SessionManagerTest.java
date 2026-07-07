@@ -131,6 +131,28 @@ class SessionManagerTest {
     }
 
     @Test
+    void rejectNewDoesNotAuthenticateRejectedSession() {
+        manager.setLoginStrategy(MultiLoginStrategy.REJECT_NEW);
+
+        EmbeddedChannel oldCh = new EmbeddedChannel();
+        NettyConnectionRef oldRef = ref(oldCh);
+        manager.createSession(oldRef);
+        manager.bindUser(oldRef.connectionId(), "user005");
+
+        EmbeddedChannel newCh = new EmbeddedChannel();
+        NettyConnectionRef newRef = ref(newCh);
+        IConnectionSession newSession = manager.createSession(newRef);
+
+        assertNull(manager.bindUser(newRef.connectionId(), "user005"));
+        assertFalse(newSession.isAuthenticated());
+        assertNull(newSession.getUserId());
+        assertEquals(1, manager.getSessionsByUserId("user005").size());
+
+        oldCh.close();
+        newCh.close();
+    }
+
+    @Test
     void allSessions() {
         assertEquals(0, manager.allSessions().size(), "should start empty");
 

@@ -44,6 +44,7 @@ export function SearchBar({
         className="h-10 w-10 shrink-0 bg-blue-600 hover:bg-blue-700"
         onClick={onSearch}
         disabled={disabled || loading}
+        aria-label="搜索"
         title="搜索"
       >
         {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}

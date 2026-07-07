@@ -107,7 +107,7 @@ public class HeartbeatHandler implements RequestHandler {
         }
 
         try {
-            String userId = authenticator.authenticate(token);
+            String userId = authenticator.authenticateAccessToken(token);
             int platformId = req.getInt("platformId", com.im.api.PlatformID.WEB);
             sessionManager.bindUser(connectionId, userId, platformId);
             IConnectionSession bound = sessionManager.getByConnectionId(connectionId);

@@ -103,6 +103,7 @@ export default function FriendRequestDialog({ open, onOpenChange }: Props) {
 
                 <div className="flex shrink-0 gap-2">
                   <Button
+                    aria-label={`拒绝 ${a.fromUserId} 的好友申请`}
                     size="sm"
                     variant="outline"
                     className="text-red-600 hover:border-red-200 hover:bg-red-50 hover:text-red-700"
@@ -116,6 +117,7 @@ export default function FriendRequestDialog({ open, onOpenChange }: Props) {
                     )}
                   </Button>
                   <Button
+                    aria-label={`同意 ${a.fromUserId} 的好友申请`}
                     size="sm"
                     onClick={() => handleApprove(a.fromUserId, true)}
                     disabled={!!processing[a.fromUserId]}

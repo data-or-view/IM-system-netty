@@ -107,7 +107,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
     }
   }, [connectRoom, resetCall]);
 
-  const joinGroupCall = useCallback(async ({ group, mediaPermissionChecked = false }: JoinGroupCallInput) => {
+  const joinGroupCall = useCallback(async ({ group, mediaPermissionChecked = false, suppressFailureToast = false }: JoinGroupCallInput) => {
     if (!group.groupId || callRef.current.phase !== "idle") return;
     try {
       if (!mediaPermissionChecked) {
@@ -152,19 +152,28 @@ export function CallProvider({ children }: { children: ReactNode }) {
       }));
     } catch (err) {
       console.error("join group call failed:", err);
-      toast(callErrorText(err, "加入群视频失败", liveKitUrlRef.current));
+      await im.group.leaveCall(group.groupId).catch(() => undefined);
+      if (!suppressFailureToast) {
+        toast(callErrorText(err, "加入群视频失败", liveKitUrlRef.current));
+      }
       await resetCall();
+      throw err;
     }
   }, [connectRoom, disconnectCurrentRoom, resetCall]);
 
   const startGroupCall = useCallback(async ({ group, callType = "video" }: StartGroupCallInput) => {
     if (!group.groupId || callRef.current.phase !== "idle") return;
+    let started = false;
     try {
       await ensureMediaPermission(callType);
       await im.group.startCall(group.groupId, callType);
-      await joinGroupCall({ group, mediaPermissionChecked: true });
+      started = true;
+      await joinGroupCall({ group, mediaPermissionChecked: true, suppressFailureToast: true });
     } catch (err) {
       console.error("start group call failed:", err);
+      if (started) {
+        await im.group.endCall(group.groupId).catch(() => undefined);
+      }
       toast(callErrorText(err, "发起群视频失败", liveKitUrlRef.current));
       await resetCall();
     }
@@ -174,16 +183,22 @@ export function CallProvider({ children }: { children: ReactNode }) {
     const current = callRef.current;
     if (current.phase !== "incoming" || !current.peer?.userId || !current.roomId || !incomingTokenRef.current) return;
 
+    let acceptedSent = false;
     try {
       stopIncomingAttention(titleBlinkTimerRef, ringtoneRef, originalTitleRef.current);
       await ensureMediaPermission(current.callType);
       setCall((prev) => ({ ...prev, phase: "accepted" }));
       await im.message.sendCallSignal(current.peer.userId, SignalingAction.ACCEPT, current.roomId);
+      acceptedSent = true;
       setCall((prev) => ({ ...prev, phase: "connectingMedia" }));
       await connectRoom(liveKitUrlRef.current, incomingTokenRef.current, current.callType);
       setCall((prev) => ({ ...prev, phase: "connected", startedAt: Date.now() }));
     } catch (err) {
       console.error("accept call failed:", err);
+      if (acceptedSent) {
+        await im.message.sendCallSignal(current.peer.userId, SignalingAction.HANGUP, current.roomId, undefined, "media_failed")
+          .catch(() => undefined);
+      }
       toast(callErrorText(err, "接听失败"));
       await resetCall();
     }

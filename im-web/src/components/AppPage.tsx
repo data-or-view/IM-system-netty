@@ -20,7 +20,7 @@ export function AppPage({
     <div className="flex h-full flex-1 flex-col bg-[var(--app-bg)]">
       <div className="flex items-center gap-3 border-b border-slate-200 bg-white/95 px-5 py-3 shadow-[0_1px_0_rgba(16,24,40,0.03)]">
         {onBack && (
-          <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0" onClick={onBack}>
+          <Button aria-label="返回" variant="ghost" size="icon" className="h-9 w-9 shrink-0" onClick={onBack}>
             <ArrowLeft className="h-4 w-4" />
           </Button>
         )}

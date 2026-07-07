@@ -3,13 +3,13 @@
  *
  * 本地开发默认连接后端 Netty 服务：
  * - WebSocket: ws://127.0.0.1:8083/ws
- * - HTTP: http://127.0.0.1:8084
+ * - HTTP: 同源 /api（经 Vite proxy 转发到 http://127.0.0.1:8084）
  *
  * 可通过 Vite 环境变量覆盖：VITE_WS_URL / VITE_HTTP_URL。
  */
 
 import { createIM } from "im-sdk";
-import { SDK_CONNECT_TIMEOUT_MS, SDK_REQUEST_TIMEOUT_MS, DEV_HTTP_URL, DEV_WS_URL } from "@/config/runtime";
+import { SDK_CONNECT_TIMEOUT_MS, SDK_REQUEST_TIMEOUT_MS, DEV_WS_URL } from "@/config/runtime";
 import {
   AUTH_REFRESH_TOKEN_KEY,
   AUTH_TOKEN_KEY,
@@ -18,8 +18,8 @@ import {
 } from "@/config/storage-keys";
 
 export const im = createIM({
-  wsUrl: import.meta.env.VITE_WS_URL ?? DEV_WS_URL,
-  httpUrl: import.meta.env.VITE_HTTP_URL ?? DEV_HTTP_URL,
+  wsUrl: envString(import.meta.env.VITE_WS_URL, DEV_WS_URL),
+  httpUrl: envString(import.meta.env.VITE_HTTP_URL, ""),
   connectTimeout: SDK_CONNECT_TIMEOUT_MS,
   requestTimeout: SDK_REQUEST_TIMEOUT_MS,
   syncOnReconnect: true,
@@ -55,3 +55,7 @@ export const im = createIM({
     }
   },
 });
+
+function envString(value: unknown, fallback: string): string {
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}

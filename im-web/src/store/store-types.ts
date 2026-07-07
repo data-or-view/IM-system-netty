@@ -95,6 +95,11 @@ export interface OpenGroupChatInput {
   faceUrl?: string;
 }
 
+export interface FetchOptions {
+  force?: boolean;
+  silent?: boolean;
+}
+
 export interface StoreContextType {
   state: State;
   dispatch: Dispatch<Action>;
@@ -103,7 +108,7 @@ export interface StoreContextType {
   logout: () => void;
   sendMessage: (toUserId: string, content: string) => Promise<Message | undefined>;
   fetchConversations: () => Promise<void>;
-  fetchFriends: () => Promise<void>;
+  fetchFriends: (options?: FetchOptions) => Promise<void>;
   searchUser: (keyword: string, limit?: number) => Promise<void>;
   applyFriend: (targetUserId: string, reqMsg?: string) => Promise<void>;
   removeFriend: (targetUserId: string) => Promise<void>;
@@ -115,9 +120,9 @@ export interface StoreContextType {
   fetchUnhandledApplyCount: () => Promise<void>;
   approveGroupApply: (groupId: string, userId: string, agreed: boolean) => Promise<void>;
   fetchUnhandledGroupApplyCount: () => Promise<void>;
-  fetchGroupMembers: (groupId: string, options?: { force?: boolean }) => Promise<void>;
-  fetchGroupInfo: (groupId: string, options?: { force?: boolean }) => Promise<void>;
-  fetchUserProfile: (userId: string, options?: { force?: boolean }) => Promise<void>;
+  fetchGroupMembers: (groupId: string, options?: FetchOptions) => Promise<void>;
+  fetchGroupInfo: (groupId: string, options?: FetchOptions) => Promise<void>;
+  fetchUserProfile: (userId: string, options?: FetchOptions) => Promise<void>;
   markConversationRead: (conversationId: string, seq?: number) => Promise<void>;
   refreshSystemMessages: () => Promise<void>;
   openSingleChat: (input: OpenSingleChatInput) => void;

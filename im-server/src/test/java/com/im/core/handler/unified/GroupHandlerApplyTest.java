@@ -7,6 +7,7 @@ import com.im.api.GroupApplyHandleResult;
 import com.im.api.GroupDisbandResult;
 import com.im.api.GroupInformation;
 import com.im.api.GroupJoinResult;
+import com.im.api.GroupMemberInfoVisibility;
 import com.im.api.GroupMemberInformation;
 import com.im.api.GroupMemberRole;
 import com.im.api.IConversationManager;
@@ -312,6 +313,38 @@ class GroupHandlerApplyTest {
         assertEquals("admin", publisher.operatorId);
     }
 
+    @Test
+    void groupMembersRejectsNonMember() {
+        RecordingGroupManager manager = new RecordingGroupManager();
+        manager.groupInformation = new GroupInformation("grp_1", "研发群", "owner");
+        manager.member = false;
+        GroupHandler handler = new GroupHandler(manager);
+        ApiRequest request = request(Operation.GROUP_MEMBERS, Map.of("groupId", "grp_1"), "mallory");
+
+        assertThrows(ForbiddenException.class, () -> handler.handle(request));
+    }
+
+    @Test
+    void groupMembersHonorsAdminOnlyVisibility() {
+        RecordingGroupManager manager = new RecordingGroupManager();
+        manager.groupInformation = new GroupInformation("grp_1", "研发群", "owner");
+        manager.groupInformation.setLookMemberInfo(GroupMemberInfoVisibility.ADMIN_ONLY);
+        manager.member = true;
+        manager.role = "member";
+        GroupHandler handler = new GroupHandler(manager);
+        ApiRequest memberRequest = request(Operation.GROUP_MEMBERS, Map.of("groupId", "grp_1"), "alice");
+
+        assertThrows(ForbiddenException.class, () -> handler.handle(memberRequest));
+
+        manager.role = "admin";
+        @SuppressWarnings("unchecked")
+        Map<String, Object> response = (Map<String, Object>) handler.handle(
+                request(Operation.GROUP_MEMBERS, Map.of("groupId", "grp_1"), "admin"));
+
+        assertEquals("grp_1", response.get("groupId"));
+        assertEquals(0, response.get("count"));
+    }
+
     private static ApiRequest request(Operation operation, Map<String, Object> params, String userId) {
         ApiRequest request = new ApiRequest(operation, params, Map.of(), null, null);
         request.setAttribute("_uid", userId);
@@ -344,6 +377,8 @@ class GroupHandlerApplyTest {
         String memberInfoGroupId;
         String memberInfoUserId;
         String memberInfoNickname;
+        GroupInformation groupInformation;
+        boolean member = true;
 
         @Override public void createGroup(String groupId, String ownerId, String groupName, String faceUrl, List<String> members, int groupType, int needVerification) {
             createdGroupId = groupId;
@@ -398,10 +433,10 @@ class GroupHandlerApplyTest {
 
         @Override public List<GroupMemberInformation> getMemberList(String groupId) { return List.of(); }
         @Override public Set<String> getMemberIds(String groupId) { return Set.of(); }
-        @Override public boolean isMember(String groupId, String userId) { return false; }
+        @Override public boolean isMember(String groupId, String userId) { return member; }
         @Override public String getRole(String groupId, String userId) { return role; }
         @Override public Set<String> getJoinedGroups(String userId) { return Set.of(); }
-        @Override public GroupInformation getGroupInformation(String groupId) { return null; }
+        @Override public GroupInformation getGroupInformation(String groupId) { return groupInformation; }
         @Override public List<GroupInformation> searchGroups(String keyword, int limit) { return List.of(); }
         @Override public IncrementalSyncResult<String> getIncrementalGroups(String userId, long version) { return new IncrementalSyncResult<>(List.of(), version, false); }
         @Override public IncrementalSyncResult<GroupMemberInformation> getIncrementalMembers(String groupId, long version) { return new IncrementalSyncResult<>(List.of(), version, false); }

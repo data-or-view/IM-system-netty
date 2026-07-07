@@ -43,6 +43,8 @@ export default function MessageComposer({
       />
       <div className="mx-auto flex max-w-3xl items-center gap-2">
         <button
+          type="button"
+          aria-label={uploading ? "正在上传文件" : "发送文件"}
           className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 disabled:cursor-not-allowed disabled:opacity-40"
           disabled={!canAttach || uploading}
           onClick={() => fileInputRef.current?.click()}
@@ -63,6 +65,8 @@ export default function MessageComposer({
         </div>
 
         <button
+          type="button"
+          aria-label="发送消息"
           onClick={onSend}
           disabled={!value.trim() || disabled}
           className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-blue-600 text-white shadow-sm transition-all hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"

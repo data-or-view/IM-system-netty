@@ -90,11 +90,14 @@ export function mergeConversationMessages(existing: Message[], incoming: Message
 
   let changed = false;
   for (const msg of incoming) {
-    const key = aliasKey.get(messageKey(msg)) ?? messageKey(msg);
+    const incomingAliases = messageAliases(msg);
+    const key = incomingAliases
+      .map((alias) => aliasKey.get(alias))
+      .find((alias) => alias !== undefined) ?? messageKey(msg);
     const current = byKey.get(key);
     if (!current) {
       byKey.set(key, msg);
-      for (const alias of messageAliases(msg)) {
+      for (const alias of incomingAliases) {
         aliasKey.set(alias, key);
       }
       changed = true;
@@ -141,9 +144,16 @@ export function setConversationsKeepingActive(
   list: Conversation[],
 ): DomainStateShape {
   const normalized = sortConversations(list.map(normalizeConversation));
+  const activeConversation = state.activeConversationId
+    ? state.conversations.find((conversation) => conversation.conversationId === state.activeConversationId)
+    : undefined;
+  const conversations = activeConversation && !normalized.some((conversation) => conversation.conversationId === activeConversation.conversationId)
+    ? sortConversations([...normalized, activeConversation])
+    : normalized;
+
   return {
     ...state,
-    conversations: normalized,
+    conversations,
   };
 }
 
@@ -190,14 +200,14 @@ export function latestMessage(messages: Message[]): Message | null {
 }
 
 export function messageKey(msg: Message): string {
-  if (msg.messageId) return `id:${msg.messageId}`;
   if (msg.seq > 0) return `seq:${msg.conversationId}:${msg.seq}`;
+  if (msg.messageId) return `id:${msg.conversationId}:${msg.messageId}`;
   return `tmp:${msg.senderUserId}:${msg.createTime}:${msg.content}`;
 }
 
 function messageAliases(msg: Message): string[] {
   const aliases = [messageKey(msg)];
-  if (msg.messageId) aliases.push(`id:${msg.messageId}`);
+  if (msg.messageId) aliases.push(`id:${msg.conversationId}:${msg.messageId}`);
   if (msg.seq > 0) aliases.push(`seq:${msg.conversationId}:${msg.seq}`);
   return Array.from(new Set(aliases));
 }

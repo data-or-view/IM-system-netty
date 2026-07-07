@@ -46,6 +46,7 @@ export function FriendList({
           搜索 / 添加好友
         </button>
         <button
+          aria-label="好友申请"
           onClick={() => {
             void fetchUnhandledApplyCount();
             onFriendRequests();
@@ -107,6 +108,7 @@ export function GroupList({
           创建
         </button>
         <button
+          aria-label="群申请"
           onClick={() => {
             void fetchUnhandledGroupApplyCount();
             onGroupRequests();

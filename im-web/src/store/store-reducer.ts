@@ -187,7 +187,9 @@ export function reducer(state: State, action: Action): State {
     case "UPSERT_SENT_MESSAGE": {
       const nextId = action.conversation.conversationId;
       const previousId = action.previousConversationId;
-      const carriedMessages = previousId && previousId !== nextId ? state.messages[previousId] || [] : [];
+      const carriedMessages = previousId && previousId !== nextId
+        ? (state.messages[previousId] || []).map((message) => ({ ...message, conversationId: nextId }))
+        : [];
       const merged = mergeConversationMessages(
         state.messages[nextId] || [],
         [...carriedMessages, action.msg],

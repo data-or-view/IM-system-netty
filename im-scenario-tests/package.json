@@ -12,13 +12,15 @@
     "scenario:group-chat": "pnpm run build && node dist/scenarios/group-chat.js",
     "scenario:group-chat-perf": "pnpm run build && node dist/scenarios/group-chat-perf.js",
     "scenario:cluster-ha": "pnpm run build && node dist/scenarios/cluster-ha.js",
+    "scenario:message-idempotency": "pnpm run build && node dist/scenarios/message-idempotency.js",
     "scenario:group-call": "pnpm run build && node dist/scenarios/group-call.js",
     "scenario:group-join-system": "pnpm run build && node dist/scenarios/group-join-system-message.js",
     "scenario:offline-sync": "pnpm run build && node dist/scenarios/offline-sync.js",
     "scenario:friend-apply-notify": "pnpm run build && node dist/scenarios/friend-apply-notify.js",
     "scenario:group-apply-notify": "pnpm run build && node dist/scenarios/group-apply-notify.js",
     "scenario:system-message": "pnpm run build && node dist/scenarios/system-message.js",
-    "scenario:friend-group-side-effects": "pnpm run build && node dist/scenarios/friend-group-side-effects.js"
+    "scenario:friend-group-side-effects": "pnpm run build && node dist/scenarios/friend-group-side-effects.js",
+    "scenario:all": "pnpm run build && node dist/scenarios/smoke.js && node dist/scenarios/group-chat.js && node dist/scenarios/group-chat-perf.js && node dist/scenarios/group-call.js && node dist/scenarios/group-join-system-message.js && node dist/scenarios/offline-sync.js && node dist/scenarios/message-idempotency.js && node dist/scenarios/friend-apply-notify.js && node dist/scenarios/group-apply-notify.js && node dist/scenarios/system-message.js && node dist/scenarios/friend-group-side-effects.js"
   },
   "dependencies": {
     "ws": "^8.20.1"

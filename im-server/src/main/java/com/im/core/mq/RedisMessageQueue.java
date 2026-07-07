@@ -11,10 +11,12 @@ import com.im.core.redis.RedisConfiguration;
 import com.im.core.redis.RedisConfiguration.CloseableRedisCommands;
 import com.im.core.serialization.jackson.ObjectMapperProvider;
 import io.lettuce.core.Consumer;
-import io.lettuce.core.api.sync.RedisCommands;
-import io.lettuce.core.XReadArgs;
+import io.lettuce.core.XAutoClaimArgs;
 import io.lettuce.core.XGroupCreateArgs;
+import io.lettuce.core.XReadArgs;
+import io.lettuce.core.api.sync.RedisCommands;
 import io.lettuce.core.cluster.api.async.RedisClusterAsyncCommands;
+import io.lettuce.core.models.stream.ClaimedMessages;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -60,11 +62,19 @@ public class RedisMessageQueue implements IMessageQueue {
     /** 每次 XREADGROUP 最大条数 */
     private static final int BATCH_SIZE = 10;
 
+    /** pending 消息超过该 idle 时间后可被当前消费者接管。 */
+    private static final Duration DEFAULT_PENDING_MIN_IDLE = Duration.ofSeconds(30);
+
+    /** 单轮最多连续接管多少批 pending，避免恢复历史消息时长期不读新消息。 */
+    private static final int MAX_PENDING_CLAIM_ROUNDS = 5;
+
     /** 连接失败重试间隔 */
     private static final Duration RETRY_INTERVAL = Duration.ofSeconds(1);
 
     private final RedisConfiguration redisConfig;
     private final String consumerId;
+    private final Duration pendingMinIdle;
+    private final int pendingClaimBatchSize;
 
     /** topic → handler 列表 */
     private final ConcurrentHashMap<String, List<MessageHandler>> subscribers = new ConcurrentHashMap<>();
@@ -77,9 +87,17 @@ public class RedisMessageQueue implements IMessageQueue {
     private RedisClusterAsyncCommands<String, String> async;
 
     public RedisMessageQueue(RedisConfiguration redisConfig, String nodeId) {
+        this(redisConfig, nodeId, DEFAULT_PENDING_MIN_IDLE, BATCH_SIZE);
+    }
+
+    RedisMessageQueue(RedisConfiguration redisConfig, String nodeId,
+                      Duration pendingMinIdle, int pendingClaimBatchSize) {
         this.redisConfig = redisConfig;
         String uuid = UUID.randomUUID().toString().substring(0, 8);
         this.consumerId = nodeId + "_" + uuid;
+        this.pendingMinIdle = pendingMinIdle != null && !pendingMinIdle.isZero() && !pendingMinIdle.isNegative()
+                ? pendingMinIdle : DEFAULT_PENDING_MIN_IDLE;
+        this.pendingClaimBatchSize = pendingClaimBatchSize > 0 ? pendingClaimBatchSize : BATCH_SIZE;
     }
 
     @Override
@@ -200,6 +218,7 @@ public class RedisMessageQueue implements IMessageQueue {
         final String topic;
         volatile Thread thread;
         volatile boolean stopped = false;
+        private String pendingClaimCursor = "0-0";
 
         ConsumerTask(String topic) {
             this.topic = topic;
@@ -226,6 +245,8 @@ public class RedisMessageQueue implements IMessageQueue {
 
                     while (!stopped && running.get() && !Thread.currentThread().isInterrupted()) {
                         try {
+                            claimPending(sync, streamKey, groupName);
+
                             List<io.lettuce.core.StreamMessage<String, String>> messages = sync.xreadgroup(
                                     Consumer.from(groupName, consumerId),
                                     XReadArgs.Builder.block(BLOCK_TIMEOUT).count(BATCH_SIZE),
@@ -255,6 +276,51 @@ public class RedisMessageQueue implements IMessageQueue {
             }
 
             log.info("Consumer stopped for topic '{}'", topic);
+        }
+
+        private void claimPending(RedisCommands<String, String> sync, String streamKey, String groupName) {
+            for (int round = 0; round < MAX_PENDING_CLAIM_ROUNDS; round++) {
+                try {
+                    ClaimedMessages<String, String> claimed = sync.xautoclaim(streamKey, new XAutoClaimArgs<String>()
+                            .consumer(Consumer.from(groupName, consumerId))
+                            .minIdleTime(pendingMinIdle)
+                            .startId(pendingClaimCursor)
+                            .count(pendingClaimBatchSize));
+                    String nextCursor = claimed.getId();
+                    if (nextCursor != null && !nextCursor.isBlank()) {
+                        pendingClaimCursor = nextCursor;
+                    }
+                    List<io.lettuce.core.StreamMessage<String, String>> messages = claimed.getMessages();
+                    if (messages == null || messages.isEmpty()) {
+                        return;
+                    }
+                    log.info("Claimed {} pending Redis stream messages: topic={}, consumerId={}, minIdleMs={}",
+                            messages.size(), topic, consumerId, pendingMinIdle.toMillis());
+                    for (io.lettuce.core.StreamMessage<String, String> msg : messages) {
+                        if (stopped || !running.get()) break;
+                        processMessage(sync, streamKey, groupName, msg);
+                    }
+                    if ("0-0".equals(nextCursor) || messages.size() < pendingClaimBatchSize) {
+                        return;
+                    }
+                } catch (Exception e) {
+                    if (isUnsupportedAutoClaim(e)) {
+                        throw new RedisPersistenceException(
+                                "Redis XAUTOCLAIM is required for stream pending recovery; use Redis 6.2+",
+                                e);
+                    }
+                    log.warn("Failed to claim pending Redis stream messages: topic={}, consumerId={}, causeType={}, causeMessage={}",
+                            topic, consumerId, e.getClass().getName(), e.getMessage());
+                    return;
+                }
+            }
+        }
+
+        private boolean isUnsupportedAutoClaim(Exception e) {
+            String message = String.valueOf(e.getMessage()).toLowerCase(Locale.ROOT);
+            return message.contains("unknown command")
+                    || message.contains("syntax error")
+                    || message.contains("unknown subcommand");
         }
 
         private void ensureGroup(RedisCommands<String, String> sync, String streamKey, String groupName) {

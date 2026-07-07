@@ -155,9 +155,7 @@ public class DbFriendManager implements IFriendManager, FriendApplyPolicy.Gatewa
         return PersistenceExceptions.runDatabase("get friend list", () -> {
             try (SqlSession session = MyBatisPlusFactory.openSession()) {
                 FriendMapper mapper = session.getMapper(FriendMapper.class);
-                return mapper.selectList(new LambdaQueryWrapper<FriendEntity>()
-                                .eq(FriendEntity::getOwnerUserId, userId)).stream()
-                        .map(this::toFriendInformation).toList();
+                return mapper.selectFriendInformationList(userId);
             }
         });
     }
@@ -288,10 +286,7 @@ public class DbFriendManager implements IFriendManager, FriendApplyPolicy.Gatewa
                     return PersistenceExceptions.runDatabase("get incremental friend entity", () -> {
                         try (SqlSession session = MyBatisPlusFactory.openSession()) {
                             FriendMapper mapper = session.getMapper(FriendMapper.class);
-                            FriendEntity entity = mapper.selectOne(new LambdaQueryWrapper<FriendEntity>()
-                                    .eq(FriendEntity::getOwnerUserId, userId)
-                                    .eq(FriendEntity::getFriendUserId, fid));
-                            return entity != null ? toFriendInformation(entity) : null;
+                            return mapper.selectFriendInformation(userId, fid);
                         }
                     });
                 },
@@ -364,17 +359,5 @@ public class DbFriendManager implements IFriendManager, FriendApplyPolicy.Gatewa
         apply.setCreateTime(entity.getCreatedAt());
         apply.setHandleTime(entity.getHandleTime());
         return apply;
-    }
-
-    private FriendInformation toFriendInformation(FriendEntity entity) {
-        FriendInformation fi = new FriendInformation();
-        fi.setOwnerUserId(entity.getOwnerUserId());
-        fi.setFriendUserId(entity.getFriendUserId());
-        fi.setRemark(entity.getRemark());
-        fi.setAddSource(ApplySource.fromCode(entity.getAddSource()));
-        fi.setEx(entity.getEx());
-        fi.setCreateTime(entity.getCreatedAt());
-        fi.setPinned(entity.getIsPinned() == 1);
-        return fi;
     }
 }

@@ -80,6 +80,10 @@ export class ScenarioWsClient {
     return this.pushes.length;
   }
 
+  pushesAfter(cursor: number): WsPush[] {
+    return this.pushes.slice(cursor);
+  }
+
   async waitForPushAfter(
     cursor: number,
     predicate: (push: WsPush) => boolean,

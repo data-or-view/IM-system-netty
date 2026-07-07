@@ -102,6 +102,7 @@ export default function GroupRequestDialog({ open, onOpenChange }: Props) {
 
                   <div className="ml-3 flex shrink-0 gap-2">
                     <Button
+                      aria-label={`拒绝 ${apply.userId} 加入 ${apply.groupName || apply.groupId}`}
                       size="sm"
                       variant="outline"
                       className="text-red-600 hover:border-red-200 hover:bg-red-50 hover:text-red-700"
@@ -110,7 +111,12 @@ export default function GroupRequestDialog({ open, onOpenChange }: Props) {
                     >
                       {processing[key] ? <Loader2 className="h-3 w-3 animate-spin" /> : <X className="h-3 w-3" />}
                     </Button>
-                    <Button size="sm" onClick={() => void handleApprove(apply, true)} disabled={!!processing[key]}>
+                    <Button
+                      aria-label={`同意 ${apply.userId} 加入 ${apply.groupName || apply.groupId}`}
+                      size="sm"
+                      onClick={() => void handleApprove(apply, true)}
+                      disabled={!!processing[key]}
+                    >
                       {processing[key] ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
                     </Button>
                   </div>

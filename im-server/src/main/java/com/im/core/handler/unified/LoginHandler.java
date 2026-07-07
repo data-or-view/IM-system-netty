@@ -77,15 +77,15 @@ public class LoginHandler implements RequestHandler {
         IConnectionSession session = null;
         if (connectionId != null) {
             session = sessionManager.getByConnectionId(connectionId);
-            if (session != null) {
-                session.authenticate(userId, platformId);
-            }
             sessionManager.bindUser(connectionId, userId, platformId);
+            IConnectionSession boundSession = sessionManager.getByConnectionId(connectionId);
+            if (boundSession == null || !boundSession.isAuthenticated()) {
+                throw new ConflictException("user already logged in");
+            }
 
             // ③ 绑定成功后注册路由（先 bindUser 后注册，
             //    避免被踢旧 session 的 channelInactive 清理逻辑误删新路由）
             if (routeTable != null) {
-                IConnectionSession boundSession = sessionManager.getByConnectionId(connectionId);
                 String sessionId = boundSession != null ? boundSession.getSessionId() : "default";
                 int boundPlatformId = boundSession != null ? boundSession.getPlatformId() : platformId;
                 routeTable.online(userId, localNodeId, boundPlatformId, sessionId);

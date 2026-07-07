@@ -32,6 +32,7 @@ function userScopedKey(userId: string | null | undefined, name: string): string 
 export const AUTH_USER_ID_KEY = scopedKey("userId");
 export const AUTH_TOKEN_KEY = scopedKey("token");
 export const AUTH_REFRESH_TOKEN_KEY = scopedKey("refreshToken");
+export const AUTH_LOGOUT_EVENT_KEY = scopedKey("logoutEvent");
 
 export function syncCursorsKey(userId: string | null | undefined): string {
   return userScopedKey(userId, "sync_cursors");

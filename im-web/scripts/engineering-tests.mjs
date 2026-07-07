@@ -17,7 +17,7 @@ function lineCount(relativePath) {
   return readSource(relativePath).split(/\r?\n/).length;
 }
 
-function loadTsModule(relativePath) {
+function loadTsModule(relativePath, options = {}) {
   const filename = path.join(root, relativePath);
   const source = fs.readFileSync(filename, "utf8");
   const compiled = ts.transpileModule(source, {
@@ -32,7 +32,8 @@ function loadTsModule(relativePath) {
   const context = {
     module,
     exports: module.exports,
-    require,
+    require: (specifier) => options.stubs?.[specifier] ?? require(specifier),
+    URL,
     URLSearchParams,
   };
   vm.runInNewContext(compiled, context, { filename });
@@ -56,14 +57,18 @@ test("route helpers centralize app paths and encode route params", () => {
 });
 
 test("auth guard only logs out for real authentication failures", () => {
-  const { isAuthExpiredError, authCheckFailureMessage } = loadTsModule("src/lib/app-errors.ts");
+  const { isAuthExpiredError, authCheckFailureMessage, toAppErrorNotice } = loadTsModule("src/lib/app-errors.ts");
 
   assert.equal(isAuthExpiredError({ code: 401, message: "unauthorized" }), true);
   assert.equal(isAuthExpiredError({ kind: "auth", code: -1, message: "invalid token" }), true);
   assert.equal(isAuthExpiredError({ code: 403, message: "forbidden" }), false);
   assert.equal(isAuthExpiredError({ kind: "connection", code: -1, message: "Not connected" }), false);
   assert.equal(isAuthExpiredError({ kind: "timeout", code: -1, message: "timeout" }), false);
-  assert.equal(authCheckFailureMessage({ kind: "timeout", message: "timeout" }), "服务响应超时，请稍后重试");
+  assert.equal(authCheckFailureMessage({ kind: "timeout", message: "timeout" }), "服务响应超时，已保留登录状态");
+  assert.equal(
+    toAppErrorNotice({ kind: "connection", message: "Failed to fetch" }, "暂时无法连接到后端，已保留登录状态", "auth-check").message,
+    "暂时无法连接到后端，已保留登录状态",
+  );
 });
 
 test("behavior constants collect non-visual magic values", () => {
@@ -97,6 +102,137 @@ test("route error boundary navigates through React Router instead of browser his
   assert.doesNotMatch(source, /PopStateEvent/);
 });
 
+test("message media URLs reject executable and local schemes", () => {
+  const { safeExternalUrl, safeMediaUrl } = loadTsModule("src/lib/safe-url.ts");
+
+  assert.equal(safeExternalUrl("https://cdn.example.test/a.png"), "https://cdn.example.test/a.png");
+  assert.equal(safeExternalUrl("/api/file/download?id=1"), "/api/file/download?id=1");
+  assert.equal(safeExternalUrl(" javascript:alert(1) "), undefined);
+  assert.equal(safeExternalUrl("data:text/html,<script>alert(1)</script>"), undefined);
+  assert.equal(safeExternalUrl("file:///etc/passwd"), undefined);
+  assert.equal(safeMediaUrl("blob:http://localhost/object-1"), "blob:http://localhost/object-1");
+});
+
+test("message revoke menu is only exposed for persisted successful messages", () => {
+  const source = readSource("src/components/chat/MessageList.tsx");
+
+  assert.match(source, /const canRevoke = .*message\.seq > 0/);
+  assert.match(source, /canRevoke &&/);
+  assert.match(source, /message\.status !== -1/);
+  assert.match(source, /aria-label="更多消息操作"/);
+});
+
+test("sidebar icon buttons expose accessible names", () => {
+  const rail = readSource("src/components/sidebar/SidebarRail.tsx");
+  const sidebar = readSource("src/components/Sidebar.tsx");
+  const lists = readSource("src/components/sidebar/SidebarLists.tsx");
+  const friendRequests = readSource("src/components/sidebar/FriendRequestDialog.tsx");
+  const groupRequests = readSource("src/components/sidebar/GroupRequestDialog.tsx");
+
+  assert.match(rail, /aria-label=\{label\}/);
+  assert.match(lists, /aria-label="好友申请"/);
+  assert.match(lists, /aria-label="群申请"/);
+  assert.match(sidebar, /<MobileTabIcon label="消息"/);
+  assert.match(sidebar, /<MobileTabIcon label="联系人"/);
+  assert.match(sidebar, /<MobileTabIcon label="群组"/);
+  assert.match(friendRequests, /aria-label=\{`拒绝 \$\{a\.fromUserId\} 的好友申请`\}/);
+  assert.match(friendRequests, /aria-label=\{`同意 \$\{a\.fromUserId\} 的好友申请`\}/);
+  assert.match(groupRequests, /aria-label=\{`拒绝 \$\{apply\.userId\} 加入/);
+  assert.match(groupRequests, /aria-label=\{`同意 \$\{apply\.userId\} 加入/);
+});
+
+test("triggered dialogs and icon-only controls expose accessible names", () => {
+  const appPage = readSource("src/components/AppPage.tsx");
+  const sidebar = readSource("src/components/Sidebar.tsx");
+  const callDialog = readSource("src/components/call/CallDialog.tsx");
+  const composer = readSource("src/components/chat/MessageComposer.tsx");
+  const sidebarItems = readSource("src/components/sidebar/SidebarItems.tsx");
+  const groupMembers = readSource("src/pages/group-info/GroupMemberList.tsx");
+  const profile = readSource("src/pages/UserProfilePage.tsx");
+  const chatHeader = readSource("src/components/chat/ChatHeader.tsx");
+  const dialogParts = readSource("src/components/sidebar/DialogParts.tsx");
+  const userSearch = readSource("src/components/sidebar/UserSearchDialog.tsx");
+  const login = readSource("src/pages/LoginPage.tsx");
+
+  assert.match(appPage, /aria-label="返回"/);
+  assert.match(sidebar, /aria-label=\{`个人资料：\$\{currentDisplayName\}`\}/);
+  assert.match(chatHeader, /aria-label="语音通话"/);
+  assert.match(chatHeader, /aria-label="视频通话"/);
+  assert.match(chatHeader, /aria-label=\{activeGroupCall \? "加入群视频" : "发起群视频"\}/);
+  assert.match(chatHeader, /aria-label="查看资料"/);
+  assert.match(callDialog, /aria-label=\{label\}/);
+  assert.match(callDialog, /title=\{label\}/);
+  assert.match(composer, /aria-label=\{uploading \? "正在上传文件" : "发送文件"\}/);
+  assert.match(composer, /aria-label="发送消息"/);
+  assert.match(dialogParts, /aria-label="搜索"/);
+  assert.match(userSearch, /aria-label=\{`向 \$\{user\.nickname \|\| user\.userId\} 发送好友申请`\}/);
+  assert.match(sidebarItems, /aria-label=\{`打开与 \$\{displayName\} 的聊天，用户 ID：\$\{friend\.friendUserId\}`\}/);
+  assert.match(sidebarItems, /aria-label=\{`更多好友操作：\$\{displayName\}`\}/);
+  assert.match(sidebarItems, /md:group-focus-within:visible/);
+  assert.match(sidebarItems, /md:invisible/);
+  assert.match(groupMembers, /aria-label=\{`查看成员资料：\$\{memberName\}，用户 ID：\$\{member\.userId\}`\}/);
+  assert.match(groupMembers, /aria-label=\{`\$\{member\.roleLevel === GroupMemberRole\.ADMIN \? "取消管理员" : "设为管理员"\}：\$\{memberName\}`\}/);
+  assert.match(groupMembers, /aria-label=\{`转让群主给：\$\{memberName\}`\}/);
+  assert.match(groupMembers, /aria-label=\{`移出群聊：\$\{memberName\}`\}/);
+  assert.match(profile, /aria-label="更换头像"/);
+  assert.match(profile, /applyingFriend/);
+  assert.match(login, /htmlFor="login-user-id"/);
+  assert.match(login, /id="login-user-id"/);
+  assert.match(login, /aria-pressed=\{isLogin\}/);
+});
+
+test("page loads can request strict store errors instead of silent refresh semantics", () => {
+  const storeTypes = readSource("src/store/store-types.ts");
+  const store = readSource("src/store/store.tsx");
+  const groupInfo = readSource("src/pages/GroupInfoPage.tsx");
+  const profile = readSource("src/pages/UserProfilePage.tsx");
+
+  assert.match(storeTypes, /export interface FetchOptions/);
+  assert.match(storeTypes, /silent\?: boolean/);
+  assert.match(store, /if \(options\?\.silent === false\) throw err;/);
+  assert.match(groupInfo, /fetchGroupInfo\(groupId, \{ silent: false \}\)/);
+  assert.match(groupInfo, /fetchGroupMembers\(groupId, \{ silent: false \}\)/);
+  assert.match(profile, /fetchFriends\(\{ silent: false \}\)/);
+  assert.match(profile, /fetchUserProfile\(userId, \{ silent: false \}\)/);
+});
+
+test("SDK token clear events remove persisted auth instead of preserving stale tokens", () => {
+  const helpers = readSource("src/store/store-helpers.ts");
+  const sdkEvents = readSource("src/store/useStoreSdkEvents.ts");
+  const store = readSource("src/store/store.tsx");
+  const storageKeys = readSource("src/config/storage-keys.ts");
+
+  assert.match(helpers, /if \(!tokens\.token && !tokens\.refreshToken\)/);
+  assert.match(helpers, /localStorage\.removeItem\(AUTH_TOKEN_KEY\)/);
+  assert.match(helpers, /localStorage\.removeItem\(AUTH_REFRESH_TOKEN_KEY\)/);
+  assert.match(sdkEvents, /token: tokens\.token \?\? null/);
+  assert.match(sdkEvents, /refreshToken: tokens\.refreshToken \?\? null/);
+  assert.match(storageKeys, /AUTH_LOGOUT_EVENT_KEY/);
+  assert.match(store, /window\.addEventListener\("storage", onAuthStorage\)/);
+  assert.match(store, /event\.key !== AUTH_LOGOUT_EVENT_KEY/);
+  assert.match(store, /im\.disconnect\(\);\n\s+clearStoredAuth\(state\.userId\);/);
+});
+
+test("create group controls expose binary and selection state", () => {
+  const source = readSource("src/pages/CreateGroupPage.tsx");
+
+  assert.match(source, /role="switch"/);
+  assert.match(source, /aria-checked=\{needVerification\}/);
+  assert.match(source, /aria-pressed=\{selected\}/);
+  assert.match(source, /aria-label=\{`\$\{selected \? "取消选择" : "选择"\}初始成员/);
+});
+
+test("call failures clean up server-side call state", () => {
+  const callProvider = readSource("src/components/call/CallProvider.tsx");
+  const callTypes = readSource("src/components/call/call-types.ts");
+
+  assert.match(callTypes, /suppressFailureToast\?: boolean/);
+  assert.match(callProvider, /await im\.group\.leaveCall\(group\.groupId\)\.catch/);
+  assert.match(callProvider, /await im\.group\.endCall\(group\.groupId\)\.catch/);
+  assert.match(callProvider, /let acceptedSent = false/);
+  assert.match(callProvider, /SignalingAction\.HANGUP, current\.roomId, undefined, "media_failed"/);
+});
+
 test("runtime behavior uses shared constants instead of scattered numbers", () => {
   const store = readSource("src/store/store.tsx");
   const chatArea = readSource("src/components/ChatArea.tsx");
@@ -112,6 +248,59 @@ test("runtime behavior uses shared constants instead of scattered numbers", () =
   assert.match(`${chatArea}\n${conversationHistory}`, /APP_BEHAVIOR\.messages\.historyPageSize/);
   assert.doesNotMatch(chatArea, /maxSeq - 20/);
   assert.doesNotMatch(conversationHistory, /maxSeq - 20/);
+});
+
+test("conversation refresh preserves the active optimistic chat while persistence catches up", () => {
+  const domain = readSource("src/store/domain.ts");
+
+  assert.match(domain, /const activeConversation = state\.activeConversationId/);
+  assert.match(domain, /state\.conversations\.find\(\(conversation\) => conversation\.conversationId === state\.activeConversationId\)/);
+  assert.match(domain, /!normalized\.some\(\(conversation\) => conversation\.conversationId === activeConversation\.conversationId\)/);
+  assert.match(domain, /sortConversations\(\[\.\.\.normalized, activeConversation\]\)/);
+});
+
+test("message merge collapses a local pending message into its server ack by client message id", () => {
+  const { mergeConversationMessages } = loadTsModule("src/store/domain.ts", {
+    stubs: {
+      "im-sdk": {
+        ApplyHandleResult: { AGREED: "AGREED", REJECTED: "REJECTED" },
+        ConversationType: { SINGLE: "SINGLE", GROUP: "GROUP" },
+        MessageReceiveOption: { NORMAL: "NORMAL" },
+      },
+      "@/lib/messages": { toViewMessage: (message) => message },
+    },
+  });
+
+  const pending = {
+    messageId: "client_msg_1",
+    seq: 0,
+    senderUserId: "alice",
+    conversationId: "single_alice_bob",
+    contentType: 101,
+    content: "{\"text\":\"hello\"}",
+    createTime: 1000,
+    status: 0,
+  };
+  const ack = {
+    ...pending,
+    seq: 7,
+    createTime: 1001,
+    status: 1,
+  };
+
+  const merged = mergeConversationMessages([], [pending, ack]);
+
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].messageId, "client_msg_1");
+  assert.equal(merged[0].seq, 7);
+  assert.equal(merged[0].status, 1);
+});
+
+test("sent message migration rewrites pending messages to the acknowledged conversation id", () => {
+  const reducer = readSource("src/store/store-reducer.ts");
+
+  assert.match(reducer, /\(state\.messages\[previousId\] \|\| \[\]\)\.map/);
+  assert.match(reducer, /\{\s*\.\.\.message,\s*conversationId: nextId\s*\}/);
 });
 
 test("feature routes use central route helpers outside the route config", () => {

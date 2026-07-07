@@ -17,7 +17,7 @@ import {
 import { createClientMsgId } from "im-sdk";
 import { im } from "@/sdk/im-sdk";
 import { APP_BEHAVIOR } from "@/config/app-behavior";
-import { AUTH_USER_ID_KEY } from "@/config/storage-keys";
+import { AUTH_LOGOUT_EVENT_KEY, AUTH_USER_ID_KEY } from "@/config/storage-keys";
 import { toOptimisticMessage } from "@/lib/messages";
 import {
   normalizeConversation,
@@ -36,6 +36,7 @@ import {
 import { useStoreSdkEvents } from "@/store/useStoreSdkEvents";
 import type {
   Conversation,
+  FetchOptions,
   FriendInfo,
   GroupInfo,
   GroupMember,
@@ -129,12 +130,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const fetchFriends = useCallback(async () => {
+  const fetchFriends = useCallback(async (options?: FetchOptions) => {
     try {
       const list = await im.friend.list();
       dispatch({ type: "SET_FRIENDS", list: list as unknown as FriendInfo[] });
     } catch (err) {
       console.error("fetchFriends failed:", err);
+      if (options?.silent === false) throw err;
     }
   }, []);
 
@@ -195,7 +197,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     refreshTimerRef.current = window.setTimeout(flushRefreshTasks, APP_BEHAVIOR.refresh.debounceMs);
   }, [flushRefreshTasks]);
 
-  const fetchUserProfile = useCallback(async (userId: string, options?: { force?: boolean }) => {
+  const fetchUserProfile = useCallback(async (userId: string, options?: FetchOptions) => {
     try {
       const currentState = stateRef.current;
       if (
@@ -211,6 +213,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       dispatch({ type: "SET_USER_PROFILE", userId, info: info as unknown as UserInfo });
     } catch (err) {
       console.error("fetchUserProfile failed:", err);
+      if (options?.silent === false) throw err;
     }
   }, [state.userId]);
 
@@ -260,6 +263,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  useEffect(() => {
+    const onAuthStorage = (event: StorageEvent) => {
+      if (event.key !== AUTH_LOGOUT_EVENT_KEY || !event.newValue) return;
+      im.disconnect();
+      clearStoredAuth(stateRef.current.userId);
+      dispatch({ type: "LOGOUT" });
+    };
+
+    window.addEventListener("storage", onAuthStorage);
+    return () => window.removeEventListener("storage", onAuthStorage);
+  }, []);
+
   const login = useCallback(async (userId: string, password?: string) => {
     localStorage.setItem(AUTH_USER_ID_KEY, userId);
     const tokens = await im.login(userId, password);
@@ -276,8 +291,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [login]);
 
   const logout = useCallback(() => {
-    clearStoredAuth(state.userId);
     im.disconnect();
+    clearStoredAuth(state.userId);
+    localStorage.setItem(AUTH_LOGOUT_EVENT_KEY, String(Date.now()));
     dispatch({ type: "LOGOUT" });
   }, [state.userId]);
 
@@ -357,7 +373,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, [fetchMyGroups, fetchUnhandledGroupApplyCount]);
 
-  const fetchGroupMembers = useCallback(async (groupId: string, options?: { force?: boolean }) => {
+  const fetchGroupMembers = useCallback(async (groupId: string, options?: FetchOptions) => {
     try {
       const currentState = stateRef.current;
       if (
@@ -371,10 +387,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       dispatch({ type: "SET_GROUP_MEMBERS", groupId, members: members as unknown as GroupMember[] });
     } catch (err) {
       console.error("fetchGroupMembers failed:", err);
+      if (options?.silent === false) throw err;
     }
   }, []);
 
-  const fetchGroupInfo = useCallback(async (groupId: string, options?: { force?: boolean }) => {
+  const fetchGroupInfo = useCallback(async (groupId: string, options?: FetchOptions) => {
     try {
       const currentState = stateRef.current;
       if (
@@ -388,6 +405,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       dispatch({ type: "SET_GROUP_INFO", groupId, info: info as unknown as GroupInfo });
     } catch (err) {
       console.error("fetchGroupInfo failed:", err);
+      if (options?.silent === false) throw err;
     }
   }, []);
 

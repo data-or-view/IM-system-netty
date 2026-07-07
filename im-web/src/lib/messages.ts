@@ -93,11 +93,14 @@ export function toLocalFailedMessage(message: ViewMessage, errorText: string): V
 
 export function messageRenderKey(msg: {
   messageId?: string;
+  conversationId?: string;
   seq?: number;
   senderUserId?: string;
   createTime?: number;
   content?: string;
 }): string {
+  if (msg.conversationId && msg.seq && msg.seq > 0) return `seq:${msg.conversationId}:${msg.seq}`;
+  if (msg.conversationId && msg.messageId) return `${msg.conversationId}:${msg.messageId}`;
   if (msg.messageId) return msg.messageId;
   if (msg.seq && msg.seq > 0) return `seq:${msg.seq}`;
   return `tmp:${msg.senderUserId || "unknown"}:${msg.createTime || 0}:${msg.content || ""}`;

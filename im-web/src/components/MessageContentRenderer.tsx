@@ -8,6 +8,7 @@ import {
 import { FileText, MapPin, Mic, Package, Phone, Quote, Video } from "lucide-react";
 import type { Message } from "@/store/store";
 import { localizeSystemMessage } from "@/lib/display-formatters";
+import { safeExternalUrl, safeMediaUrl } from "@/lib/safe-url";
 
 type Props = {
   message: Pick<Message, "contentType" | "content" | "conversationId">;
@@ -78,56 +79,82 @@ function QuoteBlock({ parsed }: { parsed: Extract<ParsedMessageContent, { type: 
 
 function ImageBlock({ parsed }: { parsed: Extract<ParsedMessageContent, { type: typeof MessageContentType.IMAGE }> }) {
   const picture = parsed.content.snapshotPicture || parsed.content.bigPicture || parsed.content.sourcePicture;
-  const target = parsed.content.sourcePicture?.url || picture?.url;
-  if (!picture?.url) return <UnsupportedBlock />;
+  const imageUrl = safeMediaUrl(picture?.url);
+  const target = safeExternalUrl(parsed.content.sourcePicture?.url || picture?.url);
+  if (!imageUrl) return <UnsupportedBlock />;
+
+  const image = (
+    <img
+      src={imageUrl}
+      alt="图片消息"
+      className="max-h-72 max-w-full object-cover"
+      loading="lazy"
+    />
+  );
+  if (!target) {
+    return <div className="block overflow-hidden rounded-lg border bg-background/40">{image}</div>;
+  }
 
   return (
-    <a href={target} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-lg border bg-background/40">
-      <img
-        src={picture.url}
-        alt="图片消息"
-        className="max-h-72 max-w-full object-cover"
-        loading="lazy"
-      />
+    <a href={target} target="_blank" rel="noopener noreferrer" className="block overflow-hidden rounded-lg border bg-background/40">
+      {image}
     </a>
   );
 }
 
 function FileBlock({ parsed }: { parsed: Extract<ParsedMessageContent, { type: typeof MessageContentType.FILE }> }) {
-  return (
-    <a
-      href={parsed.content.url}
-      target="_blank"
-      rel="noreferrer"
-      className="flex min-w-52 items-center gap-3 rounded-lg border bg-background/40 p-3 transition-colors hover:bg-background/60"
-    >
+  const fileUrl = safeExternalUrl(parsed.content.url);
+  const content = (
+    <>
       <FileText className="h-8 w-8 shrink-0" />
       <div className="min-w-0">
         <div className="truncate text-sm font-medium">{parsed.content.fileName}</div>
-        <div className="text-xs opacity-70">{formatBytes(parsed.content.fileSize)}</div>
+        <div className="text-xs opacity-70">{fileUrl ? formatBytes(parsed.content.fileSize) : "文件链接不可用"}</div>
       </div>
+    </>
+  );
+  if (!fileUrl) {
+    return (
+      <div className="flex min-w-52 items-center gap-3 rounded-lg border bg-background/40 p-3">
+        {content}
+      </div>
+    );
+  }
+  return (
+    <a
+      href={fileUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="flex min-w-52 items-center gap-3 rounded-lg border bg-background/40 p-3 transition-colors hover:bg-background/60"
+    >
+      {content}
     </a>
   );
 }
 
 function VoiceBlock({ parsed }: { parsed: Extract<ParsedMessageContent, { type: typeof MessageContentType.VOICE }> }) {
+  const voiceUrl = safeMediaUrl(parsed.content.url);
+  if (!voiceUrl) return <UnsupportedBlock />;
   return (
     <div className="flex min-w-52 items-center gap-3 rounded-lg border bg-background/40 p-3">
       <Mic className="h-5 w-5" />
-      <audio controls src={parsed.content.url} className="h-8 max-w-48" />
+      <audio controls src={voiceUrl} className="h-8 max-w-48" />
       <span className="text-xs opacity-70">{parsed.content.duration}s</span>
     </div>
   );
 }
 
 function VideoBlock({ parsed }: { parsed: Extract<ParsedMessageContent, { type: typeof MessageContentType.VIDEO }> }) {
+  const videoUrl = safeMediaUrl(parsed.content.videoUrl);
+  const posterUrl = safeMediaUrl(parsed.content.snapshotUrl);
+  if (!videoUrl) return <UnsupportedBlock />;
   return (
     <div className="overflow-hidden rounded-lg border bg-background/40">
       <video
         controls
         preload="metadata"
-        poster={parsed.content.snapshotUrl}
-        src={parsed.content.videoUrl}
+        poster={posterUrl}
+        src={videoUrl}
         className="max-h-72 max-w-full bg-black"
       />
       <div className="flex items-center gap-2 px-3 py-2 text-xs opacity-75">
@@ -142,7 +169,7 @@ function LocationBlock({ parsed }: { parsed: Extract<ParsedMessageContent, { typ
   const label = parsed.content.description || `${parsed.content.latitude}, ${parsed.content.longitude}`;
   const url = `https://www.google.com/maps?q=${parsed.content.latitude},${parsed.content.longitude}`;
   return (
-    <a href={url} target="_blank" rel="noreferrer" className="flex min-w-52 items-center gap-3 rounded-lg border bg-background/40 p-3 transition-colors hover:bg-background/60">
+    <a href={url} target="_blank" rel="noopener noreferrer" className="flex min-w-52 items-center gap-3 rounded-lg border bg-background/40 p-3 transition-colors hover:bg-background/60">
       <MapPin className="h-5 w-5" />
       <div>
         <div className="text-sm font-medium">{label}</div>

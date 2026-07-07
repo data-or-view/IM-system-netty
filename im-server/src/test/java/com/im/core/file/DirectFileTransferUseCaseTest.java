@@ -126,8 +126,24 @@ class DirectFileTransferUseCaseTest {
         assertEquals("text/plain", download.mimeType());
         assertEquals(3, download.fileSize());
         assertEquals(uploaded.fileUrl(), download.fileUrl());
+        assertEquals(900, storage.lastGetExpiresSeconds);
         assertArrayEquals(new byte[]{1, 2, 3}, storage.lastUploadedBytes);
         assertNotNull(metadata.saved.get(uploaded.fileId()));
+    }
+
+    @Test
+    void downloadSignUsesConfiguredShortTtl() {
+        FakeStorage storage = new FakeStorage();
+        InMemoryFileObjectMetadataStore metadata = new InMemoryFileObjectMetadataStore();
+        DirectFileTransferUseCase useCase = new DirectFileTransferUseCase(
+                storage, new InMemoryUploadSessionStore(), metadata, "im-system", 123);
+        metadata.save(new FileObjectMetadata("file1", "owner", "im-system", "uploads/file1.txt",
+                "a.txt", 3, "text/plain", "", "minio", "file", 1));
+
+        FileDownloadSignResult download = useCase.signDownload("owner", "file1");
+
+        assertTrue(download.fileUrl().contains("expires=123"));
+        assertEquals(123, storage.lastGetExpiresSeconds);
     }
 
     @Test
@@ -149,6 +165,7 @@ class DirectFileTransferUseCaseTest {
         byte[] lastUploadedBytes = new byte[0];
         String lastUploadId;
         int lastPartNumber;
+        int lastGetExpiresSeconds;
 
         @Override
         public String upload(String bucket, String objectId, byte[] data, String mimeType) {
@@ -168,6 +185,12 @@ class DirectFileTransferUseCaseTest {
         @Override
         public String getUrl(String bucket, String objectId) {
             return "https://oss.test/" + bucket + "/" + objectId;
+        }
+
+        @Override
+        public String presignGetObject(String bucket, String objectId, int expiresSeconds) {
+            lastGetExpiresSeconds = expiresSeconds;
+            return "https://oss.test/" + bucket + "/" + objectId + "?expires=" + expiresSeconds;
         }
 
         @Override

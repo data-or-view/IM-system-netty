@@ -34,6 +34,7 @@ export default function UserProfilePage() {
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [applyingFriend, setApplyingFriend] = useState(false);
   const [confirm, setConfirm] = useState<ConfirmDialogState>(emptyConfirmDialog);
 
   useEffect(() => {
@@ -44,9 +45,9 @@ export default function UserProfilePage() {
     setLoading(!cached);
     setFriendshipChecked(userId === state.userId);
 
-    const loadFriendship = userId === state.userId ? Promise.resolve() : fetchFriends();
+    const loadFriendship = userId === state.userId ? Promise.resolve() : fetchFriends({ silent: false });
 
-    Promise.all([fetchUserProfile(userId), loadFriendship])
+    Promise.all([fetchUserProfile(userId, { silent: false }), loadFriendship])
       .then(() => {
         if (cancelled) return;
         setFriendshipChecked(true);
@@ -161,10 +162,12 @@ export default function UserProfilePage() {
   };
 
   const handleApplyFriend = async () => {
+    if (applyingFriend) return;
     if (isFriend) {
       toast("已经是好友");
       return;
     }
+    setApplyingFriend(true);
     try {
       await applyFriend(userId);
       toast("好友申请已发送");
@@ -176,6 +179,8 @@ export default function UserProfilePage() {
         return;
       }
       toast(`操作失败：${text}`);
+    } finally {
+      setApplyingFriend(false);
     }
   };
 
@@ -218,9 +223,9 @@ export default function UserProfilePage() {
     }
 
     return (
-      <Button className="justify-start" onClick={handleApplyFriend}>
-        <UserPlus className="h-4 w-4" />
-        加好友
+      <Button className="justify-start" onClick={handleApplyFriend} disabled={applyingFriend}>
+        {applyingFriend ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
+        {applyingFriend ? "发送中" : "加好友"}
       </Button>
     );
   };
@@ -313,7 +318,7 @@ export default function UserProfilePage() {
 
           <div className="space-y-4 px-5 pb-5">
             <div className="flex justify-center">
-              <label className="relative cursor-pointer">
+              <label className="relative cursor-pointer" aria-label="更换头像">
                 <Avatar className="h-20 w-20 border border-white shadow-lg ring-1 ring-slate-200">
                   {avatarSrc && <AvatarImage src={avatarSrc} alt={nickname || userId} />}
                   <AvatarFallback className="bg-slate-100 text-xl font-semibold text-slate-700">
@@ -325,6 +330,7 @@ export default function UserProfilePage() {
                 </span>
                 <input
                   className="sr-only"
+                  aria-label="更换头像"
                   type="file"
                   accept="image/*"
                   onChange={handleAvatarChange}

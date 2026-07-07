@@ -93,6 +93,7 @@ function MessageItem({
   const isRevoked = message.contentType === 101 || message.content === "消息已撤回";
   const isCompactSystem = isCompactSystemMessage(message);
   const isPending = message.status === 0 && message.seq <= 0;
+  const canRevoke = isMine && message.seq > 0 && !isPending && message.status !== -1;
 
   if (isRevoked) {
     return (
@@ -173,10 +174,13 @@ function MessageItem({
             <MessageStatusIcon status={isPending ? 0 : message.status} errorText={message.errorText} />
           )}
 
-          {isMine && (
+          {canRevoke && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button className="invisible mb-2 flex h-6 w-6 items-center justify-center rounded-md text-slate-400 opacity-0 transition-all hover:bg-slate-200 group-hover:visible group-hover:opacity-100">
+                <button
+                  aria-label="更多消息操作"
+                  className="mb-2 flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition-all hover:bg-slate-200 focus:visible focus:opacity-100 md:invisible md:h-6 md:w-6 md:opacity-0 md:group-hover:visible md:group-hover:opacity-100"
+                >
                   <MoreHorizontal className="h-3.5 w-3.5" />
                 </button>
               </DropdownMenuTrigger>

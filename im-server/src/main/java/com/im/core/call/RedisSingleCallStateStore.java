@@ -36,6 +36,33 @@ public class RedisSingleCallStateStore implements SingleCallStateStore {
             redis.call('del', KEYS[1], KEYS[2], KEYS[3])
             return 1
             """;
+    private static final String ACCEPT_BY_PARTICIPANT_SCRIPT = """
+            local caller = redis.call('hget', KEYS[1], 'callerId')
+            local callee = redis.call('hget', KEYS[1], 'calleeId')
+            if caller == false or callee == false then
+              return 0
+            end
+            if ARGV[1] ~= caller and ARGV[1] ~= callee then
+              return 0
+            end
+            redis.call('hset', KEYS[1], 'status', ARGV[2], 'acceptedAt', ARGV[3])
+            redis.call('expire', KEYS[1], ARGV[4])
+            redis.call('expire', KEYS[2], ARGV[4])
+            redis.call('expire', KEYS[3], ARGV[4])
+            return 1
+            """;
+    private static final String END_BY_PARTICIPANT_SCRIPT = """
+            local caller = redis.call('hget', KEYS[1], 'callerId')
+            local callee = redis.call('hget', KEYS[1], 'calleeId')
+            if caller == false or callee == false then
+              return 0
+            end
+            if ARGV[1] ~= caller and ARGV[1] ~= callee then
+              return 0
+            end
+            redis.call('del', KEYS[1], KEYS[2], KEYS[3])
+            return 1
+            """;
 
     private final RedisConfiguration redisConfig;
     private final long ttlSeconds;
@@ -106,6 +133,24 @@ public class RedisSingleCallStateStore implements SingleCallStateStore {
     }
 
     @Override
+    public SingleCallSession acceptBy(String roomId, String actorId) {
+        if (!hasText(roomId) || !hasText(actorId)) return null;
+        try (RedisConfiguration.CloseableRedisCommands redis = redisConfig.createSyncCommands()) {
+            RedisCommands<String, String> sync = redis.sync();
+            SingleCallSession before = read(sync, roomId);
+            if (before == null) return null;
+            long now = System.currentTimeMillis();
+            Long accepted = sync.eval(ACCEPT_BY_PARTICIPANT_SCRIPT, ScriptOutputType.INTEGER,
+                    new String[]{roomKey(roomId), userKey(before.callerId()), userKey(before.calleeId())},
+                    actorId,
+                    SingleCallSession.STATUS_ACCEPTED,
+                    String.valueOf(now),
+                    String.valueOf(ttlSeconds));
+            return Long.valueOf(1L).equals(accepted) ? read(sync, roomId) : null;
+        }
+    }
+
+    @Override
     public SingleCallSession timeoutIfRinging(String roomId) {
         if (!hasText(roomId)) return null;
         try (RedisConfiguration.CloseableRedisCommands redis = redisConfig.createSyncCommands()) {
@@ -128,6 +173,20 @@ public class RedisSingleCallStateStore implements SingleCallStateStore {
             if (session == null) return null;
             sync.del(roomKey(roomId), userKey(session.callerId()), userKey(session.calleeId()));
             return session.end();
+        }
+    }
+
+    @Override
+    public SingleCallSession endBy(String roomId, String actorId) {
+        if (!hasText(roomId) || !hasText(actorId)) return null;
+        try (RedisConfiguration.CloseableRedisCommands redis = redisConfig.createSyncCommands()) {
+            RedisCommands<String, String> sync = redis.sync();
+            SingleCallSession session = read(sync, roomId);
+            if (session == null) return null;
+            Long ended = sync.eval(END_BY_PARTICIPANT_SCRIPT, ScriptOutputType.INTEGER,
+                    new String[]{roomKey(roomId), userKey(session.callerId()), userKey(session.calleeId())},
+                    actorId);
+            return Long.valueOf(1L).equals(ended) ? session.end() : null;
         }
     }
 

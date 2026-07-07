@@ -80,7 +80,7 @@ public class MinioFileStorageService implements IFileStorageService {
                         .contentType(mimeType != null ? mimeType : "application/octet-stream")
                         .build());
             }
-            String url = getUrl(bucket, objectId);
+            String url = presignGetObject(bucket, objectId, 900);
             log.debug("File uploaded: bucket={}, object={}, size={}, url={}", bucket, objectId, data.length, url);
             return url;
         } catch (Exception e) {
@@ -117,17 +117,20 @@ public class MinioFileStorageService implements IFileStorageService {
 
     @Override
     public String getUrl(String bucket, String objectId) {
+        return presignGetObject(bucket, objectId, 900);
+    }
+
+    @Override
+    public String presignGetObject(String bucket, String objectId, int expiresSeconds) {
         try {
-            // 尝试生成预签名 URL（有效期 7 天）
             return client.getPresignedObjectUrl(GetPresignedObjectUrlArgs.builder()
                     .method(Method.GET)
                     .bucket(bucket)
                     .object(objectId)
-                    .expiry(7, TimeUnit.DAYS)
+                    .expiry(expiresSeconds, TimeUnit.SECONDS)
                     .build());
         } catch (Exception e) {
-            // 降级：直接拼接公开 URL
-            return endpoint + "/" + bucket + "/" + objectId;
+            throw new FileStorageException("MinIO presign GET failed: " + e.getMessage(), e);
         }
     }
 

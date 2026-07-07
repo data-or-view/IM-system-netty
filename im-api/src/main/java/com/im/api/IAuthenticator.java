@@ -51,6 +51,16 @@ public interface IAuthenticator {
     String authenticate(String token);
 
     /**
+     * 验证 access token，返回 userId。
+     *
+     * <p>默认兼容旧实现，JWT 等双 token 实现必须覆写并拒绝 refresh token，
+     * 避免 refresh token 被误用于业务 API 或路由恢复。</p>
+     */
+    default String authenticateAccessToken(String token) {
+        return authenticate(token);
+    }
+
+    /**
      * 从 token 中提取 appManagerLevel。
      *
      * @param token token 字符串

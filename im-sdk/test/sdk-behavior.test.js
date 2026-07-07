@@ -308,6 +308,25 @@ test("HTTP resource APIs require httpUrl instead of falling back to websocket", 
   );
 });
 
+test("sdk treats an empty httpUrl as same-origin HTTP transport", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (input, init) => {
+    calls.push({ input, init });
+    return new Response(JSON.stringify({ code: 0, msg: "ok", data: { groups: [] } }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+  try {
+    const im = createIM({ wsUrl: "ws://example.test/ws", httpUrl: "" });
+    assert.deepEqual(await im.group.list(), []);
+    assert.equal(calls[0].input, "/api/group/list");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("HttpTransport attaches generated X-Request-Id to every request", async () => {
   const calls = [];
   const http = new HttpTransport({
@@ -325,6 +344,116 @@ test("HttpTransport attaches generated X-Request-Id to every request", async () 
   await http.get("/api/conversation/list");
 
   assert.equal(calls[0].init.headers["X-Request-Id"], "req_http_1");
+});
+
+test("HttpTransport supports same-origin relative API requests", async () => {
+  const calls = [];
+  const http = new HttpTransport({
+    baseUrl: "",
+    fetchImpl: async (input, init) => {
+      calls.push({ input, init });
+      return new Response(JSON.stringify({ code: 0, msg: "ok", data: { ok: true } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    },
+  });
+
+  await http.get("/api/conversation/list");
+
+  assert.equal(calls[0].input, "/api/conversation/list");
+});
+
+test("transport sends a heartbeat immediately after websocket opens", async () => {
+  const OriginalWebSocket = globalThis.WebSocket;
+  const sockets = [];
+  class FakeWebSocket {
+    static OPEN = 1;
+    static CONNECTING = 0;
+    readyState = FakeWebSocket.CONNECTING;
+    sent = [];
+    constructor(url) {
+      this.url = url;
+      sockets.push(this);
+    }
+    send(data) {
+      this.sent.push(JSON.parse(data));
+    }
+    close() {
+      this.readyState = 3;
+    }
+    open() {
+      this.readyState = FakeWebSocket.OPEN;
+      this.onopen?.();
+    }
+  }
+  globalThis.WebSocket = FakeWebSocket;
+  try {
+    const transport = new WsTransport({
+      heartbeatInterval: 1000,
+      requestIdFactory: () => "req_heartbeat_now",
+    });
+    transport.connect("ws://example.test/ws");
+    sockets[0].open();
+
+    assert.equal(sockets[0].sent.length, 1);
+    assert.equal(sockets[0].sent[0].op, "heartbeat");
+    assert.equal(sockets[0].sent[0]._requestId, "req_heartbeat_now");
+    transport.disconnect();
+  } finally {
+    globalThis.WebSocket = OriginalWebSocket;
+  }
+});
+
+test("transport ignores token refresh from stale websocket after disconnect", async () => {
+  const OriginalWebSocket = globalThis.WebSocket;
+  const sockets = [];
+  const tokenUpdates = [];
+  class FakeWebSocket {
+    static OPEN = 1;
+    static CONNECTING = 0;
+    readyState = FakeWebSocket.CONNECTING;
+    sent = [];
+    constructor(url) {
+      this.url = url;
+      sockets.push(this);
+    }
+    send(data) {
+      this.sent.push(JSON.parse(data));
+    }
+    close() {
+      this.readyState = 3;
+      this.onclose?.();
+    }
+    open() {
+      this.readyState = FakeWebSocket.OPEN;
+      this.onopen?.();
+    }
+    message(data) {
+      this.onmessage?.({ data });
+    }
+  }
+  globalThis.WebSocket = FakeWebSocket;
+  try {
+    const transport = new WsTransport({
+      heartbeatInterval: 1000,
+      onTokenChanged: (tokens) => tokenUpdates.push(tokens),
+    });
+    transport.connect("ws://example.test/ws");
+    sockets[0].open();
+    transport.disconnect();
+
+    sockets[0].message(JSON.stringify({
+      op: "heartbeat_ack",
+      seq: 0,
+      code: 0,
+      data: { token: "stale-access", refreshToken: "stale-refresh" },
+    }));
+
+    assert.deepEqual(tokenUpdates, []);
+  } finally {
+    globalThis.WebSocket = OriginalWebSocket;
+  }
 });
 
 test("WsTransport attaches generated _requestId to request frames", async () => {
@@ -944,6 +1073,34 @@ test("sdk does not emit duplicate message pushes with the same message id", asyn
 
   assert.deepEqual(singles.map((m) => m.messageId), ["m-dup"]);
   assert.deepEqual(batches.map((batch) => batch.map((m) => m.messageId)), [["m-dup"]]);
+});
+
+test("sdk keeps same client message id in different conversations", async () => {
+  const im = createIM({ wsUrl: "ws://example.test/ws" });
+  const batches = [];
+  const singles = [];
+  im.on("messageBatch", (msgs) => batches.push(msgs));
+  im.on("message", (msg) => singles.push(msg));
+
+  im.transport.handleMessage(JSON.stringify({
+    op: "message",
+    data: { messageId: "client-reused", conversationId: "single_a_b", messageSeq: 1, content: "one" },
+  }));
+  im.transport.handleMessage(JSON.stringify({
+    op: "message",
+    data: { messageId: "client-reused", conversationId: "single_a_c", messageSeq: 1, content: "two" },
+  }));
+
+  await waitForCondition(() => batches.length === 1, "cross-conversation message batch");
+
+  assert.deepEqual(singles.map((m) => `${m.conversationId}:${m.messageId}`), [
+    "single_a_b:client-reused",
+    "single_a_c:client-reused",
+  ]);
+  assert.deepEqual(batches[0].map((m) => `${m.conversationId}:${m.messageId}`), [
+    "single_a_b:client-reused",
+    "single_a_c:client-reused",
+  ]);
 });
 
 

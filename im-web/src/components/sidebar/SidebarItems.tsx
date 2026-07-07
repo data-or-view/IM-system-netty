@@ -137,7 +137,11 @@ export function FriendItem({ friend }: { friend: FriendInfo }) {
 
   return (
     <div className="group flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors hover:bg-slate-50">
-      <button onClick={openChat} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+      <button
+        aria-label={`打开与 ${displayName} 的聊天，用户 ID：${friend.friendUserId}`}
+        onClick={openChat}
+        className="flex min-w-0 flex-1 items-center gap-3 text-left"
+      >
         <Avatar className="h-9 w-9 shrink-0 shadow-sm">
           <AvatarImage src={friend.faceUrl} />
           <AvatarFallback className="bg-gradient-to-br from-slate-200 to-slate-300 text-slate-600 text-xs">
@@ -152,7 +156,10 @@ export function FriendItem({ friend }: { friend: FriendInfo }) {
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <button className="invisible flex h-7 w-7 items-center justify-center rounded-md text-slate-400 opacity-0 transition-all hover:bg-slate-200 hover:text-slate-600 group-hover:visible group-hover:opacity-100">
+          <button
+            aria-label={`更多好友操作：${displayName}`}
+            className="flex h-8 w-8 items-center justify-center rounded-md text-slate-400 transition-all hover:bg-slate-200 hover:text-slate-600 focus:visible focus:opacity-100 md:invisible md:h-7 md:w-7 md:opacity-0 md:group-focus-within:visible md:group-focus-within:opacity-100 md:group-hover:visible md:group-hover:opacity-100"
+          >
             <MoreHorizontal className="h-4 w-4" />
           </button>
         </DropdownMenuTrigger>

@@ -45,6 +45,13 @@ public interface IFileStorageService {
     String getUrl(String bucket, String objectId);
 
     /**
+     * 生成客户端下载对象的短有效期预签名 GET URL。
+     */
+    default String presignGetObject(String bucket, String objectId, int expiresSeconds) {
+        return getUrl(bucket, objectId);
+    }
+
+    /**
      * 生成客户端直传对象的预签名 PUT URL。
      */
     default String presignPutObject(String bucket, String objectId, String mimeType, int expiresSeconds) {

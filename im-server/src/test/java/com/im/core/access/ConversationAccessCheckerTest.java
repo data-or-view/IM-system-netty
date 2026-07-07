@@ -63,6 +63,19 @@ class ConversationAccessCheckerTest {
     }
 
     @Test
+    void rejectsStaleGroupConversationForNonMember() {
+        RecordingConversationManager conversationManager = new RecordingConversationManager();
+        conversationManager.visibleConversations.put("mallory|group_group-1",
+                new Conversation("group_group-1", "mallory", ConversationType.GROUP));
+        ConversationAccessChecker checker = new ConversationAccessChecker(conversationManager, new RecordingGroupManager());
+
+        ImException ex = assertThrows(ImException.class,
+                () -> checker.requireReadable("mallory", "group_group-1"));
+
+        assertEquals(ImErrorCode.FORBIDDEN, ex.getErrorCode());
+    }
+
+    @Test
     void listsConversationIdsVisibleToUser() {
         RecordingConversationManager conversationManager = new RecordingConversationManager();
         conversationManager.conversations.put("alice", List.of(

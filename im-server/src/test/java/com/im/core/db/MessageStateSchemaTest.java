@@ -36,6 +36,18 @@ class MessageStateSchemaTest {
     }
 
     @Test
+    void clientMessageIdIsUniqueOnlyInsideConversation() throws Exception {
+        String schema = readSchema();
+
+        assertTrue(schema.contains("UNIQUE KEY uk_conversation_client_msg (conversation_id, client_msg_id)"),
+                "clientMsgId idempotency is scoped by conversation");
+        assertTrue(!schema.contains("UNIQUE KEY uk_client_msg (client_msg_id)"),
+                "clientMsgId must not be globally unique across conversations");
+        assertTrue(schema.contains("INDEX idx_client_msg (client_msg_id)"),
+                "clientMsgId lookup still needs a non-unique index");
+    }
+
+    @Test
     void schemaSqlDefinesSyncTablesWithComments() throws Exception {
         String schema = readSchema();
 

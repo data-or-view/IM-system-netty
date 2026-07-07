@@ -38,7 +38,7 @@ export function authCheckFailureMessage(error: unknown): string {
   const code = numericCode(shape);
   const kind = stringValue(shape.kind).toLowerCase();
   if (kind === "timeout") {
-    return "服务响应超时，请稍后重试";
+    return "服务响应超时，已保留登录状态";
   }
   if (kind === "connection") {
     return "暂时无法连接到后端，已保留登录状态";
@@ -53,7 +53,9 @@ export function toAppErrorNotice(error: unknown, fallback = "操作失败", sour
   const shape = asErrorShape(error);
   const kind = stringValue(shape.kind).toLowerCase();
   const code = numericCode(shape);
-  const message = stringValue(shape.detail) || stringValue(shape.message) || fallback;
+  const message = source === "auth-check"
+    ? fallback
+    : stringValue(shape.detail) || stringValue(shape.message) || fallback;
 
   const severity: AppErrorSeverity =
     kind === "connection" || kind === "timeout" || code >= 500 ? "warning" : "error";

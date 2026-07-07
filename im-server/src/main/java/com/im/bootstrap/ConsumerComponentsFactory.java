@@ -45,6 +45,7 @@ final class ConsumerComponentsFactory {
         cluster.clusterMessageBus().subscribe("CLUSTER_COMMAND", runtime.friendApplyNotifier()::handleClusterPush);
         cluster.clusterMessageBus().subscribe("CLUSTER_COMMAND", runtime.groupApplyNotifier()::handleClusterPush);
         cluster.clusterMessageBus().subscribe("CLUSTER_COMMAND", runtime.systemMessageNotifier()::handleClusterPush);
+        cluster.clusterMessageBus().subscribe("CLUSTER_COMMAND", runtime.messageRevokeNotifier()::handleClusterPush);
         return new ConsumerDependencies(persistenceConsumer, deliveryConsumer, businessMessageDlqCompensator);
     }
 }

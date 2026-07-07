@@ -345,6 +345,8 @@ function RoundButton({
       <Button
         type="button"
         size="icon"
+        aria-label={label}
+        title={label}
         onClick={onClick}
         className={`h-14 w-14 rounded-full border border-white/10 shadow-lg backdrop-blur ${toneClass}`}
       >

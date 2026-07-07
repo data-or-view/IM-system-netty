@@ -46,6 +46,7 @@ export default function Sidebar() {
           <Tooltip>
             <TooltipTrigger asChild>
               <button
+                aria-label={`个人资料：${currentDisplayName}`}
                 onClick={() => state.userId && navigate(APP_ROUTES.user(state.userId))}
                 className="relative mb-7 flex-none rounded-full transition-opacity hover:opacity-90"
               >
@@ -115,6 +116,7 @@ export default function Sidebar() {
 
         <div className="flex items-center justify-between border-b border-slate-200 bg-white px-3 py-2.5 md:hidden">
           <button
+            aria-label={`个人资料：${currentDisplayName}`}
             className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
             onClick={() => state.userId && navigate(APP_ROUTES.user(state.userId))}
           >
@@ -136,13 +138,13 @@ export default function Sidebar() {
           </button>
 
           <div className="flex shrink-0 items-center gap-0.5">
-            <MobileTabIcon active={tab === "chats"} badge={chatUnread} onClick={() => setTab("chats")}>
+            <MobileTabIcon label="消息" active={tab === "chats"} badge={chatUnread} onClick={() => setTab("chats")}>
               <MessageCircle className="h-5 w-5" />
             </MobileTabIcon>
-            <MobileTabIcon active={tab === "friends"} badge={state.unhandledApplyCount} onClick={() => setTab("friends")}>
+            <MobileTabIcon label="联系人" active={tab === "friends"} badge={state.unhandledApplyCount} onClick={() => setTab("friends")}>
               <Contact className="h-5 w-5" />
             </MobileTabIcon>
-            <MobileTabIcon active={tab === "groups"} badge={state.unhandledGroupApplyCount} onClick={() => setTab("groups")}>
+            <MobileTabIcon label="群组" active={tab === "groups"} badge={state.unhandledGroupApplyCount} onClick={() => setTab("groups")}>
               <Users className="h-5 w-5" />
             </MobileTabIcon>
           </div>

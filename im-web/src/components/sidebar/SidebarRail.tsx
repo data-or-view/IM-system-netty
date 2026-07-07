@@ -23,6 +23,7 @@ export function RailTab({
     <Tooltip>
       <TooltipTrigger asChild>
         <button
+          aria-label={label}
           onClick={onClick}
           className={cn(
             "relative flex h-11 w-11 items-center justify-center rounded-xl transition-colors duration-150",
@@ -62,6 +63,7 @@ export function RailAction({
     <Tooltip>
       <TooltipTrigger asChild>
         <button
+          aria-label={label}
           onClick={onClick}
           className="flex h-9 w-9 items-center justify-center rounded-lg text-white/35 transition-all duration-150 hover:bg-white/[0.07] hover:text-white/70"
         >
@@ -76,11 +78,13 @@ export function RailAction({
 }
 
 export function MobileTabIcon({
+  label,
   active,
   badge,
   onClick,
   children,
 }: {
+  label: string;
   active: boolean;
   badge?: number;
   onClick: () => void;
@@ -88,6 +92,7 @@ export function MobileTabIcon({
 }) {
   return (
     <button
+      aria-label={label}
       onClick={onClick}
       className={cn(
         "relative flex h-9 w-9 items-center justify-center rounded-lg transition-colors",
