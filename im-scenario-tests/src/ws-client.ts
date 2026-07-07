@@ -21,6 +21,7 @@ export class ScenarioWsClient {
   private seq = 0;
   private readonly pending = new Map<number, { resolve: (value: WsResponse) => void; reject: (err: Error) => void; timer: NodeJS.Timeout }>();
   private readonly pushes: WsPush[] = [];
+  private readonly malformedFrames: string[] = [];
 
   constructor(
     private readonly wsUrl: string,
@@ -31,6 +32,12 @@ export class ScenarioWsClient {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) return;
     this.ws = new WebSocket(this.wsUrl);
     this.ws.on("message", (data) => this.handleMessage(data.toString()));
+    this.ws.on("close", (code, reason) => {
+      this.rejectPending(new Error(`WebSocket closed: code=${code} reason=${reason.toString() || "none"}`));
+    });
+    this.ws.on("error", (err) => {
+      this.rejectPending(err instanceof Error ? err : new Error(String(err)));
+    });
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error(`WebSocket connect timeout: ${this.wsUrl}`)), this.options.requestTimeoutMs);
       this.ws?.once("open", () => { clearTimeout(timer); resolve(); });
@@ -66,9 +73,22 @@ export class ScenarioWsClient {
   }
 
   async waitForPush(predicate: (push: WsPush) => boolean, description: string): Promise<WsPush> {
-    return waitFor(() => this.pushes.find(predicate), {
+    return this.waitForPushAfter(0, predicate, description);
+  }
+
+  markPushCursor(): number {
+    return this.pushes.length;
+  }
+
+  async waitForPushAfter(
+    cursor: number,
+    predicate: (push: WsPush) => boolean,
+    description: string,
+  ): Promise<WsPush> {
+    return waitFor(() => this.pushes.slice(cursor).find(predicate), {
       timeoutMs: this.options.requestTimeoutMs,
       description,
+      onTimeout: () => `recentPushes=${this.describeRecentPushes()}`,
     });
   }
 
@@ -94,6 +114,8 @@ export class ScenarioWsClient {
     try {
       parsed = JSON.parse(raw) as WsResponse | WsPush;
     } catch {
+      this.malformedFrames.push(raw);
+      if (this.malformedFrames.length > 5) this.malformedFrames.shift();
       return;
     }
     if (typeof (parsed as WsResponse).seq === "number") {
@@ -108,4 +130,37 @@ export class ScenarioWsClient {
     }
     this.pushes.push(parsed as WsPush);
   }
+
+  private rejectPending(error: Error): void {
+    for (const pending of this.pending.values()) {
+      clearTimeout(pending.timer);
+      pending.reject(error);
+    }
+    this.pending.clear();
+  }
+
+  private describeRecentPushes(limit = 5): string {
+    const recent = this.pushes.slice(-limit).map((push) => ({
+      op: push.op,
+      data: summarize(push.data),
+    }));
+    const malformed = this.malformedFrames.length > 0
+      ? ` malformed=${JSON.stringify(this.malformedFrames.slice(-2))}`
+      : "";
+    return `${JSON.stringify(recent)}${malformed}`;
+  }
+}
+
+function summarize(value: unknown): unknown {
+  if (typeof value !== "object" || value === null) return value;
+  const record = value as Record<string, unknown>;
+  return {
+    messageId: record.messageId ?? record._mid,
+    conversationId: record.conversationId,
+    fromUserId: record.fromUserId,
+    toUserId: record.toUserId,
+    groupId: record.groupId,
+    contentType: record.contentType,
+    content: record.content,
+  };
 }

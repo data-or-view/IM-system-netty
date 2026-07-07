@@ -18,9 +18,22 @@ export interface GroupInfo {
 }
 
 export interface SendMessageAck {
+  messageId?: string;
   status: string;
   conversationId: string;
   seq: number;
+}
+
+export interface ScenarioMessage {
+  messageId?: string;
+  conversationId?: string;
+  fromUserId?: string;
+  toUserId?: string;
+  groupId?: string;
+  contentType?: number;
+  content?: unknown;
+  messageSeq?: number;
+  seq?: number;
 }
 
 export interface MessagePush {
@@ -61,4 +74,41 @@ export interface SystemMessageInboxItem {
   contentType?: string;
   readAt?: number;
   createdAt?: number;
+}
+
+export interface ConversationInfo {
+  conversationId: string;
+  conversationType?: string | number;
+  userId?: string;
+  groupId?: string;
+  latestMsg?: string;
+  latestMsgSendTime?: number;
+  unreadCount?: number;
+}
+
+export interface FriendApplyInfo {
+  fromUserId: string;
+  toUserId: string;
+  reqMsg?: string;
+  handleResult: "PENDING" | "AGREED" | "REJECTED";
+}
+
+export interface FriendInfo {
+  ownerUserId?: string;
+  friendUserId: string;
+  nickname?: string;
+}
+
+export interface GroupApplyInfo {
+  groupId: string;
+  userId: string;
+  reqMsg?: string;
+  handleResult: "PENDING" | "AGREED" | "REJECTED";
+  handlerUserId?: string;
+}
+
+export interface GroupMemberInfo {
+  groupId: string;
+  userId: string;
+  roleLevel?: string;
 }

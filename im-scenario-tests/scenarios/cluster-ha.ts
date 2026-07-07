@@ -2,6 +2,7 @@ import { assertOk } from "../src/assertions.js";
 import { nextClientMsgId } from "../src/client-msg-id.js";
 import { readNumberArg } from "../src/cli.js";
 import { loadScenarioConfig } from "../src/config.js";
+import { hasTextContent } from "../src/message-content.js";
 import { ScenarioReporter } from "../src/reporter.js";
 import { ScenarioUser } from "../src/scenario-user.js";
 import type { GroupInfo, MessagePush, SendMessageAck } from "../src/types.js";
@@ -10,8 +11,8 @@ const config = loadScenarioConfig();
 const reporter = new ScenarioReporter();
 const suffix = Date.now().toString(36);
 
-const node1HttpUrl = process.env.IM_SCENARIO_NODE1_HTTP_URL ?? config.httpUrl;
-const node1WsUrl = process.env.IM_SCENARIO_NODE1_WS_URL ?? config.wsUrl;
+const node1HttpUrl = process.env.IM_SCENARIO_NODE1_HTTP_URL ?? "http://127.0.0.1:8088";
+const node1WsUrl = process.env.IM_SCENARIO_NODE1_WS_URL ?? "ws://127.0.0.1:8081/ws";
 const node2HttpUrl = process.env.IM_SCENARIO_NODE2_HTTP_URL ?? "http://127.0.0.1:8089";
 const node2WsUrl = process.env.IM_SCENARIO_NODE2_WS_URL ?? "ws://127.0.0.1:8084/ws";
 const holdMs = readNumberArg("hold-ms", 0);
@@ -146,5 +147,5 @@ async function assertGroupPush(
 
 function messageContains(message: MessagePush | undefined, expectedText: string): boolean {
   if (!message) return false;
-  return JSON.stringify(message).includes(expectedText);
+  return hasTextContent(message.content, expectedText);
 }

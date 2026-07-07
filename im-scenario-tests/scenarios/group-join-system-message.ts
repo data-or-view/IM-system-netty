@@ -1,12 +1,13 @@
-import { assertOk, sleep } from "../src/assertions.js";
+import { assertOk, waitForAsync } from "../src/assertions.js";
 import { loadScenarioConfig } from "../src/config.js";
+import { isSystemContent, parseMessageContent } from "../src/message-content.js";
 import { ScenarioReporter } from "../src/reporter.js";
 import { ScenarioUser } from "../src/scenario-user.js";
 import type { GroupInfo } from "../src/types.js";
 
 interface MessageRecord {
   contentType?: number;
-  content?: string;
+  content?: unknown;
   groupId?: string;
   fromUserId?: string;
 }
@@ -44,26 +45,38 @@ try {
   reporter.metric("groupId", group.groupId);
 
   reporter.step("joiner joins the group");
+  const ownerPushCursor = owner.ws.markPushCursor();
   await joiner.http.post("/api/group/join", { groupId: group.groupId });
 
   reporter.step("owner receives the group system message push");
-  await owner.ws.waitForPush((push) => {
+  await owner.ws.waitForPushAfter(ownerPushCursor, (push) => {
     const data = push.data as MessageRecord | undefined;
-    return push.op === "message" && data?.groupId === group.groupId && data.contentType === 4;
+    return push.op === "message" &&
+      data?.groupId === group.groupId &&
+      data.contentType === 4 &&
+      isSystemContent(data.content, "group_member_joined");
   }, "member joined system push");
 
-  // Persistence is async, so give the queue a tiny window before history pull.
-  await sleep(300);
-  const pulled = await owner.http.post<{ messages?: MessageRecord[] }>("/api/msg/pull", {
-    conversationId: `group_${group.groupId}`,
-    startSeq: 1,
-    limit: 20,
+  const systemMessage = await waitForAsync(async () => {
+    const pulled = await owner.http.post<{ messages?: MessageRecord[] }>("/api/msg/pull", {
+      conversationId: `group_${group.groupId}`,
+      startSeq: 1,
+      limit: 20,
+    });
+    return pulled.messages?.find((message) =>
+      message.contentType === 4 &&
+      message.groupId === group.groupId &&
+      isSystemContent(message.content, "group_member_joined")
+    );
+  }, {
+    timeoutMs: config.requestTimeoutMs,
+    intervalMs: 200,
+    description: "group member joined system history message",
   });
-  const systemMessage = pulled.messages?.find((message) => message.contentType === 4 && message.groupId === group.groupId);
   assertOk(systemMessage, "history did not contain group member joined system message");
   assertOk(systemMessage.fromUserId === "im-system", `expected fromUserId=im-system, got ${systemMessage.fromUserId}`);
-  assertOk(systemMessage.content?.includes("group_member_joined"), "system message missing group_member_joined type");
-  assertOk(systemMessage.content?.includes(joiner.userId ?? ""), "system message missing joined user id");
+  const content = parseMessageContent(systemMessage.content) as { message?: string };
+  assertOk(content.message?.includes(joiner.userId ?? ""), "system message missing joined user id");
   reporter.finish();
 } finally {
   owner.close();
