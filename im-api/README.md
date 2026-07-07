@@ -1,6 +1,6 @@
 # im-api — 接口定义层
 
-纯接口与 DTO 模块，零外部依赖。定义整个系统的能力边界。
+纯接口与 DTO 模块，定义整个系统的能力边界。这里不依赖 Netty、Redis、MQ、数据库等具体实现。
 
 ## 接口清单
 
@@ -61,8 +61,8 @@
 | `SignalingContent` | 信令消息 |
 | `SystemContent` | 系统消息 |
 
-## 依赖
+## 边界
 
-- JDK 21（虚拟线程支持）
-- Jackson（JSON 序列化）
-- Netty Buffer（ByteBuf 类型引用）
+- 只放协议枚举、DTO、公共接口和请求/响应抽象。
+- 不放 server 启动、handler 组装、DB/Redis/MQ/Netty/MinIO 具体实现。
+- 如果公共 API 需要生命周期、异常、校验等通用类型，应保持为稳定公共契约，不能把具体基础设施客户端暴露到签名里。

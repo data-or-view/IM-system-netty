@@ -22,16 +22,6 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class SyncE2ETest extends BaseE2ETest {
 
-    private static final String SENDER = "sync_sender_" + System.currentTimeMillis();
-    private static final String RECEIVER = "sync_receiver_" + System.currentTimeMillis();
-    private static final String CONVERSATION_ID;
-
-    static {
-        String u1 = SENDER.compareTo(RECEIVER) <= 0 ? SENDER : RECEIVER;
-        String u2 = SENDER.compareTo(RECEIVER) <= 0 ? RECEIVER : SENDER;
-        CONVERSATION_ID = "single_" + u1 + "_" + u2;
-    }
-
     @BeforeAll
     static void setup() throws Exception {
         startServer(Map.of());
@@ -39,7 +29,7 @@ class SyncE2ETest extends BaseE2ETest {
 
     @AfterAll
     static void teardown() {
-        cleanupRedis(SENDER, RECEIVER);
+        cleanupRegisteredUsersRedis();
         stopServer();
     }
 
@@ -54,26 +44,19 @@ class SyncE2ETest extends BaseE2ETest {
 
         try {
             // ── 注册 ──
-            sendAndWait(ws1, ws1In,
-                    "{\"op\":\"register\",\"seq\":1,\"userId\":\"" + SENDER + "\",\"nickname\":\"Sender\"}");
-            sendAndWait(ws2, ws2In,
-                    "{\"op\":\"register\",\"seq\":1,\"userId\":\"" + RECEIVER + "\",\"nickname\":\"Receiver\"}");
+            E2EUser sender = registerUser(ws1, ws1In, "Sender");
+            E2EUser receiver = registerUser(ws2, ws2In, "Receiver");
+            makeFriends(sender, receiver);
+            String conversationId = singleConversationId(sender.userId(), receiver.userId());
 
             // ── 登录获取 token ──
-            String login1Resp = sendAndWait(ws1, ws1In,
-                    "{\"op\":\"login\",\"seq\":1,\"userId\":\"" + SENDER + "\",\"platformId\":1}");
-            String senderToken = extractToken(login1Resp);
-
-            String login2Resp = sendAndWait(ws2, ws2In,
-                    "{\"op\":\"login\",\"seq\":1,\"userId\":\"" + RECEIVER + "\",\"platformId\":1}");
-            String receiverToken = extractToken(login2Resp);
-
-            assertNotNull(senderToken, "sender token");
-            assertNotNull(receiverToken, "receiver token");
+            String senderToken = loginUser(ws1, ws1In, sender, 1);
+            String receiverToken = loginUser(ws2, ws2In, receiver, 1);
 
             // ── 发送消息 ──
             String sendMsg = "{\"op\":\"chat.send\",\"seq\":1,\"Authorization\":\"" + senderToken
-                    + "\",\"toUserId\":\"" + RECEIVER + "\",\"_ct\":\"text\",\"content\":{\"text\":\"Sync me!\"}}";
+                    + "\",\"clientMsgId\":\"" + clientMsgId("sync.send")
+                    + "\",\"toUserId\":\"" + receiver.userId() + "\",\"_ct\":\"text\",\"content\":{\"text\":\"Sync me!\"}}";
             String sendResp = sendAndWait(ws1, ws1In, sendMsg);
             assertNotNull(sendResp, "send response");
             Map<String, Object> sendMap = readJson(sendResp);
@@ -86,14 +69,11 @@ class SyncE2ETest extends BaseE2ETest {
             // 排掉已投递的消息（MessageEncoder 现在会推送消息给接收方）
             drainQueue(ws2In);
 
-            // ── 接收方调用 chat.sync（已知 seq=0，拉取全部）──
-            String syncReq = "{\"op\":\"chat.sync\",\"seq\":1,\"Authorization\":\"" + receiverToken
-                    + "\",\"seqs\":{\"" + CONVERSATION_ID + "\":0}}";
-            String syncResp = sendAndWait(ws2, ws2In, syncReq);
-            assertNotNull(syncResp, "sync response");
-            Map<String, Object> syncMap = readJson(syncResp);
-            assertEquals("chat.sync_ack", syncMap.get("op"));
-            assertEquals(0, syncMap.get("code"));
+            // ── 接收方调用 chat.sync（HTTP-only，已知 seq=0，拉取全部）──
+            Map<String, Object> syncMap = httpPost("/api/msg/sync", receiverToken, Map.of(
+                    "seqs", Map.of(conversationId, 0)
+            ));
+            assertEquals(0, syncMap.get("code"), "sync response: " + syncMap);
 
             Map<String, Object> syncData = (Map<String, Object>) syncMap.get("data");
             assertNotNull(syncData, "sync response should have data");
@@ -102,7 +82,7 @@ class SyncE2ETest extends BaseE2ETest {
             java.util.List<Map<String, Object>> syncs = (java.util.List<Map<String, Object>>) syncsObj;
             assertEquals(1, syncs.size(), "should have sync entry for the conversation");
             Map<String, Object> entry = syncs.get(0);
-            assertEquals(CONVERSATION_ID, entry.get("conversationId"));
+            assertEquals(conversationId, entry.get("conversationId"));
             assertNotNull(entry.get("messages"));
             java.util.List<Map<String, Object>> msgs = (java.util.List<Map<String, Object>>) entry.get("messages");
             assertFalse(msgs.isEmpty(), "should have at least one message");
@@ -112,11 +92,10 @@ class SyncE2ETest extends BaseE2ETest {
             log.info("Sync successful: {} messages, maxSeq={}", msgs.size(), maxSeq);
 
             // ── 再次同步应无新消息 ──
-            String syncAgain = "{\"op\":\"chat.sync\",\"seq\":1,\"Authorization\":\"" + receiverToken
-                    + "\",\"seqs\":{\"" + CONVERSATION_ID + "\":" + maxSeq + "}}";
-            String syncAgainResp = sendAndWait(ws2, ws2In, syncAgain);
-            assertNotNull(syncAgainResp, "second sync response");
-            Map<String, Object> syncAgainMap = readJson(syncAgainResp);
+            Map<String, Object> syncAgainMap = httpPost("/api/msg/sync", receiverToken, Map.of(
+                    "seqs", Map.of(conversationId, maxSeq)
+            ));
+            assertEquals(0, syncAgainMap.get("code"), "second sync response: " + syncAgainMap);
             Map<String, Object> syncAgainData = (Map<String, Object>) syncAgainMap.get("data");
             java.util.List<Map<String, Object>> syncsAgain = (java.util.List<Map<String, Object>>) syncAgainData.get("syncs");
             java.util.List<Map<String, Object>> emptyMsgs = (java.util.List<Map<String, Object>>) syncsAgain.get(0).get("messages");
@@ -135,19 +114,14 @@ class SyncE2ETest extends BaseE2ETest {
         var ws1 = connectWs(ws1In);
 
         try {
-            sendAndWait(ws1, ws1In,
-                    "{\"op\":\"register\",\"seq\":1,\"userId\":\"" + SENDER + "\",\"nickname\":\"Sender\"}");
-            String loginResp = sendAndWait(ws1, ws1In,
-                    "{\"op\":\"login\",\"seq\":1,\"userId\":\"" + SENDER + "\",\"platformId\":1}");
-            String token = extractToken(loginResp);
+            E2EUser sender = registerUser(ws1, ws1In, "SenderEmptySync");
+            String token = loginUser(ws1, ws1In, sender, 1);
 
             // 空 seqs 调用
-            String resp = sendAndWait(ws1, ws1In,
-                    "{\"op\":\"chat.sync\",\"seq\":1,\"Authorization\":\"" + token + "\",\"seqs\":{}}");
-            assertNotNull(resp);
-            Map<String, Object> respMap = readJson(resp);
-            assertEquals("chat.sync_ack", respMap.get("op"));
-            assertEquals(0, respMap.get("code"));
+            Map<String, Object> respMap = httpPost("/api/msg/sync", token, Map.of(
+                    "seqs", Map.of()
+            ));
+            assertEquals(0, respMap.get("code"), "empty sync response: " + respMap);
             Map<String, Object> data = (Map<String, Object>) respMap.get("data");
             assertNotNull(data);
             java.util.List<?> syncs = (java.util.List<?>) data.get("syncs");
@@ -155,14 +129,5 @@ class SyncE2ETest extends BaseE2ETest {
         } finally {
             closeWs(ws1);
         }
-    }
-
-    private String extractToken(String loginRespJson) throws Exception {
-        Map<String, Object> map = readJson(loginRespJson);
-        if (map.get("data") instanceof Map) {
-            Object token = ((Map<String, Object>) map.get("data")).get("token");
-            return token != null ? token.toString() : null;
-        }
-        return null;
     }
 }

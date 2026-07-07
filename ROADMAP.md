@@ -141,7 +141,8 @@
 
 | 功能 | OpenIM 端点 | 说明 |
 |------|-------------|------|
-| ~~大文件分片上传~~ ✅ | `object/initiate_multipart_upload`、`object/auth_sign`、`object/complete_multipart_upload` | 已完成实现：`IFileStorageService` 新增 4 个分片接口默认方法 → `MinioFileStorageService` MinIO SDK 实现 → `MultipartUploadUseCase` 编排 init/upload/complete/abort → `FileMultipartHandler` WS/HTTP 双端支持；修复 `HttpRequestAdapter` Operation enum 比较 bug；服务端代理模式
+| ~~服务端代理文件上传~~ ✅ | `object/put_object` | `file.upload` 已统一走 `DirectFileTransferUseCase`，对象写入后同步保存文件元数据，后续可继续使用 `file.download.sign` |
+| ~~大文件分片上传~~ ✅ | `object/initiate_multipart_upload`、`object/auth_sign`、`object/complete_multipart_upload` | 已完成实现：`IFileStorageService` 分片接口 → `MinioFileStorageService` MinIO SDK 实现 → `DirectFileTransferUseCase` 编排 init/part-sign/proxy-upload/complete/abort，上传会话写 Redis，支持集群任意节点续传；服务端代理模式仍支持 `file.multipart.upload`
 | **Markdown 消息** | `MarkdownTextElem` | 消息内容类型，SDK 侧常见需求 |
 | **OA 通知消息** | `OANotificationElem` | 系统/业务通知消息类型 |
 | **业务通知发送** | `msg/send_business_notification` | 向用户/群发送自定义 key/value 通知 |

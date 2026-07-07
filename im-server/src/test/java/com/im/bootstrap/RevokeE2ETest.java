@@ -22,9 +22,6 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class RevokeE2ETest extends BaseE2ETest {
 
-    private static final String SENDER = "revoke_sender_" + System.currentTimeMillis();
-    private static final String RECEIVER = "revoke_receiver_" + System.currentTimeMillis();
-
     @BeforeAll
     static void setup() throws Exception {
         startServer(Map.of());
@@ -32,7 +29,7 @@ class RevokeE2ETest extends BaseE2ETest {
 
     @AfterAll
     static void teardown() {
-        cleanupRedis(SENDER, RECEIVER);
+        cleanupRegisteredUsersRedis();
         stopServer();
     }
 
@@ -47,26 +44,18 @@ class RevokeE2ETest extends BaseE2ETest {
 
         try {
             // ── 注册 ──
-            sendAndWait(ws1, ws1In,
-                    "{\"op\":\"register\",\"seq\":1,\"userId\":\"" + SENDER + "\",\"nickname\":\"Sender\"}");
-            sendAndWait(ws2, ws2In,
-                    "{\"op\":\"register\",\"seq\":1,\"userId\":\"" + RECEIVER + "\",\"nickname\":\"Receiver\"}");
+            E2EUser sender = registerUser(ws1, ws1In, "Sender");
+            E2EUser receiver = registerUser(ws2, ws2In, "Receiver");
+            makeFriends(sender, receiver);
 
             // ── 登录并获取 token ──
-            String login1Resp = sendAndWait(ws1, ws1In,
-                    "{\"op\":\"login\",\"seq\":1,\"userId\":\"" + SENDER + "\",\"platformId\":1}");
-            String senderToken = extractToken(login1Resp);
-
-            String login2Resp = sendAndWait(ws2, ws2In,
-                    "{\"op\":\"login\",\"seq\":1,\"userId\":\"" + RECEIVER + "\",\"platformId\":1}");
-            String receiverToken = extractToken(login2Resp);
-
-            assertNotNull(senderToken, "sender token");
-            assertNotNull(receiverToken, "receiver token");
+            String senderToken = loginUser(ws1, ws1In, sender, 1);
+            loginUser(ws2, ws2In, receiver, 1);
 
             // ── 发送消息（需带 Authorization token）──
             String sendMsg = "{\"op\":\"chat.send\",\"seq\":1,\"Authorization\":\"" + senderToken
-                    + "\",\"toUserId\":\"" + RECEIVER + "\",\"_ct\":\"text\",\"content\":{\"text\":\"Hello!\"}}";
+                    + "\",\"clientMsgId\":\"" + clientMsgId("revoke.send")
+                    + "\",\"toUserId\":\"" + receiver.userId() + "\",\"_ct\":\"text\",\"content\":{\"text\":\"Hello!\"}}";
             String sendResp = sendAndWait(ws1, ws1In, sendMsg);
             assertNotNull(sendResp, "send response");
             Map<String, Object> sendMap = readJson(sendResp);
@@ -85,14 +74,12 @@ class RevokeE2ETest extends BaseE2ETest {
             // 排掉已投递的消息（MessageEncoder 现在会推送消息给接收方）
             drainQueue(ws2In);
 
-            // ── 撤回消息 ──
-            String revokeReq = "{\"op\":\"msg_revoke\",\"seq\":1,\"Authorization\":\"" + senderToken
-                    + "\",\"conversationId\":\"" + convStr + "\",\"messageSeq\":" + messageSeq + "}";
-            String revokeResp = sendAndWait(ws1, ws1In, revokeReq);
-            assertNotNull(revokeResp, "revoke response");
-            Map<String, Object> revokeMap = readJson(revokeResp);
-            assertEquals("msg_revoke_ack", revokeMap.get("op"));
-            assertEquals(0, revokeMap.get("code"));
+            // ── 撤回消息（msg_revoke 是 HTTP-only 操作，成功后仍通过 WS 推送撤回通知）──
+            Map<String, Object> revokeMap = httpPost("/api/msg/revoke", senderToken, Map.of(
+                    "conversationId", convStr,
+                    "messageSeq", messageSeq
+            ));
+            assertEquals(0, revokeMap.get("code"), "revoke response: " + revokeMap);
             log.info("Message revoked successfully");
 
             // ── 验证接收方收到 msg_revoke 通知 ──
@@ -104,7 +91,7 @@ class RevokeE2ETest extends BaseE2ETest {
             Map<String, Object> data = (Map<String, Object>) notifyMap.get("data");
             assertEquals(convStr, data.get("conversationId"));
             assertEquals(messageSeq, ((Number) data.get("seq")).longValue());
-            assertEquals(SENDER, data.get("revokerId"));
+            assertEquals(sender.userId(), data.get("revokerId"));
             log.info("Receiver got msg_revoke notification as expected");
 
         } finally {
@@ -120,32 +107,20 @@ class RevokeE2ETest extends BaseE2ETest {
         var ws1 = connectWs(ws1In);
 
         try {
-            sendAndWait(ws1, ws1In,
-                    "{\"op\":\"register\",\"seq\":1,\"userId\":\"" + SENDER + "\",\"nickname\":\"Sender\"}");
-            String loginResp = sendAndWait(ws1, ws1In,
-                    "{\"op\":\"login\",\"seq\":1,\"userId\":\"" + SENDER + "\",\"platformId\":1}");
-            String token = extractToken(loginResp);
+            E2EUser sender = registerUser(ws1, ws1In, "SenderNonExistent");
+            E2EUser receiver = registerUser(ws1, ws1In, "ReceiverNonExistent");
+            String token = loginUser(ws1, ws1In, sender, 1);
+            String conversationId = singleConversationId(sender.userId(), receiver.userId());
 
             // 尝试撤回一个不存在的 seq
-            String revokeReq = "{\"op\":\"msg_revoke\",\"seq\":1,\"Authorization\":\"" + token
-                    + "\",\"conversationId\":\"single_" + SENDER + "_" + RECEIVER + "\",\"messageSeq\":99999}";
-            String resp = sendAndWait(ws1, ws1In, revokeReq);
-            assertNotNull(resp, "should get error response");
-            Map<String, Object> respMap = readJson(resp);
-            assertEquals("msg_revoke_ack", respMap.get("op"));
+            Map<String, Object> respMap = httpPost("/api/msg/revoke", token, Map.of(
+                    "conversationId", conversationId,
+                    "messageSeq", 99999
+            ));
             assertNotEquals(0, respMap.get("code"), "should return error code");
             log.info("Non-existent seq revoke correctly returned error: code={}", respMap.get("code"));
         } finally {
             closeWs(ws1);
         }
-    }
-
-    private String extractToken(String loginRespJson) throws Exception {
-        Map<String, Object> map = readJson(loginRespJson);
-        if (map.get("data") instanceof Map) {
-            Object token = ((Map<String, Object>) map.get("data")).get("token");
-            return token != null ? token.toString() : null;
-        }
-        return null;
     }
 }

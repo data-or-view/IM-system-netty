@@ -20,16 +20,6 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class UnreadE2ETest extends BaseE2ETest {
 
-    private static final String SENDER = "unread_sender_" + System.currentTimeMillis();
-    private static final String RECEIVER = "unread_receiver_" + System.currentTimeMillis();
-    private static final String CONVERSATION_ID;
-
-    static {
-        String u1 = SENDER.compareTo(RECEIVER) <= 0 ? SENDER : RECEIVER;
-        String u2 = SENDER.compareTo(RECEIVER) <= 0 ? RECEIVER : SENDER;
-        CONVERSATION_ID = "single_" + u1 + "_" + u2;
-    }
-
     @BeforeAll
     static void setup() throws Exception {
         startServer(Map.of());
@@ -37,7 +27,7 @@ class UnreadE2ETest extends BaseE2ETest {
 
     @AfterAll
     static void teardown() {
-        cleanupRedis(SENDER, RECEIVER);
+        cleanupRegisteredUsersRedis();
         stopServer();
     }
 
@@ -52,49 +42,40 @@ class UnreadE2ETest extends BaseE2ETest {
 
         try {
             // ── 注册 ──
-            sendAndWait(ws1, ws1In,
-                    "{\"op\":\"register\",\"seq\":1,\"userId\":\"" + SENDER + "\",\"nickname\":\"Sender\"}");
-            sendAndWait(ws2, ws2In,
-                    "{\"op\":\"register\",\"seq\":1,\"userId\":\"" + RECEIVER + "\",\"nickname\":\"Receiver\"}");
+            E2EUser sender = registerUser(ws1, ws1In, "Sender");
+            E2EUser receiver = registerUser(ws2, ws2In, "Receiver");
+            makeFriends(sender, receiver);
+            String conversationId = singleConversationId(sender.userId(), receiver.userId());
 
             // ── 登录获取 token ──
-            String login1Resp = sendAndWait(ws1, ws1In,
-                    "{\"op\":\"login\",\"seq\":1,\"userId\":\"" + SENDER + "\",\"platformId\":1}");
-            String senderToken = extractToken(login1Resp);
-
-            String login2Resp = sendAndWait(ws2, ws2In,
-                    "{\"op\":\"login\",\"seq\":1,\"userId\":\"" + RECEIVER + "\",\"platformId\":1}");
-            String receiverToken = extractToken(login2Resp);
-
-            assertNotNull(senderToken, "sender token");
-            assertNotNull(receiverToken, "receiver token");
+            String senderToken = loginUser(ws1, ws1In, sender, 1);
+            String receiverToken = loginUser(ws2, ws2In, receiver, 1);
 
             // ── 发送消息 ──
             String sendMsg = "{\"op\":\"chat.send\",\"seq\":1,\"Authorization\":\"" + senderToken
-                    + "\",\"toUserId\":\"" + RECEIVER + "\",\"_ct\":\"text\",\"content\":{\"text\":\"Hello!\"}}";
+                    + "\",\"clientMsgId\":\"" + clientMsgId("unread.send")
+                    + "\",\"toUserId\":\"" + receiver.userId() + "\",\"_ct\":\"text\",\"content\":{\"text\":\"Hello!\"}}";
             String sendResp = sendAndWait(ws1, ws1In, sendMsg);
             assertNotNull(sendResp, "send response");
             Map<String, Object> sendMap = readJson(sendResp);
             assertEquals(0, sendMap.get("code"));
             long messageSeq = ((Number) ((Map<String, Object>) sendMap.get("data")).get("seq")).longValue();
-            log.info("Message sent: conversationId={}, seq={}", CONVERSATION_ID, messageSeq);
+            log.info("Message sent: conversationId={}, seq={}", conversationId, messageSeq);
 
             // 等待异步持久化 + 会话更新完成
             Thread.sleep(1000);
             // 排掉已投递的消息（MessageEncoder 现在会推送消息给接收方）
             drainQueue(ws2In);
 
-            // ── 接收方调用已读 ──
-            String readReq = "{\"op\":\"conversation.read\",\"seq\":1,\"Authorization\":\"" + receiverToken
-                    + "\",\"conversationId\":\"" + CONVERSATION_ID + "\",\"readSeq\":" + messageSeq + "}";
-            String readResp = sendAndWait(ws2, ws2In, readReq);
-            assertNotNull(readResp, "read response");
-            Map<String, Object> readMap = readJson(readResp);
-            assertEquals("conversation.read_ack", readMap.get("op"));
-            assertEquals(0, readMap.get("code"));
+            // ── 接收方调用已读（conversation.read 是 HTTP-only 操作）──
+            Map<String, Object> readMap = httpPost("/api/conversation/read", receiverToken, Map.of(
+                    "conversationId", conversationId,
+                    "readSeq", messageSeq
+            ));
+            assertEquals(0, readMap.get("code"), "read response: " + readMap);
             Map<String, Object> readData = (Map<String, Object>) readMap.get("data");
             assertNotNull(readData, "read response should have data");
-            assertEquals(CONVERSATION_ID, readData.get("conversationId"));
+            assertEquals(conversationId, readData.get("conversationId"));
             // 已读后未读数应为 0
             assertEquals(0, ((Number) readData.get("unreadCount")).intValue(),
                     "unreadCount should be 0 after markRead");
@@ -104,14 +85,5 @@ class UnreadE2ETest extends BaseE2ETest {
             closeWs(ws1);
             closeWs(ws2);
         }
-    }
-
-    private String extractToken(String loginRespJson) throws Exception {
-        Map<String, Object> map = readJson(loginRespJson);
-        if (map.get("data") instanceof Map) {
-            Object token = ((Map<String, Object>) map.get("data")).get("token");
-            return token != null ? token.toString() : null;
-        }
-        return null;
     }
 }

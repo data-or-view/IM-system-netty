@@ -4,8 +4,8 @@ import com.im.api.ApiRequest;
 import com.im.api.RequestHandler;
 import com.im.common.exception.ValidationException;
 import com.im.common.validation.Preconditions;
-import com.im.infrastructure.storage.usecase.FileUploadResult;
-import com.im.infrastructure.storage.usecase.FileUploadUseCase;
+import com.im.core.file.DirectFileTransferUseCase;
+import com.im.core.file.FileUploadCompleteResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -21,9 +21,9 @@ public class FileUploadHandler implements RequestHandler {
 
     private static final Logger log = LoggerFactory.getLogger(FileUploadHandler.class);
 
-    private final FileUploadUseCase fileUploadUseCase;
+    private final DirectFileTransferUseCase fileUploadUseCase;
 
-    public FileUploadHandler(FileUploadUseCase fileUploadUseCase) {
+    public FileUploadHandler(DirectFileTransferUseCase fileUploadUseCase) {
         this.fileUploadUseCase = fileUploadUseCase;
     }
 
@@ -40,7 +40,9 @@ public class FileUploadHandler implements RequestHandler {
         fileName = Preconditions.requireText(fileName, "fileName");
         mimeType = Preconditions.requireText(mimeType, "mimeType");
 
-        FileUploadResult result = fileUploadUseCase.execute(fileName, mimeType, body);
+        FileUploadCompleteResult result = fileUploadUseCase.uploadSingleFile(
+                req.currentUserId(), fileName, mimeType, body,
+                req.getString("hash", ""), req.getString("fileGroup", "file"));
 
         log.info("File uploaded: fileId={}, fileName={}, size={}, url={}",
                 result.fileId(), result.fileName(), result.fileSize(), result.fileUrl());

@@ -31,6 +31,7 @@ class IMServerE2ETest {
     private static final int WS_PORT = 18081;
 
     private static IMServer server;
+    private static String registeredUserId = "e2e_test_user";
 
     @BeforeAll
     static void startServer() throws Exception {
@@ -52,7 +53,8 @@ class IMServerE2ETest {
                 map.put("im.redis.port", "6379");
                 map.put("im.node.id", "e2e-test-node");
                 map.put("im.server.use-epoll", "false");
-                map.put("im.token.secret", "e2e-test-secret");
+                map.put("im.token.secret", E2ETestConfig.TOKEN_SECRET);
+                E2ETestConfig.putInfrastructureDefaults(map);
                 return map;
             }
         });
@@ -65,7 +67,7 @@ class IMServerE2ETest {
     @AfterAll
     static void stopServer() {
         if (server != null) {
-            cleanupRedis("e2e_test_user");
+            cleanupRedis(registeredUserId);
             server.stop();
             log.info("E2E test server stopped");
         }
@@ -93,7 +95,8 @@ class IMServerE2ETest {
 
         try {
             // ── Register ──
-            String regJson = "{\"op\":\"register\",\"seq\":1,\"userId\":\"e2e_test_user\",\"nickname\":\"E2E\"}";
+            String regJson = "{\"op\":\"register\",\"seq\":1,\"nickname\":\"E2E\",\"password\":\""
+                    + E2ETestConfig.TEST_PASSWORD + "\"}";
             ws.sendText(regJson, true).get(5, TimeUnit.SECONDS);
 
             String regResp = incoming.poll(5, TimeUnit.SECONDS);
@@ -101,10 +104,15 @@ class IMServerE2ETest {
             Map<String, Object> regMap = MAPPER.readValue(regResp, Map.class);
             assertEquals("register_ack", regMap.get("op"));
             assertEquals(0, regMap.get("code"));
+            Map<String, Object> regData = (Map<String, Object>) regMap.get("data");
+            assertNotNull(regData, "register data should not be null");
+            registeredUserId = (String) regData.get("userId");
+            assertNotNull(registeredUserId, "registered userId should not be null");
             log.info("REGISTER OK");
 
             // ── Login ──
-            String loginJson = "{\"op\":\"login\",\"seq\":1,\"userId\":\"e2e_test_user\",\"platformId\":1}";
+            String loginJson = "{\"op\":\"login\",\"seq\":1,\"userId\":\"" + registeredUserId +
+                    "\",\"password\":\"" + E2ETestConfig.TEST_PASSWORD + "\",\"platformId\":1}";
             ws.sendText(loginJson, true).get(5, TimeUnit.SECONDS);
 
             String loginResp = incoming.poll(5, TimeUnit.SECONDS);
@@ -127,7 +135,7 @@ class IMServerE2ETest {
 
     private static void cleanupRedis(String... userIds) {
         try {
-            RedisClient client = RedisClient.create("redis://127.0.0.1:6379");
+            RedisClient client = RedisClient.create(E2ETestConfig.redisUri());
             try (StatefulRedisConnection<String, String> conn = client.connect()) {
                 for (String uid : userIds) {
                     conn.sync().del("route:" + uid, "online:" + uid);

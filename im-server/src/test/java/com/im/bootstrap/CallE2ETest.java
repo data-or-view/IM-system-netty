@@ -24,9 +24,6 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class CallE2ETest extends BaseE2ETest {
 
-    private static final String CALLER_ID = "caller_e2e_" + System.currentTimeMillis();
-    private static final String CALLEE_ID = "callee_e2e_" + System.currentTimeMillis();
-
     @BeforeAll
     static void setup() throws Exception {
         startServer(Map.of(
@@ -40,7 +37,7 @@ class CallE2ETest extends BaseE2ETest {
 
     @AfterAll
     static void teardown() {
-        cleanupRedis(CALLER_ID, CALLEE_ID);
+        cleanupRegisteredUsersRedis();
         stopServer();
     }
 
@@ -55,32 +52,23 @@ class CallE2ETest extends BaseE2ETest {
 
         try {
             // ── 注册两个用户 ──
-            String regCaller = "{\"op\":\"register\",\"seq\":1,\"userId\":\"" + CALLER_ID + "\",\"nickname\":\"Caller\"}";
-            assertEquals(0, readJson(sendAndWait(caller, callerIn, regCaller)).get("code"));
-
-            String regCallee = "{\"op\":\"register\",\"seq\":1,\"userId\":\"" + CALLEE_ID + "\",\"nickname\":\"Callee\"}";
-            assertEquals(0, readJson(sendAndWait(callee, calleeIn, regCallee)).get("code"));
+            E2EUser callerUser = registerUser(caller, callerIn, "Caller");
+            E2EUser calleeUser = registerUser(callee, calleeIn, "Callee");
+            String callerId = callerUser.userId();
+            String calleeId = calleeUser.userId();
+            makeFriends(callerUser, calleeUser);
             log.info("Both users registered");
 
             // ── 两个用户登录并获取 token ──
-            String loginCaller = "{\"op\":\"login\",\"seq\":1,\"userId\":\"" + CALLER_ID + "\",\"platformId\":1}";
-            Map<String, Object> loginResp1 = readJson(sendAndWait(caller, callerIn, loginCaller));
-            assertEquals(0, loginResp1.get("code"));
-            String callerToken = (String) ((Map<String, Object>) loginResp1.get("data")).get("token");
-
-            String loginCallee = "{\"op\":\"login\",\"seq\":1,\"userId\":\"" + CALLEE_ID + "\",\"platformId\":1}";
-            Map<String, Object> loginResp2 = readJson(sendAndWait(callee, calleeIn, loginCallee));
-            assertEquals(0, loginResp2.get("code"));
-            String calleeToken = (String) ((Map<String, Object>) loginResp2.get("data")).get("token");
-
-            assertNotNull(callerToken, "caller token should not be null");
-            assertNotNull(calleeToken, "callee token should not be null");
+            String callerToken = loginUser(caller, callerIn, callerUser, 1);
+            loginUser(callee, calleeIn, calleeUser, 1);
             log.info("Both users logged in");
 
             // ── 主叫发送 INVITE 信令（带 Authorization header） ──
             // ContentType 用枚举名 "signal", SignalingAction 用枚举名 "INVITE"
             String inviteJson = "{\"op\":\"chat.send\",\"seq\":10,"
-                    + "\"toUserId\":\"" + CALLEE_ID + "\","
+                    + "\"clientMsgId\":\"" + clientMsgId("call.invite") + "\","
+                    + "\"toUserId\":\"" + calleeId + "\","
                     + "\"_ct\":\"signal\","
                     + "\"content\":{\"action\":\"INVITE\",\"sdp\":\"dummy_sdp_offer\"},"
                     + "\"Authorization\":\"Bearer " + callerToken + "\"}";
@@ -104,8 +92,8 @@ class CallE2ETest extends BaseE2ETest {
             assertEquals("message", pushMap.get("op"));
 
             Map<String, Object> msgData = (Map<String, Object>) pushMap.get("data");
-            assertEquals(CALLER_ID, msgData.get("fromUserId"));
-            assertEquals(CALLEE_ID, msgData.get("toUserId"));
+            assertEquals(callerId, msgData.get("fromUserId"));
+            assertEquals(calleeId, msgData.get("toUserId"));
             assertEquals(5, msgData.get("contentType")); // ContentType.SIGNAL
 
             // 验证 content 中包含 CALLING action + calleeToken
@@ -133,26 +121,20 @@ class CallE2ETest extends BaseE2ETest {
         var callee = connectWs(calleeIn);
 
         try {
-            String uid1 = CALLER_ID + "_timeout";
-            String uid2 = CALLEE_ID + "_timeout";
-
             // ── 注册 ──
-            assertEquals(0, readJson(sendAndWait(caller, callerIn,
-                    "{\"op\":\"register\",\"seq\":1,\"userId\":\"" + uid1 + "\"}")).get("code"));
-            assertEquals(0, readJson(sendAndWait(callee, calleeIn,
-                    "{\"op\":\"register\",\"seq\":1,\"userId\":\"" + uid2 + "\"}")).get("code"));
+            E2EUser callerUser = registerUser(caller, callerIn, "CallerTimeout");
+            E2EUser calleeUser = registerUser(callee, calleeIn, "CalleeTimeout");
+            String uid1 = callerUser.userId();
+            String uid2 = calleeUser.userId();
+            makeFriends(callerUser, calleeUser);
 
             // ── 登录获取 token ──
-            Map<String, Object> login1 = readJson(sendAndWait(caller, callerIn,
-                    "{\"op\":\"login\",\"seq\":1,\"userId\":\"" + uid1 + "\",\"platformId\":1}"));
-            String token1 = (String) ((Map<String, Object>) login1.get("data")).get("token");
-
-            Map<String, Object> login2 = readJson(sendAndWait(callee, calleeIn,
-                    "{\"op\":\"login\",\"seq\":1,\"userId\":\"" + uid2 + "\",\"platformId\":1}"));
-            assertNotNull(((Map<String, Object>) login2.get("data")).get("token"));
+            String token1 = loginUser(caller, callerIn, callerUser, 1);
+            loginUser(callee, calleeIn, calleeUser, 1);
 
             // ── 主叫 INVITE ──
             String inviteJson = "{\"op\":\"chat.send\",\"seq\":10,"
+                    + "\"clientMsgId\":\"" + clientMsgId("call.timeout.invite") + "\","
                     + "\"toUserId\":\"" + uid2 + "\","
                     + "\"_ct\":\"signal\","
                     + "\"content\":{\"action\":\"INVITE\",\"sdp\":\"dummy\"},"
@@ -209,28 +191,21 @@ class CallE2ETest extends BaseE2ETest {
         var secondCaller = connectWs(secondCallerIn);
 
         try {
-            String uid1 = CALLER_ID + "_busy_1";
-            String uid2 = CALLEE_ID + "_busy_2";
-            String uid3 = CALLER_ID + "_busy_3";
+            E2EUser callerUser = registerUser(caller, callerIn, "CallerBusy");
+            E2EUser calleeUser = registerUser(callee, calleeIn, "CalleeBusy");
+            E2EUser secondCallerUser = registerUser(secondCaller, secondCallerIn, "SecondCallerBusy");
+            String uid1 = callerUser.userId();
+            String uid2 = calleeUser.userId();
+            String uid3 = secondCallerUser.userId();
+            makeFriends(callerUser, calleeUser);
+            makeFriends(secondCallerUser, calleeUser);
 
-            assertEquals(0, readJson(sendAndWait(caller, callerIn,
-                    "{\"op\":\"register\",\"seq\":1,\"userId\":\"" + uid1 + "\"}")).get("code"));
-            assertEquals(0, readJson(sendAndWait(callee, calleeIn,
-                    "{\"op\":\"register\",\"seq\":1,\"userId\":\"" + uid2 + "\"}")).get("code"));
-            assertEquals(0, readJson(sendAndWait(secondCaller, secondCallerIn,
-                    "{\"op\":\"register\",\"seq\":1,\"userId\":\"" + uid3 + "\"}")).get("code"));
-
-            Map<String, Object> login1 = readJson(sendAndWait(caller, callerIn,
-                    "{\"op\":\"login\",\"seq\":1,\"userId\":\"" + uid1 + "\",\"platformId\":1}"));
-            String token1 = (String) ((Map<String, Object>) login1.get("data")).get("token");
-            Map<String, Object> login2 = readJson(sendAndWait(callee, calleeIn,
-                    "{\"op\":\"login\",\"seq\":1,\"userId\":\"" + uid2 + "\",\"platformId\":1}"));
-            String token2 = (String) ((Map<String, Object>) login2.get("data")).get("token");
-            Map<String, Object> login3 = readJson(sendAndWait(secondCaller, secondCallerIn,
-                    "{\"op\":\"login\",\"seq\":1,\"userId\":\"" + uid3 + "\",\"platformId\":1}"));
-            String token3 = (String) ((Map<String, Object>) login3.get("data")).get("token");
+            String token1 = loginUser(caller, callerIn, callerUser, 1);
+            loginUser(callee, calleeIn, calleeUser, 1);
+            String token3 = loginUser(secondCaller, secondCallerIn, secondCallerUser, 1);
 
             String firstInvite = "{\"op\":\"chat.send\",\"seq\":10,"
+                    + "\"clientMsgId\":\"" + clientMsgId("call.busy.first") + "\","
                     + "\"toUserId\":\"" + uid2 + "\","
                     + "\"_ct\":\"signal\","
                     + "\"content\":{\"action\":\"INVITE\",\"callType\":\"video\"},"
@@ -241,6 +216,7 @@ class CallE2ETest extends BaseE2ETest {
             drainQueue(calleeIn);
 
             String secondInvite = "{\"op\":\"chat.send\",\"seq\":11,"
+                    + "\"clientMsgId\":\"" + clientMsgId("call.busy.second") + "\","
                     + "\"toUserId\":\"" + uid2 + "\","
                     + "\"_ct\":\"signal\","
                     + "\"content\":{\"action\":\"INVITE\",\"callType\":\"voice\"},"
@@ -250,6 +226,7 @@ class CallE2ETest extends BaseE2ETest {
             assertEquals("call busy", busyResp.get("detail"));
 
             String cancel = "{\"op\":\"chat.send\",\"seq\":12,"
+                    + "\"clientMsgId\":\"" + clientMsgId("call.busy.cancel") + "\","
                     + "\"toUserId\":\"" + uid2 + "\","
                     + "\"_ct\":\"signal\","
                     + "\"content\":{\"action\":\"CANCEL\",\"roomId\":\"" + roomId + "\"},"

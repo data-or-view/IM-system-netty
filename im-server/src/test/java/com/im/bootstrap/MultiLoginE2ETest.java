@@ -24,8 +24,6 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class MultiLoginE2ETest extends BaseE2ETest {
 
-    private static final String USER_ID = "multi_e2e_" + System.currentTimeMillis();
-
     @BeforeAll
     static void setup() throws Exception {
         startServer(Map.of(
@@ -35,7 +33,7 @@ class MultiLoginE2ETest extends BaseE2ETest {
 
     @AfterAll
     static void teardown() {
-        cleanupRedis(USER_ID);
+        cleanupRegisteredUsersRedis();
         stopServer();
     }
 
@@ -52,28 +50,15 @@ class MultiLoginE2ETest extends BaseE2ETest {
 
         try {
             // ── 注册用户 ──
-            String regJson = "{\"op\":\"register\",\"seq\":1,\"userId\":\"" + USER_ID + "\",\"nickname\":\"MultiTest\"}";
-            String regResp = sendAndWait(ws1, ws1In, regJson);
-            assertNotNull(regResp, "register response");
-            assertEquals(0, readJson(regResp).get("code"));
+            E2EUser user = registerUser(ws1, ws1In, "MultiTest");
             log.info("REGISTER OK");
 
             // ── WS1 登录 platformId=1（iOS）──
-            String login1 = "{\"op\":\"login\",\"seq\":1,\"userId\":\"" + USER_ID + "\",\"platformId\":1}";
-            String resp1 = sendAndWait(ws1, ws1In, login1);
-            assertNotNull(resp1, "WS1 login response");
-            Map<String, Object> m1 = readJson(resp1);
-            assertEquals("login_ack", m1.get("op"));
-            assertEquals(0, m1.get("code"));
+            loginUser(ws1, ws1In, user, 1);
             log.info("WS1 LOGIN OK (platformId=1)");
 
             // ── WS2 同用户同平台登录 → 应踢掉 WS1 ──
-            String login2 = "{\"op\":\"login\",\"seq\":1,\"userId\":\"" + USER_ID + "\",\"platformId\":1}";
-            String resp2 = sendAndWait(ws2, ws2In, login2);
-            assertNotNull(resp2, "WS2 login response");
-            Map<String, Object> m2 = readJson(resp2);
-            assertEquals("login_ack", m2.get("op"));
-            assertEquals(0, m2.get("code"));
+            loginUser(ws2, ws2In, user, 1);
             log.info("WS2 LOGIN OK (platformId=1)");
 
             // ── 验证 WS1 收到 kicked 通知 ──
@@ -87,12 +72,7 @@ class MultiLoginE2ETest extends BaseE2ETest {
             log.info("WS1 KICKED notification verified");
 
             // ── WS3 同用户不同平台 platformId=2 登录 → WS2 不应被踢 ──
-            String login3 = "{\"op\":\"login\",\"seq\":1,\"userId\":\"" + USER_ID + "\",\"platformId\":2}";
-            String resp3 = sendAndWait(ws3, ws3In, login3);
-            assertNotNull(resp3, "WS3 login response");
-            Map<String, Object> m3 = readJson(resp3);
-            assertEquals("login_ack", m3.get("op"));
-            assertEquals(0, m3.get("code"));
+            loginUser(ws3, ws3In, user, 2);
             log.info("WS3 LOGIN OK (platformId=2)");
 
             // ── 验证 WS2 未被踢（等 2 秒确认没有 kicked 通知）──

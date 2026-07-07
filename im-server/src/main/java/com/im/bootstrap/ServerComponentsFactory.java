@@ -276,7 +276,8 @@ final class ServerComponentsFactory {
                 new RedisUploadSessionStore(redisConfig),
                 new DbFileObjectMetadataStore(fileBucket),
                 fileBucket,
-                config.getInt("im.minio.presign-expire-seconds", 900));
+                config.getInt("im.minio.presign-expire-seconds", 900),
+                config.getLong("im.minio.max-file-size", 100L * 1024 * 1024));
         return new StorageDependencies(
                 sequenceManager, messageStore, singleMessageStore, groupMessageStore, messageQueue,
                 sendMessageIdempotency, businessMessageDlqStore,

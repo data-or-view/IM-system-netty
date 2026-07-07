@@ -4,6 +4,7 @@ import com.im.api.ApiRequest;
 import com.im.api.PartInfo;
 import com.im.api.RequestHandler;
 import com.im.common.exception.NotFoundException;
+import com.im.common.exception.ValidationException;
 import com.im.core.file.DirectFileTransferUseCase;
 
 import java.util.List;
@@ -40,19 +41,28 @@ public class FileDirectTransferHandler implements RequestHandler {
         };
     }
 
-    @SuppressWarnings("unchecked")
     private static List<PartInfo> toParts(ApiRequest req) {
         Object raw = req.params().get("parts");
-        if (!(raw instanceof List<?> list)) {
-            return List.of();
+        if (!(raw instanceof List<?> list) || list.isEmpty()) {
+            throw new ValidationException("parts list is required");
         }
         return list.stream()
-                .map(item -> {
-                    Map<String, Object> part = (Map<String, Object>) item;
-                    Object partNumber = part.get("partNumber");
-                    Object etag = part.get("etag");
-                    return new PartInfo(((Number) partNumber).intValue(), String.valueOf(etag));
-                })
+                .map(FileDirectTransferHandler::toPartInfo)
                 .toList();
+    }
+
+    private static PartInfo toPartInfo(Object item) {
+        if (!(item instanceof Map<?, ?> part)) {
+            throw new ValidationException("part info is invalid");
+        }
+        Object partNumberValue = part.get("partNumber");
+        if (!(partNumberValue instanceof Number number) || number.intValue() < 1) {
+            throw new ValidationException("partNumber is required");
+        }
+        Object etagValue = part.get("etag");
+        if (!(etagValue instanceof String etag) || etag.isBlank()) {
+            throw new ValidationException("etag is required");
+        }
+        return new PartInfo(number.intValue(), etag.trim());
     }
 }

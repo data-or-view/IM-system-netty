@@ -30,6 +30,7 @@ import java.util.concurrent.TimeUnit;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 class HttpRequestAdapterTest {
 
@@ -135,8 +136,8 @@ class HttpRequestAdapterTest {
         assertEquals(HttpResponseStatus.BAD_REQUEST, response.status());
         Map<String, Object> body = readBody(response);
         assertEquals(ImErrorCode.BAD_REQUEST.getCode(), body.get("code"));
-        assertEquals(ImErrorCode.BAD_REQUEST.getMessage(), body.get("msg"));
-        assertEquals("invalid json body", body.get("detail"));
+        assertEquals("请求参数不正确", body.get("msg"));
+        assertNull(body.get("detail"));
     }
 
     @Test
@@ -157,7 +158,7 @@ class HttpRequestAdapterTest {
         assertEquals(HttpResponseStatus.SERVICE_UNAVAILABLE, response.status());
         Map<String, Object> body = readBody(response);
         assertEquals(ImErrorCode.MQ_UNAVAILABLE.getCode(), body.get("code"));
-        assertEquals(ImErrorCode.MQ_UNAVAILABLE.getMessage(), body.get("msg"));
+        assertEquals("消息服务暂不可用，请稍后再试", body.get("msg"));
     }
 
     @Test
@@ -178,7 +179,7 @@ class HttpRequestAdapterTest {
         assertEquals(HttpResponseStatus.SERVICE_UNAVAILABLE, response.status());
         Map<String, Object> body = readBody(response);
         assertEquals(ImErrorCode.MQ_UNAVAILABLE.getCode(), body.get("code"));
-        assertEquals(ImErrorCode.MQ_UNAVAILABLE.getMessage(), body.get("msg"));
+        assertEquals("消息服务暂不可用，请稍后再试", body.get("msg"));
     }
 
     private static Map<String, Object> readBody(FullHttpResponse response) {

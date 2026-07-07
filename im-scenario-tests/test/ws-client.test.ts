@@ -1,11 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { once } from "node:events";
 import { WebSocketServer } from "ws";
 import { ScenarioWsClient } from "../src/ws-client.js";
 
 test("ScenarioWsClient can wait for pushes after a cursor", async () => {
-  const server = new WebSocketServer({ port: 0 });
-  const port = (server.address() as { port: number }).port;
+  const { server, port } = await startServer();
   server.on("connection", (socket) => {
     socket.send(JSON.stringify({ op: "message", data: { text: "old" } }));
     socket.on("message", (raw) => {
@@ -31,13 +31,12 @@ test("ScenarioWsClient can wait for pushes after a cursor", async () => {
     assert.equal((push.data as { text?: string }).text, "new");
   } finally {
     client.close();
-    await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+    await closeServer(server);
   }
 });
 
 test("ScenarioWsClient timeout diagnostics include pushes received while waiting", async () => {
-  const server = new WebSocketServer({ port: 0 });
-  const port = (server.address() as { port: number }).port;
+  const { server, port } = await startServer();
   server.on("connection", (socket) => {
     setTimeout(() => {
       socket.send(JSON.stringify({ op: "friend.apply", data: { fromUserId: "u1", toUserId: "u2" } }));
@@ -58,6 +57,18 @@ test("ScenarioWsClient timeout diagnostics include pushes received while waiting
     );
   } finally {
     client.close();
-    await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+    await closeServer(server);
   }
 });
+
+async function startServer(): Promise<{ server: WebSocketServer; port: number }> {
+  const server = new WebSocketServer({ port: 0 });
+  await once(server, "listening");
+  const address = server.address();
+  assert.ok(address && typeof address === "object", "test WebSocket server must bind a TCP port");
+  return { server, port: address.port };
+}
+
+async function closeServer(server: WebSocketServer): Promise<void> {
+  await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+}

@@ -12,23 +12,36 @@ import java.util.Map;
 public class DirectFileTransferUseCase {
 
     private static final String DEFAULT_ENGINE = "minio";
+    private static final long DEFAULT_MAX_PROXY_UPLOAD_BYTES = 100L * 1024 * 1024;
 
     private final IFileStorageService fileStorage;
     private final UploadSessionStore uploadSessionStore;
     private final FileObjectMetadataStore metadataStore;
     private final String bucket;
     private final int presignExpiresSeconds;
+    private final long maxProxyUploadBytes;
 
     public DirectFileTransferUseCase(IFileStorageService fileStorage,
                                      UploadSessionStore uploadSessionStore,
                                      FileObjectMetadataStore metadataStore,
                                      String bucket,
                                      int presignExpiresSeconds) {
+        this(fileStorage, uploadSessionStore, metadataStore, bucket, presignExpiresSeconds,
+                DEFAULT_MAX_PROXY_UPLOAD_BYTES);
+    }
+
+    public DirectFileTransferUseCase(IFileStorageService fileStorage,
+                                     UploadSessionStore uploadSessionStore,
+                                     FileObjectMetadataStore metadataStore,
+                                     String bucket,
+                                     int presignExpiresSeconds,
+                                     long maxProxyUploadBytes) {
         this.fileStorage = fileStorage;
         this.uploadSessionStore = uploadSessionStore;
         this.metadataStore = metadataStore;
         this.bucket = bucket;
         this.presignExpiresSeconds = presignExpiresSeconds;
+        this.maxProxyUploadBytes = maxProxyUploadBytes > 0 ? maxProxyUploadBytes : DEFAULT_MAX_PROXY_UPLOAD_BYTES;
     }
 
     public PresignedUploadResult signSingleUpload(String userId, String fileName, long fileSize,
@@ -53,6 +66,28 @@ public class DirectFileTransferUseCase {
             throw new ImException(ImErrorCode.NOT_FOUND, "upload session not found");
         }
         return complete(session, userId);
+    }
+
+    public FileUploadCompleteResult uploadSingleFile(String userId, String fileName, String contentType,
+                                                     byte[] data, String hash, String fileGroup) {
+        validateUser(userId);
+        if (data == null || data.length == 0) {
+            throw new ImException(ImErrorCode.BAD_REQUEST, "file body is empty");
+        }
+        if (data.length > maxProxyUploadBytes) {
+            throw new ImException(ImErrorCode.BAD_REQUEST,
+                    "file too large: " + data.length + " (max " + maxProxyUploadBytes + ")");
+        }
+        validateFile(fileName, data.length);
+        String fileId = IdGenerator.fileId();
+        String objectKey = objectKey(fileId, fileName);
+        String mimeType = normalizeContentType(contentType);
+        String fileUrl = fileStorage.upload(bucket, objectKey, data, mimeType);
+        FileObjectMetadata metadata = new FileObjectMetadata(fileId, userId, bucket, objectKey, fileName,
+                data.length, mimeType, hash != null ? hash : "", DEFAULT_ENGINE,
+                normalizeFileGroup(fileGroup), System.currentTimeMillis());
+        metadataStore.save(metadata);
+        return new FileUploadCompleteResult(fileUrl, fileId, objectKey, fileName, mimeType, data.length);
     }
 
     public MultipartSignResult initiateMultipartUpload(String userId, String fileName, long fileSize,
@@ -81,6 +116,25 @@ public class DirectFileTransferUseCase {
         String uploadUrl = fileStorage.presignUploadPart(session.bucket(), session.objectKey(), uploadId,
                 partNumber, presignExpiresSeconds);
         return new PresignedPartResult(uploadId, partNumber, uploadUrl, "PUT", Map.of(), presignExpiresSeconds);
+    }
+
+    public String uploadMultipartPart(String userId, String uploadId, int partNumber, byte[] data) {
+        validateUser(userId);
+        if (uploadId == null || uploadId.isBlank() || partNumber < 1 || partNumber > 10_000 ||
+                data == null || data.length == 0) {
+            throw new ImException(ImErrorCode.BAD_REQUEST, "uploadId, partNumber and body are required");
+        }
+        UploadSession session = uploadSessionStore.getByUploadId(uploadId);
+        if (session == null || !session.multipart()) {
+            throw new ImException(ImErrorCode.NOT_FOUND, "upload session not found");
+        }
+        ensureOwner(session, userId);
+        if (data.length > maxProxyUploadBytes || data.length > session.fileSize()) {
+            throw new ImException(ImErrorCode.BAD_REQUEST,
+                    "multipart part too large: " + data.length + " (fileSize " + session.fileSize() +
+                            ", max " + maxProxyUploadBytes + ")");
+        }
+        return fileStorage.uploadPart(session.bucket(), session.objectKey(), uploadId, partNumber, data);
     }
 
     public FileUploadCompleteResult completeMultipartUpload(String userId, String uploadId, List<PartInfo> parts) {
@@ -146,9 +200,13 @@ public class DirectFileTransferUseCase {
         }
     }
 
-    private static void validateFile(String fileName, long fileSize) {
+    private void validateFile(String fileName, long fileSize) {
         if (fileName == null || fileName.isBlank() || fileSize <= 0) {
             throw new ImException(ImErrorCode.BAD_REQUEST, "fileName and fileSize are required");
+        }
+        if (fileSize > maxProxyUploadBytes) {
+            throw new ImException(ImErrorCode.BAD_REQUEST,
+                    "file too large: " + fileSize + " (max " + maxProxyUploadBytes + ")");
         }
     }
 

@@ -1,7 +1,6 @@
 package com.im.bootstrap;
 
 import com.im.api.IAuthenticator;
-import com.im.api.IFileStorageService;
 import com.im.api.IChatSendPolicy;
 import com.im.api.Operation;
 import com.im.config.Config;
@@ -34,8 +33,6 @@ import com.im.core.usecase.RevokeUseCase;
 import com.im.core.usecase.SendMessageUseCase;
 import com.im.core.system.SystemMessagePublishUseCase;
 import com.im.core.webhook.LocalWebhookManager;
-import com.im.infrastructure.storage.usecase.FileUploadUseCase;
-import com.im.infrastructure.storage.usecase.MultipartUploadUseCase;
 
 /**
  * Builds the protocol dispatcher and its handler graph.
@@ -87,7 +84,7 @@ final class DispatcherFactory {
         registerBusinessHandlers(dispatcher, dependencies, loginUseCase, registerUseCase,
                 conversationAccessChecker, sendMessageUseCase, systemMessagePublishUseCase);
         registerMessagingHandlers(dispatcher, dependencies, sendMessageUseCase, revokeUseCase, conversationAccessChecker, chatSendPolicy);
-        registerFileHandlers(dispatcher, config, dependencies);
+        registerFileHandlers(dispatcher, dependencies);
         return dispatcher;
     }
 
@@ -174,12 +171,10 @@ final class DispatcherFactory {
                 new RevokeHandler(revokeUseCase, dependencies.runtime().sessionManager()));
     }
 
-    private static void registerFileHandlers(ApiDispatcher dispatcher, Config config,
+    private static void registerFileHandlers(ApiDispatcher dispatcher,
                                              DispatcherDependencies dependencies) {
-        IFileStorageService fileStorage = dependencies.storage().fileStorage();
         dispatcher.registerHandler(Operation.FILE_UPLOAD,
-                new FileUploadHandler(new FileUploadUseCase(
-                        fileStorage, config.getLong("im.minio.max-file-size", 100L * 1024 * 1024))));
+                new FileUploadHandler(dependencies.storage().directFileTransferUseCase()));
         FileDirectTransferHandler directHandler = new FileDirectTransferHandler(
                 dependencies.storage().directFileTransferUseCase());
         dispatcher.registerHandlers(directHandler,
@@ -187,6 +182,6 @@ final class DispatcherFactory {
                 Operation.FILE_MULTIPART_INIT, Operation.FILE_MULTIPART_PART_SIGN,
                 Operation.FILE_MULTIPART_COMPLETE, Operation.FILE_MULTIPART_ABORT);
         dispatcher.registerHandler(Operation.FILE_MULTIPART_UPLOAD,
-                new FileMultipartHandler(new MultipartUploadUseCase(fileStorage)));
+                new FileMultipartHandler(dependencies.storage().directFileTransferUseCase()));
     }
 }

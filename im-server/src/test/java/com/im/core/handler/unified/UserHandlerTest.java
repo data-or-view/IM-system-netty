@@ -56,9 +56,12 @@ class UserHandlerTest {
         ApiRequest request = new ApiRequest(Operation.USER_ME, Map.of(), Map.of(), null, null);
         request.setAttribute(ApiRequest.ATTR_USER_ID, "u1");
 
-        Object response = handler.handle(request);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> response = (Map<String, Object>) handler.handle(request);
 
-        assertEquals(alice, response);
+        assertEquals("u1", response.get("userId"));
+        assertEquals("Alice", response.get("nickname"));
+        assertEquals(alice.getGlobalRecvMsgOpt(), response.get("globalRecvMsgOpt"));
         assertEquals("u1", userManager.lookupUserId);
     }
 
