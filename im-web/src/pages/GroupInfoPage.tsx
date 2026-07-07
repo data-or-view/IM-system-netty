@@ -23,6 +23,7 @@ import { AppPage, Surface } from "@/components/AppPage";
 import { LoadingState, StateBadge } from "@/components/design-system";
 import { shortId } from "@/lib/display-formatters";
 import { ConfirmDialog, emptyConfirmDialog, type ConfirmDialogState } from "@/components/ConfirmDialog";
+import { APP_ROUTES } from "@/config/routes";
 
 function roleLabel(role: GroupMemberRoleValue): { text: string; className: string } | null {
   if (role === GroupMemberRole.OWNER) return { text: "群主", className: "text-red-500 bg-red-50 border-red-200" };
@@ -226,7 +227,7 @@ export default function GroupInfoPage() {
       await refreshAfterMembershipChanged();
       toast("群已解散");
       setConfirm(emptyConfirmDialog);
-      navigate("/chat");
+      navigate(APP_ROUTES.chat);
     } catch (err) {
       toast(`解散失败：${getErrorText(err)}`);
       setConfirm((prev) => ({ ...prev, loading: false }));
@@ -240,7 +241,7 @@ export default function GroupInfoPage() {
       await quitGroup(groupId);
       toast("已退出群");
       setConfirm(emptyConfirmDialog);
-      navigate("/chat");
+      navigate(APP_ROUTES.chat);
     } catch (err) {
       toast(`退出失败：${getErrorText(err)}`);
       setConfirm((prev) => ({ ...prev, loading: false }));
@@ -309,7 +310,7 @@ export default function GroupInfoPage() {
       <div className="flex flex-1 items-center justify-center">
         <div className="text-center">
           <p className="text-sm text-slate-600">加载群信息失败：{loadError}</p>
-          <Button variant="outline" className="mt-3" onClick={() => navigate("/chat")}>返回聊天</Button>
+          <Button variant="outline" className="mt-3" onClick={() => navigate(APP_ROUTES.chat)}>返回聊天</Button>
         </div>
       </div>
     );
@@ -324,7 +325,7 @@ export default function GroupInfoPage() {
   }
 
   return (
-    <AppPage title="群信息" description={groupInfo.groupName} onBack={() => navigate("/chat")}>
+    <AppPage title="群信息" description={groupInfo.groupName} onBack={() => navigate(APP_ROUTES.chat)}>
       <ScrollArea className="h-full">
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-5 py-5">
           <Surface className="overflow-hidden">
@@ -409,11 +410,11 @@ export default function GroupInfoPage() {
                   role="button"
                   tabIndex={0}
                   className="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-slate-50"
-                  onClick={() => navigate(`/chat/user/${member.userId}`)}
+                  onClick={() => navigate(APP_ROUTES.user(member.userId))}
                   onKeyDown={(event) => {
                     if (event.key === "Enter" || event.key === " ") {
                       event.preventDefault();
-                      navigate(`/chat/user/${member.userId}`);
+                      navigate(APP_ROUTES.user(member.userId));
                     }
                   }}
                 >

@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 
 interface Props {
   children: ReactNode;
+  onNavigateHome: () => void;
 }
 
 interface State {
@@ -37,8 +38,7 @@ export default class RouteErrorBoundary extends Component<Props, State> {
               variant="outline"
               onClick={() => {
                 this.setState({ error: null });
-                window.history.pushState(null, "", "/chat");
-                window.dispatchEvent(new PopStateEvent("popstate"));
+                this.props.onNavigateHome();
               }}
             >
               返回聊天页

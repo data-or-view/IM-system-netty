@@ -56,6 +56,7 @@
 | 双节点本地集群 | `bin/start-cluster.sh` |
 | 停止本地集群 | `bin/stop-cluster.sh` |
 | 前端开发 | `pnpm --dir im-web dev` |
+| 前端工程化测试 | `pnpm --dir im-web test:engineering` |
 | 场景冒烟 | `pnpm --dir im-scenario-tests scenario:smoke` |
 | 跨节点场景 | `pnpm --dir im-scenario-tests scenario:cluster-ha` |
 
@@ -75,6 +76,14 @@
 - 当前代码优先级是 `IM_*` 环境变量 > `-Dim.*` 系统属性 > env YAML > default YAML > properties。
 - 本地常用环境是 `macbook-dev`，由 `-Dim.env=macbook-dev` 或 `IM_ENV=macbook-dev` 激活。
 - 多机 LiveKit 部署时，`im.call.sfu-endpoint` 不能是 localhost。
+
+## 前端工程约束
+
+- `im-web` 页面路径和跳转目标必须通过 `src/config/routes.ts`，不要在组件里散落 `/chat`、`/login` 字符串。
+- 缓存 TTL、刷新 debounce、搜索/分页数量等非视觉行为常量放在 `src/config/app-behavior.ts`。
+- 登录态校验只有明确 token 失效才 `logout()`；连接失败、超时、5xx 等临时错误必须保留登录状态。
+- 全局错误入口是 `src/components/GlobalErrorHandler.tsx` 和 `src/lib/app-errors.ts`。业务 catch 后如果不本地展示，使用 `notifyAppError()`。
+- 改前端路由、守卫、错误处理或行为常量后，运行 `pnpm --dir im-web test:engineering`。
 
 ## 新增 API 的固定路径
 

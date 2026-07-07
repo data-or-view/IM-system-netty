@@ -30,19 +30,39 @@ pnpm --dir im-web dev
 pnpm --dir im-web build
 ```
 
+## 工程化测试
+
+```bash
+pnpm --dir im-web test:engineering
+```
+
+这组轻量测试用于守住前端工程约束：路由集中配置、鉴权错误分类、错误边界导航、行为常量收敛、旧示例入口清理。
+
 ## 关键文件
 
 | 文件 | 说明 |
 |------|------|
 | `src/sdk/im-sdk.ts` | 创建 SDK 单例，配置 WS/HTTP、token、重连同步。 |
 | `src/config/runtime.ts` | 本地开发默认端口和请求超时。 |
+| `src/config/routes.ts` | 前端路由和 redirect 目标集中配置。 |
+| `src/config/app-behavior.ts` | 缓存 TTL、刷新 debounce、分页数量等非视觉行为常量。 |
+| `src/lib/app-errors.ts` | 鉴权错误分类和全局错误事件。 |
 | `src/App.tsx` | 登录态校验、路由、通话 Provider。 |
+| `src/components/GlobalErrorHandler.tsx` | 监听 SDK error、运行时异常和未处理 Promise，并做 toast 去重。 |
 | `src/pages/ChatLayout.tsx` | 聊天工作台布局。 |
-| `src/components/ChatArea.tsx` | 消息区。 |
+| `src/components/ChatArea.tsx` | 消息区编排层，具体展示和副作用拆到 `src/components/chat/*`。 |
+| `src/components/chat/*` | 消息头部、消息列表、输入区、历史加载和群通话状态。 |
 | `src/components/Sidebar.tsx` | 会话、好友、群组入口。 |
 | `src/store/store.tsx` | 全局状态容器。 |
 | `src/store/domain.ts` | 会话、消息、推送事件的领域合并逻辑。 |
 | `src/components/call/*` | LiveKit 通话 UI 和状态。 |
+
+## 前端约束
+
+- 新增页面或跳转时优先改 `src/config/routes.ts`，业务组件不要散落 `/chat`、`/login` 字符串。
+- 非视觉行为数值优先放进 `src/config/app-behavior.ts`，例如缓存 TTL、请求数量、debounce。
+- 登录态校验只有明确 token 失效才 logout；连接失败、超时、服务端 5xx 要保留当前登录态。
+- 业务主动 catch 的错误要么本地明确展示，要么通过 `notifyAppError()` 交给全局错误处理。
 
 ## 与后端的关系
 

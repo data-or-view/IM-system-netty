@@ -20,6 +20,7 @@ import { AppPage, Surface } from "@/components/AppPage";
 import { LoadingState, StateBadge, StatusDot } from "@/components/design-system";
 import { shortId } from "@/lib/display-formatters";
 import { ConfirmDialog, emptyConfirmDialog, type ConfirmDialogState } from "@/components/ConfirmDialog";
+import { APP_ROUTES } from "@/config/routes";
 
 export default function UserProfilePage() {
   const { userId } = useParams<{ userId: string }>();
@@ -108,7 +109,7 @@ export default function UserProfilePage() {
       nickname: profile.nickname || userId,
       faceUrl: profile.faceUrl,
     });
-    navigate("/chat");
+    navigate(APP_ROUTES.chat);
   };
 
   const handleRemoveFriend = async () => {
@@ -117,7 +118,7 @@ export default function UserProfilePage() {
       await removeFriend(userId);
       toast("已删除好友");
       setConfirm(emptyConfirmDialog);
-      navigate("/chat");
+      navigate(APP_ROUTES.chat);
     } catch (err) {
       toast(`删除失败：${getErrorText(err)}`);
       setConfirm((prev) => ({ ...prev, loading: false }));
@@ -130,7 +131,7 @@ export default function UserProfilePage() {
       await im.friend.black(userId);
       toast("已拉黑");
       setConfirm(emptyConfirmDialog);
-      navigate("/chat");
+      navigate(APP_ROUTES.chat);
     } catch (err) {
       toast(`拉黑失败：${getErrorText(err)}`);
       setConfirm((prev) => ({ ...prev, loading: false }));

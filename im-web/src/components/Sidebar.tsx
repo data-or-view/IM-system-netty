@@ -47,6 +47,7 @@ import GroupRequestDialog from "./sidebar/GroupRequestDialog";
 import { toast } from "sonner";
 import { displayText, formatMessagePreview, shortId } from "@/lib/display-formatters";
 import { ConfirmDialog, emptyConfirmDialog, type ConfirmDialogState } from "@/components/ConfirmDialog";
+import { APP_ROUTES } from "@/config/routes";
 
 type Tab = "chats" | "friends" | "groups";
 
@@ -85,7 +86,7 @@ export default function Sidebar() {
           <Tooltip>
             <TooltipTrigger asChild>
               <button
-                onClick={() => state.userId && navigate(`/chat/user/${state.userId}`)}
+                onClick={() => state.userId && navigate(APP_ROUTES.user(state.userId))}
                 className="relative mb-7 flex-none rounded-full transition-opacity hover:opacity-90"
               >
                 <Avatar className="h-10 w-10 ring-2 ring-white/[0.09] ring-offset-2 ring-offset-[#1a1c2a]">
@@ -144,7 +145,7 @@ export default function Sidebar() {
             <RailAction
               icon={<Plus className="h-[18px] w-[18px]" />}
               label="创建群组"
-              onClick={() => navigate("/chat/create-group")}
+              onClick={() => navigate(APP_ROUTES.createGroup)}
             />
             <RailAction
               icon={<LogOut className="h-[18px] w-[18px]" />}
@@ -160,7 +161,7 @@ export default function Sidebar() {
         <div className="flex items-center justify-between border-b border-slate-200 bg-white px-3 py-2.5 md:hidden">
           <button
             className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
-            onClick={() => state.userId && navigate(`/chat/user/${state.userId}`)}
+            onClick={() => state.userId && navigate(APP_ROUTES.user(state.userId))}
           >
             <Avatar className="h-8 w-8 shrink-0">
               <AvatarImage src={currentUser?.faceUrl} />
@@ -225,7 +226,7 @@ export default function Sidebar() {
           {tab === "groups" && (
             <GroupList
               onSearchGroup={() => setSearchGroupOpen(true)}
-              onCreateGroup={() => navigate("/chat/create-group")}
+              onCreateGroup={() => navigate(APP_ROUTES.createGroup)}
               onGroupRequests={() => setGroupRequestOpen(true)}
             />
           )}
@@ -487,7 +488,7 @@ function SystemConversationItem() {
     <button
       onClick={() => {
         dispatch({ type: "SET_ACTIVE_CONVERSATION", conversationId: SYSTEM_CONVERSATION_ID });
-        navigate("/chat");
+        navigate(APP_ROUTES.chat);
       }}
       className={cn(
         "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors",
@@ -535,7 +536,7 @@ function ConversationItem({ conv }: { conv: Conversation }) {
     <button
       onClick={() => {
         dispatch({ type: "SET_ACTIVE_CONVERSATION", conversationId: conv.conversationId });
-        navigate("/chat");
+        navigate(APP_ROUTES.chat);
       }}
       className={cn(
         "relative flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors",
@@ -578,7 +579,7 @@ function FriendItem({ friend }: { friend: FriendInfo }) {
       nickname: displayName,
       faceUrl: friend.faceUrl,
     });
-    navigate("/chat");
+    navigate(APP_ROUTES.chat);
   };
 
   const handleRemoveFriend = async () => {
@@ -661,7 +662,7 @@ function GroupItem({ group }: { group: GroupInfo }) {
       groupName: conversation?.showName || groupTitle(group),
       faceUrl: conversation?.faceUrl || group.faceUrl,
     });
-    navigate("/chat");
+    navigate(APP_ROUTES.chat);
   };
 
   return (

@@ -1,12 +1,13 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { DEV_HTTP_URL, DEV_WEB_PORT, DEV_WS_URL } from "./src/config/runtime";
 
-declare const process: { cwd: () => string };
+declare const process: { cwd: () => string; env: Record<string, string | undefined> };
 
 const root = process.cwd();
-const DEV_WEB_PORT = 39073;
-const DEV_WS_TARGET = "ws://127.0.0.1:8083";
-const DEV_HTTP_TARGET = "http://127.0.0.1:8084";
+const devWebPort = numberEnv("VITE_DEV_WEB_PORT", DEV_WEB_PORT);
+const devWsTarget = process.env.VITE_WS_PROXY_TARGET ?? originOf(DEV_WS_URL);
+const devHttpTarget = process.env.VITE_HTTP_PROXY_TARGET ?? DEV_HTTP_URL;
 
 export default defineConfig({
   plugins: [react()],
@@ -43,18 +44,37 @@ export default defineConfig({
     },
   },
   server: {
-    port: DEV_WEB_PORT,
+    port: devWebPort,
     strictPort: true,
     host: "0.0.0.0",
     proxy: {
       "/ws": {
-        target: DEV_WS_TARGET,
+        target: devWsTarget,
         ws: true,
       },
       "/api": {
-        target: DEV_HTTP_TARGET,
+        target: devHttpTarget,
         changeOrigin: true,
       },
     },
   },
+  preview: {
+    port: devWebPort,
+    strictPort: true,
+    host: "0.0.0.0",
+  },
 });
+
+function numberEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function originOf(value: string): string {
+  const schemeEnd = value.indexOf("://");
+  if (schemeEnd < 0) return value;
+  const pathStart = value.indexOf("/", schemeEnd + 3);
+  return pathStart < 0 ? value : value.slice(0, pathStart);
+}

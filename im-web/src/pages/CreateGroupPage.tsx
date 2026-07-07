@@ -12,6 +12,7 @@ import { im } from "@/sdk/im-sdk";
 import { GroupJoinVerification, GroupType, getErrorText } from "im-sdk";
 import { AppPage, Surface } from "@/components/AppPage";
 import { StateBadge } from "@/components/design-system";
+import { APP_ROUTES } from "@/config/routes";
 
 export default function CreateGroupPage() {
   const navigate = useNavigate();
@@ -36,7 +37,7 @@ export default function CreateGroupPage() {
       await Promise.all([fetchMyGroups(), fetchConversations()]);
       openGroupChat({ groupId: group.groupId, groupName: group.groupName, faceUrl: group.faceUrl });
       toast("群创建成功");
-      navigate("/chat");
+      navigate(APP_ROUTES.chat);
     } catch (err) {
       toast(`创建群失败：${getErrorText(err)}`);
     } finally {
@@ -48,7 +49,7 @@ export default function CreateGroupPage() {
     <AppPage
       title="创建群"
       description="设置群资料并选择初始成员"
-      onBack={() => navigate("/chat")}
+      onBack={() => navigate(APP_ROUTES.chat)}
       footer={(
         <Button
           className="w-full"

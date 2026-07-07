@@ -301,14 +301,27 @@ im_system_channels, im_system_messages, im_system_message_inbox
 关键文件：
 
 ```text
+src/config/routes.ts
+src/config/app-behavior.ts
+src/lib/app-errors.ts
 src/sdk/im-sdk.ts
 src/store/store.tsx
 src/store/domain.ts
+src/components/GlobalErrorHandler.tsx
 src/pages/ChatLayout.tsx
 src/components/ChatArea.tsx
+src/components/chat/*
 src/components/Sidebar.tsx
 src/components/call/*
 ```
+
+前端工程约束：
+
+- 页面路径、redirect 目标和用户/群资料跳转必须通过 `src/config/routes.ts`，不要在组件里散落 `/chat`、`/login` 字符串。
+- 缓存 TTL、刷新 debounce、搜索/分页数量等非视觉行为数值放在 `src/config/app-behavior.ts`。
+- 登录态校验只在明确 token 失效时 `logout()`；连接失败、超时、5xx 等临时错误要保留登录状态。
+- 全局错误入口是 `src/components/GlobalErrorHandler.tsx` 和 `src/lib/app-errors.ts`，会监听 SDK `error`、`window.error`、`unhandledrejection` 和 `im:app-error`。
+- 改前端工程约束后运行 `pnpm --dir im-web test:engineering`；交付前至少运行 `pnpm --dir im-web build`。
 
 ## 场景测试
 

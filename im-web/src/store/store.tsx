@@ -25,6 +25,7 @@ import {
   getStoredAuthUserId,
   syncCursorsKey,
 } from "@/config/storage-keys";
+import { APP_BEHAVIOR } from "@/config/app-behavior";
 import { toOptimisticMessage, toViewMessage, type ViewMessage } from "@/lib/messages";
 import {
   applyDomainEvent,
@@ -81,10 +82,6 @@ interface State {
   groupInfoCachedAt: Record<string, number>;
   userProfileCachedAt: Record<string, number>;
 }
-
-const USER_PROFILE_TTL_MS = 5 * 60 * 1000;
-const GROUP_INFO_TTL_MS = 5 * 60 * 1000;
-const GROUP_MEMBERS_TTL_MS = 60 * 1000;
 
 const initialState: State = {
   token: localStorage.getItem(AUTH_TOKEN_KEY),
@@ -688,7 +685,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const refreshSystemMessages = useCallback(async () => {
     try {
       const [messages, unread] = await Promise.all([
-        im.system.messages({ limit: 30 }),
+        im.system.messages({ limit: APP_BEHAVIOR.systemMessages.listLimit }),
         im.system.unreadCount(),
       ]);
       dispatch({ type: "SET_SYSTEM_MESSAGES", messages, unreadCount: unread.count ?? 0 });
@@ -721,7 +718,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       refreshQueueRef.current.add(task);
     }
     if (refreshTimerRef.current !== null) return;
-    refreshTimerRef.current = window.setTimeout(flushRefreshTasks, 80);
+    refreshTimerRef.current = window.setTimeout(flushRefreshTasks, APP_BEHAVIOR.refresh.debounceMs);
   }, [flushRefreshTasks]);
 
   const fetchUserProfile = useCallback(async (userId: string, options?: { force?: boolean }) => {
@@ -730,7 +727,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (
         !options?.force &&
         currentState.userProfileCache[userId] &&
-        cacheFresh(currentState.userProfileCachedAt[userId], USER_PROFILE_TTL_MS)
+        cacheFresh(currentState.userProfileCachedAt[userId], APP_BEHAVIOR.cache.userProfileTtlMs)
       ) {
         return;
       }
@@ -909,12 +906,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return msg;
   }, [fetchConversations, state.userId]);
 
-  const searchUser = useCallback(async (keyword: string, limit = 20) => {
+  const searchUser = useCallback(async (keyword: string, limit: number = APP_BEHAVIOR.search.defaultLimit) => {
     const list = await im.friend.search(keyword, limit);
     dispatch({ type: "SET_SEARCH_USERS", list: list as unknown as UserInfo[] });
   }, []);
 
-  const searchGroup = useCallback(async (keyword: string, limit = 20) => {
+  const searchGroup = useCallback(async (keyword: string, limit: number = APP_BEHAVIOR.search.defaultLimit) => {
     const list = await im.group.search(keyword, limit);
     dispatch({ type: "SET_SEARCH_GROUPS", list: list as unknown as GroupInfo[] });
   }, []);
@@ -951,6 +948,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       await Promise.all([fetchFriends(), fetchUnhandledApplyCount()]);
     } catch (err) {
       console.error("approveFriend failed:", err);
+      throw err;
     }
   }, [fetchFriends, fetchUnhandledApplyCount]);
 
@@ -970,7 +968,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (
         !options?.force &&
         currentState.groupMembers[groupId] &&
-        cacheFresh(currentState.groupMembersCachedAt[groupId], GROUP_MEMBERS_TTL_MS)
+        cacheFresh(currentState.groupMembersCachedAt[groupId], APP_BEHAVIOR.cache.groupMembersTtlMs)
       ) {
         return;
       }
@@ -987,7 +985,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (
         !options?.force &&
         currentState.groupInfoCache[groupId] &&
-        cacheFresh(currentState.groupInfoCachedAt[groupId], GROUP_INFO_TTL_MS)
+        cacheFresh(currentState.groupInfoCachedAt[groupId], APP_BEHAVIOR.cache.groupInfoTtlMs)
       ) {
         return;
       }

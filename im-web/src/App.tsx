@@ -6,7 +6,10 @@ import { im } from "@/sdk/im-sdk";
 import LoginPage from "@/pages/LoginPage";
 import { CallProvider } from "@/components/call/CallProvider";
 import RouteErrorBoundary from "@/components/RouteErrorBoundary";
+import GlobalErrorHandler from "@/components/GlobalErrorHandler";
 import { LoadingState } from "@/components/design-system";
+import { APP_ROUTES, getRedirectTarget } from "@/config/routes";
+import { authCheckFailureMessage, isAuthExpiredError, notifyAppError } from "@/lib/app-errors";
 
 const ChatLayout = lazy(() => import("@/pages/ChatLayout"));
 const ChatArea = lazy(() => import("@/components/ChatArea"));
@@ -56,10 +59,15 @@ function AuthGate() {
           setCheckingAuth(false);
         }
       })
-      .catch(() => {
+      .catch((err) => {
         if (!cancelled) {
-          checkedAuthKeyRef.current = null;
-          logout();
+          if (isAuthExpiredError(err)) {
+            checkedAuthKeyRef.current = null;
+            logout();
+          } else {
+            checkedAuthKeyRef.current = authKey;
+            notifyAppError(err, authCheckFailureMessage(err), "auth-check");
+          }
           setCheckingAuth(false);
         }
       });
@@ -71,7 +79,7 @@ function AuthGate() {
 
   const redirectTarget = getRedirectTarget(location.search);
   const currentPath = `${location.pathname}${location.search}${location.hash}`;
-  const isLoginRoute = location.pathname === "/login";
+  const isLoginRoute = location.pathname === APP_ROUTES.login;
 
   const handleLogin = useCallback(
     async (userId: string, password?: string) => {
@@ -85,8 +93,10 @@ function AuthGate() {
         await storeLogin(userId, password);
         setStatusMsg("");
         navigate(redirectTarget, { replace: true });
-      } catch {
-        setStatusMsg("登录失败");
+      } catch (err) {
+        const message = "登录失败";
+        setStatusMsg(message);
+        notifyAppError(err, message, "login");
       } finally {
         setConnecting(false);
         connectingRef.current = false;
@@ -107,8 +117,10 @@ function AuthGate() {
         const generatedUserId = await storeRegister(params);
         setStatusMsg(`注册成功，你的用户 ID：${generatedUserId}`);
         navigate(redirectTarget, { replace: true });
-      } catch {
-        setStatusMsg("注册失败");
+      } catch (err) {
+        const message = "注册失败";
+        setStatusMsg(message);
+        notifyAppError(err, message, "register");
       } finally {
         setConnecting(false);
         connectingRef.current = false;
@@ -122,7 +134,7 @@ function AuthGate() {
       <div className="flex min-h-screen items-center justify-center bg-[var(--app-bg)] px-4">
         <div className="rounded-md border border-slate-200 bg-white px-6 py-5 text-center shadow-sm">
           <div className="text-sm font-medium">正在校验登录状态...</div>
-          <div className="mt-1 text-xs text-muted-foreground">如果后端数据已重置，会自动回到登录页</div>
+          <div className="mt-1 text-xs text-muted-foreground">网络异常时会保留当前登录状态</div>
         </div>
       </div>
     );
@@ -130,7 +142,7 @@ function AuthGate() {
 
   if (!state.token || !state.userId) {
     if (!isLoginRoute) {
-      return <Navigate to={`/login?redirect=${encodeURIComponent(currentPath)}`} replace />;
+      return <Navigate to={APP_ROUTES.loginWithRedirect(currentPath)} replace />;
     }
     return (
       <LoginPage
@@ -148,16 +160,16 @@ function AuthGate() {
 
   return (
     <CallProvider>
-      <RouteErrorBoundary>
+      <RouteErrorBoundary onNavigateHome={() => navigate(APP_ROUTES.chat, { replace: true })}>
         <Suspense fallback={<PageFallback />}>
           <Routes>
-            <Route path="/chat" element={<ChatLayout />}>
+            <Route path={APP_ROUTES.chat} element={<ChatLayout />}>
               <Route index element={<ChatArea />} />
               <Route path="create-group" element={<CreateGroupPage />} />
               <Route path="group/:groupId" element={<GroupInfoPage />} />
               <Route path="user/:userId" element={<UserProfilePage />} />
             </Route>
-            <Route path="*" element={<Navigate to="/chat" replace />} />
+            <Route path="*" element={<Navigate to={APP_ROUTES.chat} replace />} />
           </Routes>
           <CallDialog />
         </Suspense>
@@ -166,17 +178,10 @@ function AuthGate() {
   );
 }
 
-function getRedirectTarget(search: string): string {
-  const redirect = new URLSearchParams(search).get("redirect");
-  if (!redirect || !redirect.startsWith("/") || redirect.startsWith("//")) {
-    return "/chat";
-  }
-  return redirect;
-}
-
 export default function App() {
   return (
     <StoreProvider>
+      <GlobalErrorHandler />
       <Routes>
         <Route path="*" element={<AuthGate />} />
       </Routes>
