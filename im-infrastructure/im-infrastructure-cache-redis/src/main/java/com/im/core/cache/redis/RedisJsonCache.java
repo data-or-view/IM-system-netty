@@ -1,25 +1,30 @@
-package com.im.core.cache;
+package com.im.core.cache.redis;
 
-import com.im.core.redis.RedisConfiguration;
+import com.im.core.cache.Cache;
+import com.im.core.cache.CacheStats;
 import com.im.core.serialization.Serializer;
 import io.lettuce.core.KeyValue;
+import io.lettuce.core.SetArgs;
 import io.lettuce.core.cluster.api.async.RedisClusterAsyncCommands;
 
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 
 /**
- * Redis JSON cache backed by the shared cluster Redis connection.
+ * Redis JSON cache backed by a shared standalone or cluster Lettuce command interface.
  *
- * <p>Used by production bootstrap for cross-node caches. Local in-memory caches remain
- * useful in unit tests, but production-visible data should use Redis so invalidation is
- * seen by every node.</p>
+ * <p>This implementation is cluster-safe because callers pass the same
+ * {@link RedisClusterAsyncCommands} abstraction used by the rest of the server Redis runtime.
+ * It does not maintain local key state, so {@link #clear()} is intentionally unsupported for
+ * production prefixed caches.</p>
  */
 public class RedisJsonCache<K, V> implements Cache<K, V> {
 
@@ -36,18 +41,18 @@ public class RedisJsonCache<K, V> implements Cache<K, V> {
     private final AtomicLong missCount = new AtomicLong();
     private final AtomicLong evictionCount = new AtomicLong();
 
-    public RedisJsonCache(RedisConfiguration redisConfig,
+    public RedisJsonCache(RedisClusterAsyncCommands<String, String> async,
                           Function<K, String> keyMapper,
                           Serializer<V, String> serializer,
                           Class<V> valueType,
                           String keyPrefix,
                           Duration ttl) {
-        this.async = redisConfig.async();
-        this.keyMapper = keyMapper;
-        this.serializer = serializer;
-        this.valueType = valueType;
-        this.keyPrefix = keyPrefix;
-        this.ttlSeconds = Math.max(1, ttl.toSeconds());
+        this.async = Objects.requireNonNull(async, "async");
+        this.keyMapper = Objects.requireNonNull(keyMapper, "keyMapper");
+        this.serializer = Objects.requireNonNull(serializer, "serializer");
+        this.valueType = Objects.requireNonNull(valueType, "valueType");
+        this.keyPrefix = Objects.requireNonNull(keyPrefix, "keyPrefix");
+        this.ttlSeconds = Math.max(1, Objects.requireNonNull(ttl, "ttl").toSeconds());
     }
 
     @Override
@@ -94,12 +99,11 @@ public class RedisJsonCache<K, V> implements Cache<K, V> {
 
     @Override
     public boolean putIfAbsent(K key, V value) {
-        Boolean success = await(async.setnx(redisKey(key), serializer.serialize(value)));
-        if (Boolean.TRUE.equals(success)) {
-            await(async.expire(redisKey(key), ttlSeconds));
-            return true;
-        }
-        return false;
+        String result = await(async.set(
+                redisKey(key),
+                serializer.serialize(value),
+                SetArgs.Builder.nx().ex(ttlSeconds)));
+        return "OK".equals(result);
     }
 
     @Override
@@ -151,7 +155,7 @@ public class RedisJsonCache<K, V> implements Cache<K, V> {
         return redisKey(typedKey);
     }
 
-    private static <T> T await(java.util.concurrent.CompletionStage<T> stage) {
+    private static <T> T await(CompletionStage<T> stage) {
         try {
             return stage.toCompletableFuture().get(COMMAND_TIMEOUT_MS, TimeUnit.MILLISECONDS);
         } catch (Exception e) {

@@ -10,13 +10,14 @@ import com.im.common.exception.DatabasePersistenceException;
 import com.im.core.db.MyBatisPlusFactory;
 import com.im.core.db.entity.MessageSendFailureEntity;
 import com.im.core.db.mapper.MessageSendFailureMapper;
+import com.im.core.serialization.jackson.ObjectMapperProvider;
 import org.apache.ibatis.session.SqlSession;
 
 import java.util.List;
 
 public final class DbBusinessMessageDlqStore implements BusinessMessageDlqStore {
 
-    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    private static final ObjectMapper OBJECT_MAPPER = ObjectMapperProvider.get();
     private static final int MAX_ERROR_LENGTH = 2000;
     static final String STATUS_PENDING = "PENDING";
     static final String STATUS_RETRYING = "RETRYING";

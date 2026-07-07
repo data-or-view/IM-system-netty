@@ -9,17 +9,9 @@ import java.util.Optional;
 import java.util.Set;
 
 /**
- * 安全缓存装饰器 —— 保证缓存异常绝不传播到业务层。
+ * 安全缓存装饰器，保证缓存异常不传播到业务层。
  *
- * <p>装饰模式包装任意 {@link Cache} 实现，每个方法都包裹 try-catch，
- * 任何异常都降级为「缓存未命中」行为，业务层完全无感知。
- *
- * <p>适用场景：
- * <ul>
- *   <li>Redis 缓存不可用时，自动降级到数据源</li>
- *   <li>缓存实现出现罕见 OOM/并发异常时静默忽略</li>
- *   <li>缓存重构/迁移期，即使缓存出错也不影响主流程</li>
- * </ul>
+ * <p>适合包装 Redis 等外部缓存：缓存不可用时降级为未命中，主业务继续读取权威数据源。</p>
  *
  * @param <K> 键类型
  * @param <V> 值类型
@@ -29,7 +21,6 @@ public class SafeCache<K, V> implements Cache<K, V> {
     private static final Logger log = LoggerFactory.getLogger(SafeCache.class);
 
     private final Cache<K, V> delegate;
-    
     private final String name;
 
     public SafeCache(Cache<K, V> delegate) {

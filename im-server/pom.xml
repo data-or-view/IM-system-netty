@@ -28,6 +28,10 @@
         </dependency>
         <dependency>
             <groupId>com.im</groupId>
+            <artifactId>im-infrastructure-cache-redis</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.im</groupId>
             <artifactId>im-infrastructure-serialization-jackson</artifactId>
         </dependency>
         <dependency>

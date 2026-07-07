@@ -29,8 +29,9 @@ import com.im.core.call.GroupCallManager;
 import com.im.core.call.LiveKitCallManager;
 import com.im.core.call.RedisGroupCallStateStore;
 import com.im.core.call.RedisSingleCallStateStore;
-import com.im.core.cache.RedisJsonCache;
+import com.im.core.cache.Cache;
 import com.im.core.cache.SafeCache;
+import com.im.core.cache.redis.RedisJsonCache;
 import com.im.core.conversation.CachedConversationManager;
 import com.im.core.conversation.DbConversationManager;
 import com.im.core.conversation.ConversationListSnapshot;
@@ -46,6 +47,7 @@ import com.im.core.handler.ConnectionEventHandler;
 import com.im.core.ratelimit.RedisRateLimiter;
 import com.im.core.redis.RedisConfiguration;
 import com.im.core.retry.FailsafeRetryExecutor;
+import com.im.core.serialization.Serializer;
 import com.im.core.serialization.jackson.JacksonSerializer;
 import com.im.core.session.RedisSessionManager;
 import com.im.core.session.SessionManager;
@@ -53,6 +55,9 @@ import com.im.core.user.CachedUserManager;
 import com.im.core.user.DbUserManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.time.Duration;
+import java.util.function.Function;
 
 /**
  * Production composition root.
@@ -145,64 +150,46 @@ final class ServerComponentsFactory {
                 new DbRefreshTokenStore(retryExecutor));
         IGroupManager groupManager = new CachedGroupManager(
                 new DbGroupManager(retryExecutor),
-                new SafeCache<>(new RedisJsonCache<>(
-                        redisConfig,
-                        key -> key,
-                        new JacksonSerializer<>(),
-                        com.im.api.GroupInformation.class,
-                        "cache:group:info:",
-                        java.time.Duration.ofSeconds(config.getLong("im.cache.group-info-ttl-seconds", 120))),
-                        "group-info"),
-                new SafeCache<>(new RedisJsonCache<>(
-                        redisConfig,
-                        key -> key,
-                        new JacksonSerializer<>(),
-                        GroupMemberListSnapshot.class,
-                        "cache:group:members:",
-                        java.time.Duration.ofSeconds(config.getLong("im.cache.group-member-list-ttl-seconds", 30))),
-                        "group-member-list"),
-                new SafeCache<>(new RedisJsonCache<>(
-                        redisConfig,
-                        key -> key,
-                        new JacksonSerializer<>(),
-                        GroupMemberIdsSnapshot.class,
-                        "cache:group:member-ids:",
-                        java.time.Duration.ofSeconds(config.getLong("im.cache.group-member-ids-ttl-seconds", 30))),
-                        "group-member-ids"));
+                safeRedisCache(redisConfig, config, "im.cache.group-info-ttl-seconds", 120,
+                        com.im.api.GroupInformation.class, "cache:group:info:", "group-info"),
+                safeRedisCache(redisConfig, config, "im.cache.group-member-list-ttl-seconds", 30,
+                        GroupMemberListSnapshot.class, "cache:group:members:", "group-member-list"),
+                safeRedisCache(redisConfig, config, "im.cache.group-member-ids-ttl-seconds", 30,
+                        GroupMemberIdsSnapshot.class, "cache:group:member-ids:", "group-member-ids"));
         IConversationManager conversationManager = new CachedConversationManager(
                 new DbConversationManager(retryExecutor),
-                new SafeCache<>(new RedisJsonCache<>(
-                        redisConfig,
-                        key -> key,
-                        new JacksonSerializer<>(),
-                        ConversationListSnapshot.class,
-                        "cache:conversation:list:",
-                        java.time.Duration.ofSeconds(config.getLong("im.cache.conversation-list-ttl-seconds", 30))),
-                        "conversation-list"),
-                new SafeCache<>(new RedisJsonCache<>(
-                        redisConfig,
-                        key -> key,
-                        new JacksonSerializer<>(),
-                        com.im.api.Conversation.class,
-                        "cache:conversation:item:",
-                        java.time.Duration.ofSeconds(config.getLong("im.cache.conversation-item-ttl-seconds", 30))),
-                        "conversation-item"));
+                safeRedisCache(redisConfig, config, "im.cache.conversation-list-ttl-seconds", 30,
+                        ConversationListSnapshot.class, "cache:conversation:list:", "conversation-list"),
+                safeRedisCache(redisConfig, config, "im.cache.conversation-item-ttl-seconds", 30,
+                        com.im.api.Conversation.class, "cache:conversation:item:", "conversation-item"));
         IFriendManager friendManager = new DbFriendManager(retryExecutor);
         DbUserManager dbUserManager = new DbUserManager(retryExecutor, routeTable);
         IUserManager userManager = new CachedUserManager(
                 dbUserManager,
-                new SafeCache<>(new RedisJsonCache<>(
-                        redisConfig,
-                        key -> key,
-                        new JacksonSerializer<>(),
-                        com.im.api.UserInformation.class,
-                        "cache:user:profile:",
-                        java.time.Duration.ofSeconds(config.getLong("im.cache.user-profile-ttl-seconds", 120))),
-                        "user-profile"));
+                safeRedisCache(redisConfig, config, "im.cache.user-profile-ttl-seconds", 120,
+                        com.im.api.UserInformation.class, "cache:user:profile:", "user-profile"));
         IPasswordHasher passwordHasher = new Pbkdf2PasswordHasher();
         return new BusinessDependencies(
                 authenticator, retryExecutor, groupManager, conversationManager, friendManager,
                 userManager, dbUserManager, passwordHasher);
+    }
+
+    private static <V> Cache<String, V> safeRedisCache(RedisConfiguration redisConfig,
+                                                       Config config,
+                                                       String ttlConfigKey,
+                                                       long defaultTtlSeconds,
+                                                       Class<V> valueType,
+                                                       String keyPrefix,
+                                                       String name) {
+        Serializer<V, String> serializer = new JacksonSerializer<>();
+        return new SafeCache<>(new RedisJsonCache<>(
+                redisConfig.async(),
+                Function.identity(),
+                serializer,
+                valueType,
+                keyPrefix,
+                Duration.ofSeconds(config.getLong(ttlConfigKey, defaultTtlSeconds))),
+                name);
     }
 
     private static CallDependencies createCall(Config config, IMessageQueue messageQueue,

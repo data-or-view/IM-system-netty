@@ -1,6 +1,7 @@
 package com.wzg.idempotency.persistence;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.wzg.idempotency.core.JsonConfig;
 import com.wzg.idempotency.exception.IdempotencyItemAlreadyExistsException;
 import com.wzg.idempotency.exception.IdempotencyItemNotFoundException;
 import org.redisson.api.RBucket;
@@ -39,7 +40,7 @@ public class RedissonPersistenceStore extends BasePersistenceStore {
         this.keyPrefix = keyPrefix;
         this.lockWaitTime = lockWaitTime;
         this.lockLeaseTime = lockLeaseTime;
-        this.objectMapper = new ObjectMapper();
+        this.objectMapper = JsonConfig.get().getObjectMapper();
     }
 
     @Override

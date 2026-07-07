@@ -6,6 +6,7 @@ import com.im.api.IMessageQueue;
 import com.im.api.Message;
 import com.im.api.QueueMessageHandler;
 import com.im.config.Config;
+import com.im.core.serialization.jackson.ObjectMapperProvider;
 import com.im.infrastructure.message.MessageBusException;
 import org.apache.rocketmq.client.consumer.DefaultMQPushConsumer;
 import org.apache.rocketmq.client.consumer.listener.ConsumeConcurrentlyContext;
@@ -45,7 +46,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class RocketMqMessageQueue implements IMessageQueue {
 
     private static final Logger log = LoggerFactory.getLogger(RocketMqMessageQueue.class);
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final ObjectMapper MAPPER = ObjectMapperProvider.get();
 
     private final RocketMqMessageQueueProperties properties;
     private final String nodeId;
