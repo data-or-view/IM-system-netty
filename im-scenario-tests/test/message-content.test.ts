@@ -26,6 +26,16 @@ test("message content helpers match text and signaling payloads structurally", (
   assert.equal(hasTextContent({ text: "hello from scenario" }, "hello from scenario"), true);
   assert.equal(hasTextContent("{\"text\":\"hello from scenario\"}", "hello from scenario"), true);
   assert.equal(isSignalingContent({ roomId: "room-1", action: "INVITE" }, "room-1"), true);
+  assert.equal(isSignalingContent({ roomId: "room-1", action: "CALLING", callType: "video" }, {
+    roomId: "room-1",
+    action: "CALLING",
+    callType: "video",
+  }), true);
+  assert.equal(isSignalingContent({ roomId: "room-1", action: "CALLING", callType: "voice" }, {
+    roomId: "room-1",
+    action: "CALLING",
+    callType: "video",
+  }), false);
   assert.equal(isSignalingContent({ _room: "room-1", _act: 1 }, "room-1"), true);
   assert.equal(isSignalingContent({ _room: "room-2", _act: 1 }, "room-1"), false);
 });

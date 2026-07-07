@@ -3,9 +3,10 @@ import { assertOk } from "../src/assertions.js";
 import { nextClientMsgId } from "../src/client-msg-id.js";
 import { readNumberArg, readStringArg } from "../src/cli.js";
 import { loadScenarioConfig } from "../src/config.js";
+import { hasTextContent } from "../src/message-content.js";
 import { ScenarioReporter } from "../src/reporter.js";
 import { ScenarioUser } from "../src/scenario-user.js";
-import type { GroupInfo, SendMessageAck } from "../src/types.js";
+import type { GroupInfo, MessagePush, SendMessageAck } from "../src/types.js";
 
 const config = loadScenarioConfig();
 const reporter = new ScenarioReporter();
@@ -45,6 +46,12 @@ try {
   assertOk(group.groupId, "group.create did not return groupId");
   reporter.metric("groupId", group.groupId);
 
+  const receivers = users.slice(1);
+  const receiverCursors = receivers.map((user) => ({
+    user,
+    cursor: user.ws.markPushCursor(),
+  }));
+  const finalMessageText = `perf message ${messageCount}/${messageCount}`;
   reporter.step(`sending ${messageCount} group messages with concurrency=${concurrency}`);
   const started = performance.now();
   let nextMessage = 0;
@@ -67,6 +74,16 @@ try {
   reporter.metric("sentMessages", messageCount);
   reporter.metric("durationMs", durationMs);
   reporter.metric("throughputMsgPerSec", throughput);
+
+  reporter.step("checking every online member receives the final perf message");
+  await Promise.all(receiverCursors.map(({ user, cursor }) => user.ws.waitForPushAfter(cursor, (push) => {
+    const data = push.data as MessagePush | undefined;
+    return push.op === "message" &&
+      data?.groupId === group.groupId &&
+      data.fromUserId === owner.userId &&
+      hasTextContent(data.content, finalMessageText);
+  }, `final perf group message push for ${user.userId}`)));
+  reporter.metric("verifiedReceivers", receivers.length);
   reporter.finish();
 } finally {
   for (const user of users) user.close();

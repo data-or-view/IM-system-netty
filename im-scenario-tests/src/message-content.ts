@@ -19,11 +19,23 @@ export function isSystemContent(content: unknown, systemType: string): boolean {
   return isRecord(parsed) && parsed.systemType === systemType;
 }
 
-export function isSignalingContent(content: unknown, roomId?: string): boolean {
+export function isSignalingContent(
+  content: unknown,
+  expected?: string | { roomId?: string; action?: string | number; callType?: string },
+): boolean {
   const parsed = parseMessageContent(content);
   if (!isRecord(parsed)) return false;
   const actualRoomId = stringValue(parsed.roomId) ?? stringValue(parsed._room);
-  if (roomId && actualRoomId !== roomId) return false;
+  const options = typeof expected === "string" ? { roomId: expected } : expected ?? {};
+  if (options.roomId && actualRoomId !== options.roomId) return false;
+  if (options.callType && parsed.callType !== options.callType) return false;
+  if (options.action !== undefined) {
+    const actualAction = parsed.action ?? parsed._act;
+    if (typeof options.action === "string") {
+      return typeof actualAction === "string" && actualAction.toUpperCase() === options.action.toUpperCase();
+    }
+    return actualAction === options.action;
+  }
   return parsed.action !== undefined || parsed._act !== undefined;
 }
 

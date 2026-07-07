@@ -2,6 +2,7 @@ import { assertOk } from "../src/assertions.js";
 import { nextClientMsgId } from "../src/client-msg-id.js";
 import { readNumberArg, readStringArg } from "../src/cli.js";
 import { loadScenarioConfig } from "../src/config.js";
+import { hasTextContent } from "../src/message-content.js";
 import { ScenarioReporter } from "../src/reporter.js";
 import { ScenarioUser } from "../src/scenario-user.js";
 import type { GroupInfo, MessagePush, SendMessageAck } from "../src/types.js";
@@ -44,25 +45,37 @@ try {
   assertOk(group.groupId, "group.create did not return groupId");
   reporter.metric("groupId", group.groupId);
 
+  const receivers = users.slice(1);
+  const receiverCursors = receivers.map((user) => ({
+    user,
+    cursor: user.ws.markPushCursor(),
+  }));
+  const sentTexts: string[] = [];
   reporter.step(`sending ${messageCount} group messages from owner`);
   for (let i = 0; i < messageCount; i++) {
+    const text = `scenario message ${i + 1}/${messageCount}`;
+    sentTexts.push(text);
     const ack = await owner.ws.request<SendMessageAck>("chat.send.group", {
       groupId: group.groupId,
       clientMsgId: nextClientMsgId("scenario-group"),
       _ct: "text",
-      content: { text: `scenario message ${i + 1}/${messageCount}` },
+      content: { text },
     });
     assertOk(ack.data?.seq !== undefined, `message ${i + 1} did not return seq`);
   }
   reporter.metric("sentMessages", messageCount);
 
-  reporter.step("checking every online member receives at least one group message push");
-  const receivers = users.slice(1);
-  await Promise.all(receivers.map((user) => user.ws.waitForPush((push) => {
-    const data = push.data as MessagePush | undefined;
-    return push.op === "message" && data?.groupId === group.groupId;
-  }, `group message push for ${user.userId}`)));
-  reporter.metric("receiverPushes", receivers.length);
+  reporter.step("checking every online member receives every group message push");
+  await Promise.all(receiverCursors.flatMap(({ user, cursor }) =>
+    sentTexts.map((text) => user.ws.waitForPushAfter(cursor, (push) => {
+      const data = push.data as MessagePush | undefined;
+      return push.op === "message" &&
+        data?.groupId === group.groupId &&
+        data.fromUserId === owner.userId &&
+        hasTextContent(data.content, text);
+    }, `group message push "${text}" for ${user.userId}`))
+  ));
+  reporter.metric("receiverPushes", receivers.length * sentTexts.length);
   reporter.finish();
 } finally {
   for (const user of users) user.close();

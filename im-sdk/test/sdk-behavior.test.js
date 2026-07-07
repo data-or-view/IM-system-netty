@@ -50,6 +50,15 @@ function createCapturingTransport(responseData) {
   return { transport, sentFrames };
 }
 
+async function waitForCondition(condition, description, timeoutMs = 1000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() <= deadline) {
+    if (condition()) return;
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+  assert.fail(`Timed out waiting for ${description}`);
+}
+
 test("message.pull unwraps backend message envelope", async () => {
   const message = { messageId: "m1", conversationId: "c1", sequenceId: 1 };
   const { transport } = createCapturingTransport({
@@ -321,6 +330,7 @@ test("HttpTransport attaches generated X-Request-Id to every request", async () 
 test("WsTransport attaches generated _requestId to request frames", async () => {
   const ws = new WsTransport({
     requestIdFactory: () => "req_ws_1",
+    requestTimeout: 100,
   });
   const sentFrames = [];
   ws.send = (frame) => {
@@ -329,9 +339,15 @@ test("WsTransport attaches generated _requestId to request frames", async () => 
   };
 
   const pending = ws.request("chat.send", { toUserId: "u2" });
-  pending.catch(() => {});
 
   assert.equal(sentFrames[0]._requestId, "req_ws_1");
+  ws.requestManager.resolveResponse({
+    op: "chat.send_ack",
+    seq: sentFrames[0].seq,
+    code: 0,
+    data: {},
+  });
+  await pending;
 });
 
 test("HttpTransport rejects non-envelope HTTP responses at the protocol boundary", async () => {
@@ -700,7 +716,7 @@ test("sdk syncs missed messages after reconnect using host cursors", async () =>
   im.transport.bus.emit("stateChanged", "connected");
   im.transport.bus.emit("stateChanged", "disconnected");
   im.transport.bus.emit("stateChanged", "connected");
-  await new Promise((resolve) => setTimeout(resolve, 25));
+  await waitForCondition(() => synced.length === 1 && batches.length === 1, "reconnect sync batch");
 
   assert.equal(synced.length, 1);
   assert.equal(synced[0].conversationId, "c1");
@@ -903,7 +919,7 @@ test("sdk batches websocket message pushes before emitting messageBatch", async 
   }));
 
   assert.equal(batches.length, 0);
-  await new Promise((resolve) => setTimeout(resolve, 25));
+  await waitForCondition(() => batches.length === 1, "message batch flush");
 
   assert.equal(batches.length, 1);
   assert.deepEqual(batches[0].map((m) => m.messageId), ["m1", "m2"]);
@@ -924,7 +940,7 @@ test("sdk does not emit duplicate message pushes with the same message id", asyn
   im.transport.handleMessage(JSON.stringify(payload));
   im.transport.handleMessage(JSON.stringify(payload));
 
-  await new Promise((resolve) => setTimeout(resolve, 25));
+  await waitForCondition(() => batches.length === 1, "deduplicated message batch");
 
   assert.deepEqual(singles.map((m) => m.messageId), ["m-dup"]);
   assert.deepEqual(batches.map((batch) => batch.map((m) => m.messageId)), [["m-dup"]]);

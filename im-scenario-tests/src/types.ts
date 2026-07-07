@@ -41,6 +41,7 @@ export interface MessagePush {
   conversationId?: string;
   fromUserId?: string;
   groupId?: string;
+  contentType?: number;
   content?: unknown;
   messageSeq?: number;
   seq?: number;

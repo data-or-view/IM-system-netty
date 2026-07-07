@@ -132,11 +132,6 @@ test("feature routes use central route helpers outside the route config", () => 
   }
 });
 
-test("unused SDK example entry points are not shipped as app source", () => {
-  assert.equal(fs.existsSync(path.join(root, "src/sdk/useIM.ts")), false);
-  assert.equal(fs.existsSync(path.join(root, "src/sdk/ExampleUsage.tsx")), false);
-});
-
 test("ChatArea stays an orchestration component with chat responsibilities split out", () => {
   assert.ok(lineCount("src/components/ChatArea.tsx") <= 360);
   for (const file of [

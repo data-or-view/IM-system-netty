@@ -41,12 +41,6 @@ RocketMQ infrastructure broker tests:
 mvn -pl im-infrastructure/im-infrastructure-message-rocketmq -am -Procketmq-it -Dtest=RocketMqMessageQueueIT -Dsurefire.failIfNoSpecifiedTests=false test
 ```
 
-Business DLQ compensation through a real RocketMQ broker:
-
-```bash
-mvn -pl im-server -am -Procketmq-it -Dtest=BusinessMessageDlqCompensatorIT -Dsurefire.failIfNoSpecifiedTests=false test
-```
-
 Business DLQ compensation through real MySQL and RocketMQ:
 
 ```bash

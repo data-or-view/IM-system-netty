@@ -51,13 +51,13 @@ pnpm --dir im-scenario-tests scenario:smoke
 pnpm --dir im-scenario-tests scenario:group-chat -- --users=3 --messages=1
 ```
 
-注册多个用户，全部 WebSocket 登录，创建群，发送群消息，并检查其它在线成员收到推送。
+注册多个用户，全部 WebSocket 登录，创建群，发送群消息，并检查其它在线成员收到每条群消息推送。
 
 ```bash
 pnpm --dir im-scenario-tests scenario:group-chat-perf -- --users=3 --messages=10 --concurrency=2
 ```
 
-小规模群聊压测，用于检查并发发送、推送数量和基础耗时指标。
+小规模群聊压测，用于检查并发发送、最终推送可达和基础耗时指标。
 
 ```bash
 pnpm --dir im-scenario-tests scenario:group-call -- --users=3 --type=video

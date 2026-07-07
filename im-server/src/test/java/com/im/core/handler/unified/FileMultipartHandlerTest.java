@@ -19,7 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 class FileMultipartHandlerTest {
 
     @Test
-    void uploadUsesClusterVisibleUploadSession() {
+    void uploadUsesStoredMultipartSession() {
         FakeStorage storage = new FakeStorage();
         DirectFileTransferUseCase useCase = new DirectFileTransferUseCase(
                 storage,

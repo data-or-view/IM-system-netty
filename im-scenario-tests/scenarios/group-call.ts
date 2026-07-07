@@ -2,6 +2,7 @@ import { assertOk } from "../src/assertions.js";
 import { nextClientMsgId } from "../src/client-msg-id.js";
 import { readNumberArg, readStringArg } from "../src/cli.js";
 import { loadScenarioConfig } from "../src/config.js";
+import { isSignalingContent } from "../src/message-content.js";
 import { ScenarioReporter } from "../src/reporter.js";
 import { ScenarioUser } from "../src/scenario-user.js";
 import type { GroupCallJoinResult, GroupCallSession, GroupInfo, MessagePush } from "../src/types.js";
@@ -57,7 +58,15 @@ try {
   reporter.step("checking online members receive group call signal push");
   await Promise.all(users.slice(1).map((user) => user.ws.waitForPush((push) => {
     const data = push.data as MessagePush | undefined;
-    return push.op === "message" && data?.groupId === group.groupId;
+    return push.op === "message" &&
+      data?.groupId === group.groupId &&
+      data.fromUserId === owner.userId &&
+      data.contentType === 5 &&
+      isSignalingContent(data.content, {
+        roomId: started.roomId,
+        action: "CALLING",
+        callType,
+      });
   }, `group call signal for ${user.userId}`)));
   reporter.metric("signalReceivers", users.length - 1);
 
