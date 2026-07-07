@@ -10,7 +10,7 @@ import com.im.api.ProtocolFields;
 import com.im.api.RouteBinding;
 import com.im.api.SystemMessageNotifier;
 import com.im.api.SystemMessageSummary;
-import com.im.bootstrap.ws.WsPushEvent;
+import com.im.api.PushEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -41,7 +41,7 @@ public class ClusterAwareSystemMessageNotifier implements SystemMessageNotifier 
 
     @Override
     public void notify(List<String> userIds, SystemMessageSummary summary) {
-        WsPushEvent event = new WsPushEvent(OP_SYSTEM_MESSAGE, toData(summary));
+        PushEvent event = new PushEvent(OP_SYSTEM_MESSAGE, toData(summary));
         for (String userId : userIds != null ? userIds : List.<String>of()) {
             push(userId, event);
         }
@@ -55,11 +55,11 @@ public class ClusterAwareSystemMessageNotifier implements SystemMessageNotifier 
         Object op = command.payload().get(ProtocolFields.OP);
         Object data = command.payload().get(ProtocolFields.DATA);
         if (OP_SYSTEM_MESSAGE.equals(op)) {
-            pushLocal(command.userId(), new WsPushEvent(OP_SYSTEM_MESSAGE, data));
+            pushLocal(command.userId(), new PushEvent(OP_SYSTEM_MESSAGE, data));
         }
     }
 
-    private void push(String userId, WsPushEvent event) {
+    private void push(String userId, PushEvent event) {
         List<RouteBinding> bindings = routeTable != null ? routeTable.lookupAllBindings(userId) : List.of();
         for (RouteBinding binding : bindings) {
             if (binding.isExpired(System.currentTimeMillis())) {
@@ -73,7 +73,7 @@ public class ClusterAwareSystemMessageNotifier implements SystemMessageNotifier 
         }
     }
 
-    private void pushLocal(String userId, WsPushEvent event) {
+    private void pushLocal(String userId, PushEvent event) {
         for (IConnectionSession session : sessionManager.getSessionsByUserId(userId)) {
             if (session.getConnection().isActive()) {
                 session.getConnection().write(event);
@@ -81,7 +81,7 @@ public class ClusterAwareSystemMessageNotifier implements SystemMessageNotifier 
         }
     }
 
-    private void forward(String userId, WsPushEvent event, String targetNodeId) {
+    private void forward(String userId, PushEvent event, String targetNodeId) {
         if (clusterMessageBus == null) {
             log.warn("Remote system message push dropped: userId={}, targetNode={}", userId, targetNodeId);
             return;

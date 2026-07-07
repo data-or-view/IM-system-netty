@@ -20,7 +20,7 @@
         </dependency>
         <dependency>
             <groupId>com.im</groupId>
-            <artifactId>im-infrastructure-common</artifactId>
+            <artifactId>im-common</artifactId>
         </dependency>
 
         <!-- MinIO -->

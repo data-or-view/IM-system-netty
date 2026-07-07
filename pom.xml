@@ -12,6 +12,7 @@
     <description>Distributed IM System - Multi-Module</description>
 
     <modules>
+        <module>im-common</module>
         <module>im-api</module>
         <module>im-server</module>
         <module>im-infrastructure</module>
@@ -80,7 +81,7 @@
             </dependency>
             <dependency>
                 <groupId>com.im</groupId>
-                <artifactId>im-infrastructure-common</artifactId>
+                <artifactId>im-common</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

@@ -8,9 +8,10 @@
 
 | 路径 | 说明 |
 |------|------|
+| `im-common/` | 跨模块公共异常、重试、生命周期、ID 和工具类，不依赖具体基础设施。 |
 | `im-api/` | Java 接口、DTO、Operation 枚举和协议契约。 |
 | `im-server/` | 服务端实现，包含启动、Netty 传输、Dispatcher、handler、use case、Redis/MySQL/RocketMQ/MinIO 装配。 |
-| `im-infrastructure/` | 基础设施子模块，包括配置、缓存、序列化、对象存储、幂等、Kafka/RocketMQ 抽象与实现。 |
+| `im-infrastructure/` | 基础设施适配器子模块，包括配置、缓存、序列化、对象存储、幂等、Kafka/RocketMQ 抽象与实现。 |
 | `im-sdk/` | TypeScript SDK，封装 WS、HTTP、token、重连同步、消息批处理和业务 API。 |
 | `im-web/` | React + Vite 前端，默认连接本地开发后端 `8083/8084`。 |
 | `im-scenario-tests/` | 多用户真实 HTTP/WS 场景脚本，覆盖冒烟、群聊、跨节点投递、通话等流程。 |

@@ -10,7 +10,7 @@ import com.im.api.IRouteTable;
 import com.im.api.ISessionManager;
 import com.im.api.ProtocolFields;
 import com.im.api.RouteBinding;
-import com.im.bootstrap.ws.WsPushEvent;
+import com.im.api.PushEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -59,12 +59,12 @@ public class ClusterAwareGroupApplyNotifier implements GroupApplyNotifier {
         Object op = command.payload().get(ProtocolFields.OP);
         Object data = command.payload().get(ProtocolFields.DATA);
         if (OP_GROUP_APPLY.equals(op)) {
-            pushLocal(command.userId(), new WsPushEvent(OP_GROUP_APPLY, data));
+            pushLocal(command.userId(), new PushEvent(OP_GROUP_APPLY, data));
         }
     }
 
     private void push(String userId, GroupApply apply) {
-        WsPushEvent event = new WsPushEvent(OP_GROUP_APPLY, toData(apply));
+        PushEvent event = new PushEvent(OP_GROUP_APPLY, toData(apply));
         List<RouteBinding> bindings = routeTable != null ? routeTable.lookupAllBindings(userId) : List.of();
         for (RouteBinding binding : bindings) {
             if (binding.isExpired(System.currentTimeMillis())) {
@@ -78,7 +78,7 @@ public class ClusterAwareGroupApplyNotifier implements GroupApplyNotifier {
         }
     }
 
-    private void pushLocal(String userId, WsPushEvent event) {
+    private void pushLocal(String userId, PushEvent event) {
         for (IConnectionSession session : sessionManager.getSessionsByUserId(userId)) {
             if (session.getConnection().isActive()) {
                 session.getConnection().write(event);
@@ -86,7 +86,7 @@ public class ClusterAwareGroupApplyNotifier implements GroupApplyNotifier {
         }
     }
 
-    private void forward(String userId, WsPushEvent event, String targetNodeId) {
+    private void forward(String userId, PushEvent event, String targetNodeId) {
         if (clusterMessageBus == null) {
             log.warn("Remote group apply push dropped: userId={}, targetNode={}", userId, targetNodeId);
             return;

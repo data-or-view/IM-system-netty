@@ -19,9 +19,10 @@
 
 | 模块 | 用途 | 常看文件 |
 |------|------|----------|
+| `im-common` | 跨模块公共异常、重试、生命周期、ID 和工具类；不依赖具体基础设施 | `ImException.java`, `RetryExecutor.java`, `IdGenerator.java` |
 | `im-api` | Java 接口、DTO、协议枚举、错误码 | `Operation.java`, `Message.java`, `ConversationIds.java` |
 | `im-server` | 服务端启动、Netty、handler、use case、Redis/MySQL/RocketMQ/MinIO/LiveKit 实现 | `Main.java`, `ServerRuntime.java`, `DispatcherFactory.java`, `ServerComponentsFactory.java` |
-| `im-infrastructure` | 配置、缓存、序列化、存储、幂等、消息中间件 | `im-infrastructure-config`, `im-infrastructure-idempotency`, `im-infrastructure-message-rocketmq` |
+| `im-infrastructure` | 基础设施适配器：配置、缓存、序列化、存储、幂等、消息中间件 | `im-infrastructure-config`, `im-infrastructure-idempotency`, `im-infrastructure-message-rocketmq` |
 | `im-sdk` | 浏览器/Node 可用的 TS SDK | `src/index.ts`, `src/transport/ws.ts`, `src/transport/http.ts`, `src/api/*` |
 | `im-web` | React 聊天工作台 | `src/App.tsx`, `src/pages/ChatLayout.tsx`, `src/store/*`, `src/sdk/im-sdk.ts` |
 | `im-scenario-tests` | 多用户真实协议测试 | `scenarios/cluster-ha.ts`, `src/scenario-user.ts` |
@@ -170,7 +171,8 @@ IM_* 环境变量
 |----|------|
 | `Main` | 加载配置并启动 `IMServer`。 |
 | `IMServer` | 生命周期外壳。 |
-| `ServerComponentsFactory` | 生产组合根，决定 Redis/MySQL/MQ/MinIO/LiveKit 实现。 |
+| `ServerComponentsFactory` | 生产组合根，串起 Redis/MySQL/MQ/MinIO/LiveKit 等装配切片。 |
+| `RedisComponentsFactory` / `DatabaseComponentsFactory` / `StorageComponentsFactory` / `ConsumerComponentsFactory` | 按 Redis、DB、存储和消费者职责拆开的 package-private 装配切片。 |
 | `ServerRuntime` | 控制启动和停止顺序。 |
 | `TransportServer` | 管理 Netty EventLoop、WS/HTTP Channel、空闲连接扫描。 |
 | `DispatcherFactory` | 注册拦截器和所有 handler。 |
@@ -180,8 +182,8 @@ IM_* 环境变量
 | `RedisNodeDiscovery` | Redis 节点注册和心跳。 |
 | `RedisSequenceManager` | Redis INCR 消息序号。 |
 | `SendMessageUseCase` | 消息发送主流程。 |
-| `PersistenceConsumer` | 消费 `persist`，写消息和会话。 |
-| `DeliveryConsumer` | 消费 `deliver`，本地推送或跨节点转发。 |
+| `PersistenceConsumer` | 消费 `persist`，把可靠消费外壳交给 `MessagePersistenceWorkflow`。 |
+| `DeliveryConsumer` | 消费 `deliver`，把投递 workflow 交给 `MessageDeliveryWorkflow`。 |
 | `BusinessMessageDlqCompensator` | 补偿失败的 MQ 业务消息。 |
 
 ## WebSocket 与 HTTP 边界

@@ -17,7 +17,7 @@ class MessageQueueSelectionTest {
 
     @Test
     void defaultsToRedisMessageQueue() {
-        IMessageQueue queue = ServerComponentsFactory.createMessageQueue(
+        IMessageQueue queue = StorageComponentsFactory.createMessageQueue(
                 new TestConfig(Map.of()), null, "node-a");
 
         assertInstanceOf(RedisMessageQueue.class, queue);
@@ -25,7 +25,7 @@ class MessageQueueSelectionTest {
 
     @Test
     void createsRocketMqMessageQueueWhenConfigured() {
-        IMessageQueue queue = ServerComponentsFactory.createMessageQueue(
+        IMessageQueue queue = StorageComponentsFactory.createMessageQueue(
                 new TestConfig(Map.of(
                         "im.mq.type", "rocketmq",
                         "im.rocketmq.name-server", "127.0.0.1:9876"
@@ -36,7 +36,7 @@ class MessageQueueSelectionTest {
 
     @Test
     void rejectsUnknownMessageQueueType() {
-        assertThrows(IllegalArgumentException.class, () -> ServerComponentsFactory.createMessageQueue(
+        assertThrows(IllegalArgumentException.class, () -> StorageComponentsFactory.createMessageQueue(
                 new TestConfig(Map.of("im.mq.type", "kafka")), null, "node-a"));
     }
 

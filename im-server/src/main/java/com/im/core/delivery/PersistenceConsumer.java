@@ -9,8 +9,6 @@ import com.im.api.SendMessageIdempotency;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Set;
-
 /**
  * 消息持久化消费者。
  *
@@ -27,10 +25,7 @@ public class PersistenceConsumer implements Lifecycle {
     private static final Logger log = LoggerFactory.getLogger(PersistenceConsumer.class);
 
     private final IMessageQueue messageQueue;
-    private final ISingleMessageStore singleMessageStore;
-    private final IGroupMessageStore groupMessageStore;
-    private final IConversationManager conversationManager;
-    private final IGroupManager groupManager;
+    private final MessagePersistenceWorkflow workflow;
     private final RetryExecutor retryExecutor;
     private final SendMessageIdempotency idempotency;
     private final BusinessMessageDlqStore failureStore;
@@ -56,10 +51,8 @@ public class PersistenceConsumer implements Lifecycle {
                                IConversationManager conversationManager,
                                IGroupManager groupManager) {
         this.messageQueue = messageQueue;
-        this.singleMessageStore = singleMessageStore;
-        this.groupMessageStore = groupMessageStore;
-        this.conversationManager = conversationManager;
-        this.groupManager = groupManager;
+        this.workflow = new MessagePersistenceWorkflow(
+                singleMessageStore, groupMessageStore, conversationManager, groupManager);
         this.retryExecutor = null;
         this.idempotency = null;
         this.failureStore = null;
@@ -74,10 +67,8 @@ public class PersistenceConsumer implements Lifecycle {
                                SendMessageIdempotency idempotency,
                                BusinessMessageDlqStore failureStore) {
         this.messageQueue = messageQueue;
-        this.singleMessageStore = singleMessageStore;
-        this.groupMessageStore = groupMessageStore;
-        this.conversationManager = conversationManager;
-        this.groupManager = groupManager;
+        this.workflow = new MessagePersistenceWorkflow(
+                singleMessageStore, groupMessageStore, conversationManager, groupManager);
         this.retryExecutor = retryExecutor;
         this.idempotency = idempotency;
         this.failureStore = failureStore;
@@ -85,54 +76,7 @@ public class PersistenceConsumer implements Lifecycle {
 
     @Override
     public void start() {
-        IMessageQueue.MessageHandler delegate = msg -> {
-            String messageId = msg.getMessageId();
-            String fromUserId = msg.getFromUserId();
-
-            // ① 持久化消息：业务链路面向单聊/群聊端口，物理存储仍可由统一表承接。
-            tryPersist(msg, messageId);
-
-            // ② 更新会话
-            if (conversationManager != null) {
-                String groupId = msg.getGroupId();
-                String toUserId = msg.getToUserId();
-
-                if (groupId != null) {
-                    // 群聊：更新每个成员的会话
-                    String conversationId = ConversationIds.group(groupId);
-
-                    // 发送者：不加未读数
-                    if (fromUserId != null) {
-                        conversationManager.updateOnMessage(fromUserId, conversationId, msg, true);
-                    }
-
-                    // 其他成员：遍历群成员，更新会话 + 未读数
-                    Set<String> memberIds = groupManager != null
-                            ? groupManager.getMemberIds(groupId)
-                            : Set.of();
-                    for (String memberId : memberIds) {
-                        if (!memberId.equals(fromUserId)) {
-                            conversationManager.updateOnMessage(memberId, conversationId, msg, false);
-                        }
-                    }
-
-                    log.debug("Group conv updated for {} members: groupId={}", memberIds.size(), groupId);
-
-                } else if (toUserId != null) {
-                    // 单聊：两方的会话都要更新
-                    String conversationId = ConversationIds.single(fromUserId, toUserId);
-
-                    // 发送方：不加未读数
-                    if (fromUserId != null) {
-                        conversationManager.updateOnMessage(fromUserId, conversationId, msg, true);
-                    }
-                    // 接收方：+1 未读数
-                    conversationManager.updateOnMessage(toUserId, conversationId, msg, false);
-                }
-            }
-
-            log.debug("Persisted msg {} (conv updated)", messageId);
-        };
+        IMessageQueue.MessageHandler delegate = workflow::persist;
 
         this.handler = retryExecutor != null
                 ? new ReliableMessageHandler(MessageQueueTopics.PERSIST, delegate,
@@ -140,36 +84,6 @@ public class PersistenceConsumer implements Lifecycle {
                 : delegate;
         messageQueue.subscribe(MessageQueueTopics.PERSIST, handler);
         log.info("PersistenceConsumer subscribed to topic '{}'", MessageQueueTopics.PERSIST);
-    }
-
-    private void tryPersist(Message msg, String messageId) {
-        try {
-            String groupId = msg.getGroupId();
-            if (groupId != null && !groupId.isBlank()) {
-                if (groupMessageStore != null) {
-                    groupMessageStore.saveGroupMessage(msg);
-                }
-            } else if (singleMessageStore != null) {
-                singleMessageStore.saveSingleMessage(msg);
-            }
-        } catch (Exception e) {
-            if (isDuplicateEntry(e)) {
-                log.debug("Msg already saved (dup), seqId={}, mid={}", msg.getMessageSeq(), messageId);
-            } else {
-                log.warn("Persistence save failed: seqId={}, err={}", msg.getMessageSeq(), e.getMessage());
-                throw e;
-            }
-        }
-    }
-
-    private boolean isDuplicateEntry(Throwable error) {
-        for (Throwable t = error; t != null; t = t.getCause()) {
-            String message = t.getMessage();
-            if (message != null && message.contains("Duplicate entry")) {
-                return true;
-            }
-        }
-        return false;
     }
 
     @Override

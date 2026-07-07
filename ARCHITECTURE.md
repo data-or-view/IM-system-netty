@@ -16,6 +16,9 @@
 im-api
   接口、DTO、Operation、错误码、消息内容类型、集群协议对象
 
+im-common
+  跨模块公共异常、重试、生命周期、ID 和工具类，不承载具体基础设施实现
+
 im-server
   Main / IMServer / ServerRuntime
   TransportServer / WsServerBootstrap / HttpServerBootstrap
@@ -23,7 +26,7 @@ im-server
   usecase、manager、Redis/MySQL/RocketMQ/MinIO/LiveKit 实现
 
 im-infrastructure
-  config、common、cache、serialization、storage、idempotency、message queue
+  config、cache、serialization、storage、idempotency、message queue 等基础设施适配器
 
 im-sdk
   TypeScript 客户端 SDK，封装 WebSocket、HTTP、token、重连同步和业务 API
@@ -67,7 +70,16 @@ Main
 
 ## 运行时组件装配
 
-生产装配集中在 `ServerComponentsFactory`：
+生产装配以 `ServerComponentsFactory` 为组合根，并按职责拆到 package-private factory：
+
+| Factory | 职责 |
+|---------|------|
+| `RedisComponentsFactory` | Redis 配置、路由表、集群总线、节点发现和节点信息。 |
+| `DatabaseComponentsFactory` | 数据库启用检查、MyBatis 初始化和 schema 初始化。 |
+| `StorageComponentsFactory` | 消息存储、消息队列、序号、幂等、文件存储和系统消息存储。 |
+| `ConsumerComponentsFactory` | 持久化/投递消费者、DLQ 补偿器和集群订阅。 |
+
+核心运行组件：
 
 | 能力 | 当前实现 | 说明 |
 |------|----------|------|

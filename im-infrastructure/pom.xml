@@ -19,7 +19,6 @@
         <module>im-infrastructure-cache-redis</module>
         <module>im-infrastructure-serialization</module>
         <module>im-infrastructure-serialization-jackson</module>
-        <module>im-infrastructure-common</module>
         <module>im-infrastructure-config</module>
         <module>im-infrastructure-idempotency</module>
         <module>im-infrastructure-spi</module>

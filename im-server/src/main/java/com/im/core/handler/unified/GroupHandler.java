@@ -1,30 +1,23 @@
 package com.im.core.handler.unified;
 
 import com.im.api.ApiRequest;
-import com.im.api.GroupApplyHandleResult;
 import com.im.api.GroupApply;
-import com.im.api.GroupDisbandResult;
 import com.im.api.GroupInformation;
 import com.im.api.GroupJoinResult;
 import com.im.api.GroupMemberInformation;
 import com.im.api.GroupMemberRole;
-import com.im.api.ConversationIds;
 import com.im.api.IConversationManager;
 import com.im.api.IGroupManager;
 import com.im.api.RequestPreconditions;
 import com.im.api.RequestHandler;
-import com.im.common.exception.ForbiddenException;
 import com.im.common.exception.ValidationException;
 import com.im.common.exception.NotFoundException;
-import com.im.common.id.IdGenerator;
 import com.im.common.validation.Preconditions;
 import com.im.api.GroupApplyNotifier;
 import com.im.api.GroupSystemMessagePublisher;
 import com.im.core.system.SystemMessagePublishUseCase;
-import com.im.api.SystemMessage;
+import com.im.core.group.GroupWorkflow;
 
-import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 
@@ -37,10 +30,7 @@ import java.util.Map;
 public class GroupHandler implements RequestHandler {
 
     private final IGroupManager groupManager;
-    private final GroupApplyNotifier groupApplyNotifier;
-    private final GroupSystemMessagePublisher groupSystemMessagePublisher;
-    private final IConversationManager conversationManager;
-    private final SystemMessagePublishUseCase systemMessagePublishUseCase;
+    private final GroupWorkflow workflow;
 
     public GroupHandler(IGroupManager groupManager) {
         this(groupManager, GroupApplyNotifier.NOOP);
@@ -66,11 +56,12 @@ public class GroupHandler implements RequestHandler {
                         IConversationManager conversationManager,
                         SystemMessagePublishUseCase systemMessagePublishUseCase) {
         this.groupManager = groupManager;
-        this.groupApplyNotifier = groupApplyNotifier != null ? groupApplyNotifier : GroupApplyNotifier.NOOP;
-        this.groupSystemMessagePublisher = groupSystemMessagePublisher != null
-                ? groupSystemMessagePublisher : GroupSystemMessagePublisher.NOOP;
-        this.conversationManager = conversationManager;
-        this.systemMessagePublishUseCase = systemMessagePublishUseCase;
+        this.workflow = new GroupWorkflow(
+                groupManager,
+                groupApplyNotifier,
+                groupSystemMessagePublisher,
+                conversationManager,
+                systemMessagePublishUseCase);
     }
 
     @Override
@@ -98,7 +89,6 @@ public class GroupHandler implements RequestHandler {
     }
 
     private Object handleCreate(ApiRequest req) {
-        String groupId = IdGenerator.groupId();
         String groupName = req.getString("groupName");
         String ownerId = RequestPreconditions.requireUser(req);
         groupName = Preconditions.requireText(groupName, "groupName");
@@ -108,46 +98,10 @@ public class GroupHandler implements RequestHandler {
         List<String> members = (List<String>) req.param("members");
         if (members == null) members = List.of();
 
-        groupManager.createGroup(groupId, ownerId, groupName, faceUrl, members, groupType, needVerification);
-        List<String> allMemberIds = normalizeInitialMemberIds(ownerId, members);
-        if (conversationManager != null) {
-            conversationManager.createGroupConversations(allMemberIds, groupId, ConversationIds.group(groupId));
-        }
-        groupSystemMessagePublisher.groupCreated(groupId, ownerId, allMemberIds);
-        publishGroupCreatedMessage(groupId, groupName, ownerId, allMemberIds);
-        GroupInformation info = groupManager.getGroupInformation(groupId);
-        return info != null ? info : Map.of("groupId", groupId, "status", "OK");
-    }
-
-    private static List<String> normalizeInitialMemberIds(String ownerId, List<String> members) {
-        LinkedHashSet<String> ids = new LinkedHashSet<>();
-        if (ownerId != null && !ownerId.isBlank()) {
-            ids.add(ownerId);
-        }
-        for (String memberId : members != null ? members : List.<String>of()) {
-            if (memberId != null && !memberId.isBlank()) {
-                ids.add(memberId);
-            }
-        }
-        return new ArrayList<>(ids);
-    }
-
-    private void publishGroupCreatedMessage(String groupId, String groupName, String ownerId, List<String> allMemberIds) {
-        if (systemMessagePublishUseCase == null) return;
-        List<String> invitedMemberIds = allMemberIds.stream()
-                .filter(memberId -> !memberId.equals(ownerId))
-                .toList();
-        if (invitedMemberIds.isEmpty()) return;
-
-        SystemMessage message = new SystemMessage();
-        message.setChannelId("group");
-        message.setTitle("你已加入群聊");
-        String displayName = groupName != null && !groupName.isBlank() ? groupName : groupId;
-        message.setSummary(ownerId + " 邀请你加入「" + displayName + "」");
-        message.setContent(ownerId + " 邀请你加入群聊「" + displayName + "」");
-        message.setContentType("group_invited");
-        message.setSenderId(ownerId);
-        systemMessagePublishUseCase.publishToUsers(message, invitedMemberIds);
+        GroupWorkflow.CreateResult result = workflow.createGroup(
+                ownerId, groupName, faceUrl, groupType, needVerification, members);
+        GroupInformation info = result.groupInformation();
+        return info != null ? info : Map.of("groupId", result.groupId(), "status", "OK");
     }
 
     private Object handleJoin(ApiRequest req) {
@@ -155,18 +109,7 @@ public class GroupHandler implements RequestHandler {
         String userId = RequestPreconditions.requireUser(req);
         groupId = Preconditions.requireText(groupId, "groupId");
         String reqMsg = req.getString("reqMsg", "");
-        GroupJoinResult result = groupManager.joinGroup(groupId, userId, reqMsg);
-        if (result == GroupJoinResult.JOINED) {
-            // 直接入群也要写系统消息，离线成员靠普通消息同步感知成员变更。
-            groupSystemMessagePublisher.memberJoined(groupId, userId, userId);
-        }
-        if (result == GroupJoinResult.APPLY_CREATED) {
-            GroupApply apply = findGroupApply(groupId, userId, true);
-            if (apply != null) {
-                // 通知管理员时使用已入库申请，避免多端审批页拿不到同一条申请的持久化状态。
-                groupApplyNotifier.notifyApplyCreated(groupManager.getManagerIds(groupId), apply);
-            }
-        }
+        GroupJoinResult result = workflow.joinGroup(groupId, userId, reqMsg);
         return Map.of("status", result.name(), "result", result.name());
     }
 
@@ -174,14 +117,7 @@ public class GroupHandler implements RequestHandler {
         String groupId = req.getString("groupId");
         String userId = RequestPreconditions.requireUser(req);
         groupId = Preconditions.requireText(groupId, "groupId");
-        boolean removed = groupManager.quitGroup(groupId, userId);
-        if (removed) {
-            // 退群人的会话要立即从自己的列表消失；剩余成员通过群消息流感知成员变更。
-            if (conversationManager != null) {
-                conversationManager.deleteConversation(userId, ConversationIds.group(groupId));
-            }
-            groupSystemMessagePublisher.memberLeft(groupId, userId, userId);
-        }
+        workflow.quitGroup(groupId, userId);
         return Map.of("status", "OK");
     }
 
@@ -192,11 +128,7 @@ public class GroupHandler implements RequestHandler {
         if (groupId == null || targetUserId == null) {
             throw new ValidationException("groupId and targetUserId are required");
         }
-        groupManager.kickMember(groupId, operatorId, targetUserId);
-        if (conversationManager != null) {
-            conversationManager.deleteConversation(targetUserId, ConversationIds.group(groupId));
-        }
-        groupSystemMessagePublisher.memberLeft(groupId, targetUserId, operatorId);
+        workflow.kickMember(groupId, operatorId, targetUserId);
         return Map.of("status", "OK");
     }
 
@@ -204,41 +136,20 @@ public class GroupHandler implements RequestHandler {
         String groupId = req.getString("groupId");
         String operatorId = RequestPreconditions.requireUser(req);
         groupId = Preconditions.requireText(groupId, "groupId");
-        GroupDisbandResult result = groupManager.disbandGroup(groupId, operatorId);
-        for (String memberId : result.getAffectedMemberIds()) {
-            if (conversationManager != null) {
-                conversationManager.deleteConversation(memberId, ConversationIds.group(groupId));
-            }
-        }
-        publishGroupDisbandedMessage(result);
+        workflow.disbandGroup(groupId, operatorId);
         return Map.of("status", "OK");
-    }
-
-    private void publishGroupDisbandedMessage(GroupDisbandResult result) {
-        if (systemMessagePublishUseCase == null || result.getAffectedMemberIds().isEmpty()) return;
-        SystemMessage message = new SystemMessage();
-        message.setChannelId("group");
-        message.setTitle("群聊已解散");
-        String groupName = result.getGroupName() != null && !result.getGroupName().isBlank()
-                ? result.getGroupName() : result.getGroupId();
-        message.setSummary(groupName + "已解散");
-        message.setContent(groupName + "已被群主解散");
-        message.setContentType("group_disbanded");
-        message.setSenderId(result.getOperatorId());
-        systemMessagePublishUseCase.publishToUsers(message, result.getAffectedMemberIds());
     }
 
     private Object handleInfoUpdate(ApiRequest req) {
         String groupId = req.getString("groupId");
         groupId = Preconditions.requireText(groupId, "groupId");
-        groupManager.setGroupInformation(groupId,
+        workflow.updateGroupInfo(groupId,
                 req.getString("groupName"), req.getString("notification"),
                 req.getString("introduction"), req.getString("faceUrl"),
                 req.getInt("needVerification", -1),
                 req.getInt("lookMemberInfo", -1),
                 req.getInt("applyMemberFriend", -1),
                 req.currentUserId());
-        groupSystemMessagePublisher.groupInfoUpdated(groupId, req.currentUserId());
         return Map.of("status", "OK");
     }
 
@@ -246,8 +157,7 @@ public class GroupHandler implements RequestHandler {
         String groupId = Preconditions.requireText(req.getString("groupId"), "groupId");
         String operatorId = RequestPreconditions.requireUser(req);
         String targetUserId = Preconditions.requireText(req.getString("targetUserId"), "targetUserId");
-        groupManager.transferOwner(groupId, operatorId, targetUserId);
-        groupSystemMessagePublisher.ownerTransferred(groupId, operatorId, targetUserId);
+        workflow.transferOwner(groupId, operatorId, targetUserId);
         return Map.of("status", "OK");
     }
 
@@ -256,8 +166,7 @@ public class GroupHandler implements RequestHandler {
         String operatorId = RequestPreconditions.requireUser(req);
         String targetUserId = Preconditions.requireText(req.getString("targetUserId"), "targetUserId");
         GroupMemberRole role = parseMutableRole(req.param("roleLevel"));
-        groupManager.setMemberRole(groupId, operatorId, targetUserId, role.getCode());
-        groupSystemMessagePublisher.roleChanged(groupId, targetUserId, operatorId, role);
+        workflow.setMemberRole(groupId, operatorId, targetUserId, role);
         return Map.of("status", "OK", "roleLevel", role.name());
     }
 
@@ -265,7 +174,7 @@ public class GroupHandler implements RequestHandler {
         String groupId = Preconditions.requireText(req.getString("groupId"), "groupId");
         String userId = RequestPreconditions.requireUser(req);
         String nickname = Preconditions.requireText(req.getString("nickname"), "nickname");
-        groupManager.setMemberInfo(groupId, userId, nickname);
+        workflow.updateMemberInfo(groupId, userId, nickname);
         return Map.of("status", "OK");
     }
 
@@ -303,7 +212,7 @@ public class GroupHandler implements RequestHandler {
         String operatorId = RequestPreconditions.requireUser(req);
         boolean mute = req.getBoolean("mute", true);
         groupId = Preconditions.requireText(groupId, "groupId");
-        groupManager.muteGroupAll(groupId, operatorId, mute);
+        workflow.muteAll(groupId, operatorId, mute);
         return Map.of("status", "OK", "mute", mute);
     }
 
@@ -329,35 +238,8 @@ public class GroupHandler implements RequestHandler {
         if (groupId == null || userId == null) {
             throw new ValidationException("groupId and userId are required");
         }
-        // 审批入口必须在响应前再次校验管理员身份，不能只依赖前端展示的“管理员可见”入口。
-        requireGroupAdmin(groupId, operatorId);
-        GroupApplyHandleResult result = groupManager.respondJoinRequest(groupId, userId, operatorId, handleMsg, agreed);
-        if (result == GroupApplyHandleResult.HANDLED) {
-            GroupApply apply = findGroupApply(groupId, userId, false);
-            if (apply != null) {
-                // 被处理人在线时即时推送；不在线时仍可通过申请列表读取最终状态。
-                groupApplyNotifier.notifyApplyHandled(userId, apply);
-            }
-            if (agreed) {
-                // 同意入群后也走群消息流，保证群成员通过同一条历史链路看到成员变动。
-                groupSystemMessagePublisher.memberJoined(groupId, userId, operatorId);
-            }
-        }
+        workflow.approveApply(groupId, userId, operatorId, handleMsg, agreed);
         return Map.of("status", "OK");
-    }
-
-    private GroupApply findGroupApply(String groupId, String userId, boolean onlyPending) {
-        return groupManager.getJoinRequests(groupId, onlyPending).stream()
-                .filter(apply -> userId.equals(apply.getUserId()))
-                .findFirst()
-                .orElse(null);
-    }
-
-    private void requireGroupAdmin(String groupId, String operatorId) {
-        String role = groupManager.getRole(groupId, operatorId);
-        if (!"owner".equals(role) && !"admin".equals(role)) {
-            throw new ForbiddenException("only group owner or admin can operate group apply");
-        }
     }
 
     private GroupMemberRole parseMutableRole(Object value) {
