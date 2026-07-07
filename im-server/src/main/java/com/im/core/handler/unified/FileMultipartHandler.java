@@ -1,6 +1,7 @@
 package com.im.core.handler.unified;
 
 import com.im.api.ApiRequest;
+import com.im.api.Operation;
 import com.im.api.RequestHandler;
 import com.im.common.exception.NotFoundException;
 import com.im.core.file.DirectFileTransferUseCase;
@@ -28,8 +29,10 @@ public class FileMultipartHandler implements RequestHandler {
 
     @Override
     public Object handle(ApiRequest req) {
-        return switch (req.operation()) {
-            case "file.multipart.upload" -> handleUpload(req);
+        Operation operation = Operation.fromOpName(req.operation());
+        if (operation == null) throw new NotFoundException("unsupported: " + req.operation());
+        return switch (operation) {
+            case FILE_MULTIPART_UPLOAD -> handleUpload(req);
             default -> throw new NotFoundException("unsupported: " + req.operation());
         };
     }

@@ -15,10 +15,15 @@ import {
   isCompactSystemMessage,
 } from "@/components/MessageContentRenderer";
 import { APP_ROUTES } from "@/config/routes";
-import { messageRenderKey } from "@/lib/messages";
+import {
+  LOCAL_PENDING_SEQ,
+  REVOKED_MESSAGE_TEXT,
+  VIEW_MESSAGE_STATUS,
+  messageRenderKey,
+} from "@/lib/messages";
 import { cn } from "@/lib/utils";
 import { MessageCircle, MoreHorizontal, Undo2 } from "lucide-react";
-import { ConversationType } from "im-sdk";
+import { ConversationType, MessageContentType } from "im-sdk";
 import type { Conversation, Message } from "@/store/store";
 
 interface RevokeMessageInput {
@@ -90,10 +95,10 @@ function MessageItem({
   onRevoke: (message: RevokeMessageInput) => void;
 }) {
   const isMine = message.senderUserId === currentUserId;
-  const isRevoked = message.contentType === 101 || message.content === "消息已撤回";
+  const isRevoked = message.contentType === MessageContentType.REVOKED || message.content === REVOKED_MESSAGE_TEXT;
   const isCompactSystem = isCompactSystemMessage(message);
-  const isPending = message.status === 0 && message.seq <= 0;
-  const canRevoke = isMine && message.seq > 0 && !isPending && message.status !== -1;
+  const isPending = message.status === VIEW_MESSAGE_STATUS.PENDING && message.seq <= LOCAL_PENDING_SEQ;
+  const canRevoke = isMine && message.seq > LOCAL_PENDING_SEQ && !isPending && message.status !== VIEW_MESSAGE_STATUS.FAILED;
 
   if (isRevoked) {
     return (
@@ -144,7 +149,7 @@ function MessageItem({
           <div
             className={cn(
               "relative px-3.5 py-2.5 text-sm shadow-sm",
-              message.status === -1
+              message.status === VIEW_MESSAGE_STATUS.FAILED
                 ? "rounded-2xl border border-red-200 bg-red-50 text-red-800"
                 : isMine
                   ? "rounded-2xl rounded-br-md bg-gradient-to-br from-blue-500 to-blue-600 text-white"
@@ -155,14 +160,14 @@ function MessageItem({
             <div
               className={cn(
                 "mt-1 text-[10px] leading-none",
-                isMine && message.status !== -1
+                isMine && message.status !== VIEW_MESSAGE_STATUS.FAILED
                   ? "text-white/60"
                   : "text-slate-400"
               )}
             >
               {formatMsgTime(message.createTime)}
               {isMine &&
-                (message.status === -1
+                (message.status === VIEW_MESSAGE_STATUS.FAILED
                   ? " 发送失败"
                   : isPending
                     ? " 发送中…"
@@ -171,7 +176,10 @@ function MessageItem({
           </div>
 
           {isMine && (
-            <MessageStatusIcon status={isPending ? 0 : message.status} errorText={message.errorText} />
+            <MessageStatusIcon
+              status={isPending ? VIEW_MESSAGE_STATUS.PENDING : message.status}
+              errorText={message.errorText}
+            />
           )}
 
           {canRevoke && (

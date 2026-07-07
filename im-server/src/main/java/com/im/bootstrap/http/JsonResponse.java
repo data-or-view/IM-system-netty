@@ -38,6 +38,11 @@ public class JsonResponse {
         write(ctx, HttpResponseStatus.OK, data, requestId, requestOrigin);
     }
 
+    public static void status(ChannelHandlerContext ctx, HttpResponseStatus status, Object data,
+                              String requestId, String requestOrigin) {
+        write(ctx, status, data, requestId, requestOrigin);
+    }
+
     public static void ok(ChannelHandlerContext ctx, Object data, String requestId) {
         write(ctx, HttpResponseStatus.OK, data, requestId);
     }

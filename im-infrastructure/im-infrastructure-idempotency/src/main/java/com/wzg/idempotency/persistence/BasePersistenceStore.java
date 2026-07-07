@@ -125,7 +125,7 @@ public abstract class BasePersistenceStore implements PersistenceStore {
      * 
      * <h3>过期处理：</h3>
      * <ul>
-     *   <li>记录过期后，状态会被视为 {@link DataRecord.Status#EXPIRED}</li>
+     *   <li>记录过期后，状态会被视为 {@link DataRecordStatus#EXPIRED}</li>
      *   <li>过期的记录会被清理，相同请求可以重新执行</li>
      *   <li>这样可以避免记录永久占用存储空间</li>
      * </ul>
@@ -192,8 +192,8 @@ public abstract class BasePersistenceStore implements PersistenceStore {
      * <h3>缓存策略：</h3>
      * <ul>
      *   <li>使用 LRU（最近最少使用）算法，自动淘汰最久未使用的记录</li>
-     *   <li>只缓存 {@link DataRecord.Status#COMPLETED} 状态的记录</li>
-     *   <li>不缓存 {@link DataRecord.Status#INPROGRESS} 状态的记录（因为可能很快会更新）</li>
+     *   <li>只缓存 {@link DataRecordStatus#COMPLETED} 状态的记录</li>
+     *   <li>不缓存 {@link DataRecordStatus#INPROGRESS} 状态的记录（因为可能很快会更新）</li>
      *   <li>缓存中的记录过期后会自动清理</li>
      * </ul>
      * 
@@ -444,7 +444,7 @@ public abstract class BasePersistenceStore implements PersistenceStore {
             }
             DataRecord dataRecord = new DataRecord(
                     hashedIdempotencyKey.get(),
-                    DataRecord.Status.COMPLETED,
+                    DataRecordStatus.COMPLETED,
                     getExpiryEpochSecond(now),
                     responseJson,
                     "");
@@ -478,7 +478,7 @@ public abstract class BasePersistenceStore implements PersistenceStore {
         // 这里把这个幂等性key保存到实体中
         DataRecord dataRecord = new DataRecord(
                 idempotencyKey,
-                DataRecord.Status.INPROGRESS,
+                DataRecordStatus.INPROGRESS,
                 getExpiryEpochSecond(now),
                 null,
                 "",
@@ -641,7 +641,7 @@ public abstract class BasePersistenceStore implements PersistenceStore {
             return;
         }
         // INPROGRESS状态的记录不缓存，因为可能很快会更新
-        if (dataRecord.getStatus().equals(DataRecord.Status.INPROGRESS)) {
+        if (dataRecord.getStatus().equals(DataRecordStatus.INPROGRESS)) {
             return;
         }
         // 保存到LRU缓存，缓存大小由 localCacheMaxItems 配置控制

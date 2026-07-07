@@ -1,6 +1,7 @@
 package com.im.core.handler.unified;
 
 import com.im.api.ApiRequest;
+import com.im.api.Operation;
 import com.im.api.RequestPreconditions;
 import com.im.api.RequestHandler;
 import com.im.common.exception.ValidationException;
@@ -36,30 +37,32 @@ public class GroupCallHandler implements RequestHandler {
         String groupId = req.getString("groupId");
         groupId = Preconditions.requireText(groupId, "groupId");
 
-        return switch (req.operation()) {
-            case "group.call.start" -> {
+        Operation operation = Operation.fromOpName(req.operation());
+        if (operation == null) throw new ValidationException("unsupported group call operation: " + req.operation());
+        return switch (operation) {
+            case GROUP_CALL_START -> {
                 GroupCallSession session = groupCallManager.start(userId, groupId, req.getString("callType", "video"));
                 publishGroupSignal(req, userId, groupId, SignalingAction.CALLING, session);
                 yield toMap(session);
             }
-            case "group.call.join" -> {
+            case GROUP_CALL_JOIN -> {
                 GroupCallJoinResult result = groupCallManager.join(userId, groupId);
                 publishGroupSignal(req, userId, groupId, SignalingAction.ACCEPT, result.session());
                 yield toMap(result);
             }
-            case "group.call.leave" -> {
+            case GROUP_CALL_LEAVE -> {
                 GroupCallSession session = groupCallManager.leave(userId, groupId);
                 publishGroupSignal(req, userId, groupId,
                         session != null && session.ended() ? SignalingAction.HANGUP : SignalingAction.CANCEL,
                         session);
                 yield toMap(session, groupId);
             }
-            case "group.call.end" -> {
+            case GROUP_CALL_END -> {
                 GroupCallSession session = groupCallManager.end(userId, groupId);
                 publishGroupSignal(req, userId, groupId, SignalingAction.HANGUP, session);
                 yield toMap(session, groupId);
             }
-            case "group.call.active" -> toMap(groupCallManager.active(userId, groupId), groupId);
+            case GROUP_CALL_ACTIVE -> toMap(groupCallManager.active(userId, groupId), groupId);
             default -> throw new ValidationException("unsupported group call operation: " + req.operation());
         };
     }

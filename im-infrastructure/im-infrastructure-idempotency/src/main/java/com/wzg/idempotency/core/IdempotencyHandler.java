@@ -19,8 +19,8 @@ import java.time.Instant;
 import java.util.OptionalInt;
 import java.util.function.BiFunction;
 
-import static com.wzg.idempotency.persistence.DataRecord.Status.EXPIRED;
-import static com.wzg.idempotency.persistence.DataRecord.Status.INPROGRESS;
+import static com.wzg.idempotency.persistence.DataRecordStatus.EXPIRED;
+import static com.wzg.idempotency.persistence.DataRecordStatus.INPROGRESS;
 
 /**
  * 幂等性处理器

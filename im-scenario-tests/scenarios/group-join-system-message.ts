@@ -1,6 +1,11 @@
 import { assertOk, waitForAsync } from "../src/assertions.js";
 import { loadScenarioConfig } from "../src/config.js";
 import { isSystemContent, parseMessageContent } from "../src/message-content.js";
+import {
+  GROUP_JOIN_VERIFICATION_CODE,
+  SCENARIO_CONTENT_TYPE,
+  SCENARIO_PUSH_OP,
+} from "../src/protocol.js";
 import { ScenarioReporter } from "../src/reporter.js";
 import { ScenarioUser } from "../src/scenario-user.js";
 import type { GroupInfo } from "../src/types.js";
@@ -39,7 +44,7 @@ try {
   reporter.step("owner creates a public direct-join group");
   const group = await owner.http.post<GroupInfo>("/api/group/create", {
     groupName: `scenario_join_system_${suffix}`,
-    needVerification: 0,
+    needVerification: GROUP_JOIN_VERIFICATION_CODE.DIRECT,
   });
   assertOk(group.groupId, "group.create did not return groupId");
   reporter.metric("groupId", group.groupId);
@@ -51,9 +56,9 @@ try {
   reporter.step("owner receives the group system message push");
   await owner.ws.waitForPushAfter(ownerPushCursor, (push) => {
     const data = push.data as MessageRecord | undefined;
-    return push.op === "message" &&
+    return push.op === SCENARIO_PUSH_OP.MESSAGE &&
       data?.groupId === group.groupId &&
-      data.contentType === 4 &&
+      data.contentType === SCENARIO_CONTENT_TYPE.SYSTEM &&
       isSystemContent(data.content, "group_member_joined");
   }, "member joined system push");
 
@@ -64,13 +69,13 @@ try {
       limit: 20,
     });
     return pulled.messages?.find((message) =>
-      message.contentType === 4 &&
+      message.contentType === SCENARIO_CONTENT_TYPE.SYSTEM &&
       message.groupId === group.groupId &&
       isSystemContent(message.content, "group_member_joined")
     );
   }, {
     timeoutMs: config.requestTimeoutMs,
-    intervalMs: 200,
+    intervalMs: config.pollIntervalMs,
     description: "group member joined system history message",
   });
   assertOk(systemMessage, "history did not contain group member joined system message");

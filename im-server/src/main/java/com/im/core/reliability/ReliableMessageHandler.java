@@ -1,7 +1,7 @@
 package com.im.core.reliability;
 
-import com.im.api.IMessageQueue;
 import com.im.api.Message;
+import com.im.api.QueueMessageHandler;
 import com.im.api.BusinessMessageDlqStore;
 import com.im.api.SendMessageIdempotency;
 import com.im.common.enums.ImErrorCode;
@@ -12,18 +12,18 @@ import com.im.core.observability.MessageObservability;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public final class ReliableMessageHandler implements IMessageQueue.MessageHandler {
+public final class ReliableMessageHandler implements QueueMessageHandler {
 
     private static final Logger log = LoggerFactory.getLogger(ReliableMessageHandler.class);
 
     private final String topic;
-    private final IMessageQueue.MessageHandler delegate;
+    private final QueueMessageHandler delegate;
     private final RetryExecutor retryExecutor;
     private final SendMessageIdempotency idempotency;
     private final BusinessMessageDlqStore failureStore;
 
     public ReliableMessageHandler(String topic,
-                                  IMessageQueue.MessageHandler delegate,
+                                  QueueMessageHandler delegate,
                                   RetryExecutor retryExecutor,
                                   SendMessageIdempotency idempotency,
                                   BusinessMessageDlqStore failureStore) {

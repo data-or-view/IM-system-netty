@@ -2,6 +2,7 @@ import { assertOk, waitForAsync } from "../src/assertions.js";
 import { nextClientMsgId } from "../src/client-msg-id.js";
 import { loadScenarioConfig } from "../src/config.js";
 import { hasTextContent } from "../src/message-content.js";
+import { SCENARIO_CONTENT_TYPE, SCENARIO_OP } from "../src/protocol.js";
 import { ScenarioReporter } from "../src/reporter.js";
 import { ScenarioUser } from "../src/scenario-user.js";
 import type { FriendInfo, ScenarioMessage, SendMessageAck } from "../src/types.js";
@@ -85,7 +86,7 @@ try {
     return matches.length > 0 ? matches : undefined;
   }, {
     timeoutMs: config.requestTimeoutMs,
-    intervalMs: 200,
+    intervalMs: config.pollIntervalMs,
     description: "idempotent message in msg.sync",
   });
   assertOk(messages.length === 1, `expected one persisted idempotent message, got ${messages.length}`);
@@ -132,10 +133,10 @@ function send(clientMsgId: string, text: string) {
 }
 
 function sendTo(toUserId: string, clientMsgId: string, text: string) {
-  return sender.ws.request<SendMessageAck>("chat.send", {
+  return sender.ws.request<SendMessageAck>(SCENARIO_OP.CHAT_SEND, {
     toUserId,
     clientMsgId,
-    _ct: "text",
+    _ct: SCENARIO_CONTENT_TYPE.TEXT,
     content: { text },
   });
 }
@@ -164,7 +165,7 @@ function waitForMessage(
     return matches.length > 0 ? matches : undefined;
   }, {
     timeoutMs: config.requestTimeoutMs,
-    intervalMs: 200,
+    intervalMs: config.pollIntervalMs,
     description: `message ${clientMsgId} in ${conversationId}`,
   });
 }

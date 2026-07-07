@@ -5,6 +5,7 @@ import com.im.api.ConversationIds;
 import com.im.api.FriendInformation;
 import com.im.api.IConversationManager;
 import com.im.api.IFriendManager;
+import com.im.api.Operation;
 import com.im.api.RequestPreconditions;
 import com.im.api.RequestHandler;
 import com.im.common.exception.ValidationException;
@@ -44,18 +45,20 @@ public class FriendHandler implements RequestHandler {
 
     @Override
     public Object handle(ApiRequest req) {
-        return switch (req.operation()) {
-            case "friend.apply" -> handleApply(req);
-            case "friend.approve" -> handleApprove(req);
-            case "friend.remove" -> handleRemove(req);
-            case "friend.list" -> handleList(req);
-            case "friend.black" -> handleAddBlack(req);
-            case "friend.unblack" -> handleRemoveBlack(req);
-            case "friend.blacklist" -> handleBlackList(req);
-            case "friend.get_apply_list" -> handleReceivedApplyList(req);
-            case "friend.get_sent_apply_list" -> handleSentApplyList(req);
-            case "friend.get_apply_detail" -> handleApplyDetail(req);
-            case "friend.get_unhandled_apply_count" -> handleUnhandledApplyCount(req);
+        Operation operation = Operation.fromOpName(req.operation());
+        if (operation == null) throw new NotFoundException("unsupported: " + req.operation());
+        return switch (operation) {
+            case FRIEND_APPLY -> handleApply(req);
+            case FRIEND_APPROVE -> handleApprove(req);
+            case FRIEND_REMOVE -> handleRemove(req);
+            case FRIEND_LIST -> handleList(req);
+            case FRIEND_BLACK -> handleAddBlack(req);
+            case FRIEND_UNBLACK -> handleRemoveBlack(req);
+            case FRIEND_BLACKLIST -> handleBlackList(req);
+            case FRIEND_APPLY_RECEIVED -> handleReceivedApplyList(req);
+            case FRIEND_APPLY_SENT -> handleSentApplyList(req);
+            case FRIEND_APPLY_DETAIL -> handleApplyDetail(req);
+            case FRIEND_APPLY_UNHANDLED_COUNT -> handleUnhandledApplyCount(req);
             default -> throw new NotFoundException("unsupported: " + req.operation());
         };
     }

@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { AlertCircle, CircleDashed, Inbox, Loader2 } from "lucide-react";
+import { VIEW_MESSAGE_STATUS } from "@/lib/messages";
 import { cn } from "@/lib/utils";
 
 export function StatusDot({
@@ -83,7 +84,7 @@ export function MessageStatusIcon({
   status: number;
   errorText?: string;
 }) {
-  if (status === -1) {
+  if (status === VIEW_MESSAGE_STATUS.FAILED) {
     return (
       <span title={errorText || "发送失败"} className="mb-2 flex items-center gap-1 text-xs text-[var(--signal-danger)]">
         <AlertCircle className="h-4 w-4 fill-red-500/10" />
@@ -91,7 +92,7 @@ export function MessageStatusIcon({
       </span>
     );
   }
-  if (status === 0) {
+  if (status === VIEW_MESSAGE_STATUS.PENDING) {
     return (
       <span title="发送中" className="mb-2 text-slate-400">
         <Loader2 className="h-3.5 w-3.5 animate-spin" />

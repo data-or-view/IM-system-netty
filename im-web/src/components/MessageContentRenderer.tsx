@@ -8,6 +8,7 @@ import {
 import { FileText, MapPin, Mic, Package, Phone, Quote, Video } from "lucide-react";
 import type { Message } from "@/store/store";
 import { localizeSystemMessage } from "@/lib/display-formatters";
+import { REVOKED_MESSAGE_TEXT } from "@/lib/messages";
 import { safeExternalUrl, safeMediaUrl } from "@/lib/safe-url";
 
 type Props = {
@@ -41,7 +42,7 @@ export function MessageContentRenderer({ message }: Props) {
     case MessageContentType.CUSTOM:
       return <InfoBlock icon={<Package className="h-4 w-4" />} title={parsed.content.description || "自定义消息"} detail={customMessageDetail(parsed.content.data)} />;
     case MessageContentType.REVOKED:
-      return <SystemBlock text={parsed.content.text || "消息已撤回"} />;
+      return <SystemBlock text={parsed.content.text || REVOKED_MESSAGE_TEXT} />;
     default:
       return <UnsupportedBlock />;
   }
@@ -211,7 +212,7 @@ export function isCompactSystemMessage(message: Pick<Message, "contentType" | "c
 
 export function compactSystemMessageText(message: Pick<Message, "contentType" | "content">): string {
   const parsed = parseMessageContent(message);
-  if (parsed.type === MessageContentType.REVOKED) return parsed.content.text || "消息已撤回";
+  if (parsed.type === MessageContentType.REVOKED) return parsed.content.text || REVOKED_MESSAGE_TEXT;
   if (parsed.type !== MessageContentType.SYSTEM) return "";
   return systemText(parsed.content.systemType, localizeSystemMessage(parsed.content.systemType, parsed.content.message || parsed.raw));
 }

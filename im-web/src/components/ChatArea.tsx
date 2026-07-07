@@ -4,6 +4,7 @@ import { MessageCircle } from "lucide-react";
 import { toast } from "sonner";
 import {
   ConversationType,
+  OutgoingMessageContentType,
   createClientMsgId,
   getErrorText,
   type OutgoingMessageContentTypeValue,
@@ -84,7 +85,7 @@ export default function ChatArea() {
       const pending = toLocalPendingMessage({
         conversationId: conversation.conversationId,
         senderUserId: state.userId || "",
-        contentType: "text",
+        contentType: OutgoingMessageContentType.TEXT,
         content: messageContent,
         messageId: clientMsgId,
       });
@@ -95,21 +96,21 @@ export default function ChatArea() {
           conversation.conversationType === ConversationType.GROUP && conversation.groupId
             ? await im.message.sendGroup({
                 groupId: conversation.groupId,
-                contentType: "text",
+                contentType: OutgoingMessageContentType.TEXT,
                 content: messageContent,
                 clientMsgId,
               })
             : conversation.userId
               ? await im.message.send({
                   toUserId: conversation.userId,
-                  contentType: "text",
+                  contentType: OutgoingMessageContentType.TEXT,
                   content: messageContent,
                   clientMsgId,
                 })
               : null;
 
         if (ack) {
-          appendSentMessage(ack, "text", messageContent);
+          appendSentMessage(ack, OutgoingMessageContentType.TEXT, messageContent);
         }
       } catch (err) {
         const failed = toLocalFailedMessage(pending, getErrorText(err));

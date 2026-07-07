@@ -17,6 +17,9 @@ public final class ProtocolFields {
     public static final String CLIENT_TRACE_ID = ApiRequest.ATTR_TRACE_ID;
 
     public static final String OP_MESSAGE = "message";
+    public static final String OP_FRIEND_APPLY = "friend.apply";
+    public static final String OP_GROUP_APPLY = "group.apply";
+    public static final String OP_SYSTEM_MESSAGE = "system.message";
     public static final String OP_ERROR = "error";
     public static final String OP_KICKED = "kicked";
     public static final String OP_MESSAGE_REVOKED = "msg_revoke";

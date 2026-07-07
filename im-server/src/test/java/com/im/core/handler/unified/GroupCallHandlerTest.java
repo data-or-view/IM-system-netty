@@ -9,6 +9,7 @@ import com.im.api.ISequenceManager;
 import com.im.api.Message;
 import com.im.api.MessageQueueTopics;
 import com.im.api.Operation;
+import com.im.api.QueueMessageHandler;
 import com.im.api.RoomInformation;
 import com.im.core.handler.WebhookService;
 import com.im.core.call.GroupCallParticipant;
@@ -203,8 +204,8 @@ class GroupCallHandlerTest {
             messages.add(message);
         }
 
-        @Override public void subscribe(String topic, MessageHandler handler) {}
-        @Override public void unsubscribe(String topic, MessageHandler handler) {}
+        @Override public void subscribe(String topic, QueueMessageHandler handler) {}
+        @Override public void unsubscribe(String topic, QueueMessageHandler handler) {}
         @Override public boolean hasSubscribers(String topic) { return false; }
     }
 

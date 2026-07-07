@@ -212,10 +212,7 @@ public class MinioFileStorageService implements IFileStorageService {
     public void completeMultipartUpload(String bucket, String objectId, String uploadId,
                                          List<PartInfo> parts) {
         try {
-            List<S3MultipartUploader.PartInfo> converted = parts.stream()
-                    .map(p -> new S3MultipartUploader.PartInfo(p.partNumber(), p.etag()))
-                    .toList();
-            multipartUploader.completeMultipartUpload(bucket, objectId, uploadId, converted);
+            multipartUploader.completeMultipartUpload(bucket, objectId, uploadId, parts);
             log.info("Multipart upload completed: bucket={}, object={}, parts={}",
                     bucket, objectId, parts.size());
         } catch (Exception e) {

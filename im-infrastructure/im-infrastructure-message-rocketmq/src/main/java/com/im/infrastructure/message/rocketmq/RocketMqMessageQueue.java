@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.im.api.IMessageQueue;
 import com.im.api.Message;
+import com.im.api.QueueMessageHandler;
 import com.im.config.Config;
 import com.im.infrastructure.message.MessageBusException;
 import org.apache.rocketmq.client.consumer.DefaultMQPushConsumer;
@@ -48,7 +49,7 @@ public class RocketMqMessageQueue implements IMessageQueue {
 
     private final RocketMqMessageQueueProperties properties;
     private final String nodeId;
-    private final ConcurrentHashMap<String, List<MessageHandler>> subscribers = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, List<QueueMessageHandler>> subscribers = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, DefaultMQPushConsumer> consumers = new ConcurrentHashMap<>();
     private final AtomicBoolean running = new AtomicBoolean(false);
 
@@ -120,7 +121,7 @@ public class RocketMqMessageQueue implements IMessageQueue {
     }
 
     @Override
-    public void subscribe(String topic, MessageHandler handler) {
+    public void subscribe(String topic, QueueMessageHandler handler) {
         subscribers.computeIfAbsent(topic, k -> new CopyOnWriteArrayList<>()).add(handler);
         if (running.get()) {
             startConsumer(topic);
@@ -129,8 +130,8 @@ public class RocketMqMessageQueue implements IMessageQueue {
     }
 
     @Override
-    public void unsubscribe(String topic, MessageHandler handler) {
-        List<MessageHandler> handlers = subscribers.get(topic);
+    public void unsubscribe(String topic, QueueMessageHandler handler) {
+        List<QueueMessageHandler> handlers = subscribers.get(topic);
         if (handlers != null) {
             handlers.remove(handler);
             if (handlers.isEmpty()) {
@@ -146,7 +147,7 @@ public class RocketMqMessageQueue implements IMessageQueue {
 
     @Override
     public boolean hasSubscribers(String topic) {
-        List<MessageHandler> handlers = subscribers.get(topic);
+        List<QueueMessageHandler> handlers = subscribers.get(topic);
         return handlers != null && !handlers.isEmpty();
     }
 
@@ -240,7 +241,7 @@ public class RocketMqMessageQueue implements IMessageQueue {
     }
 
     private ConsumeConcurrentlyStatus consume(String logicalTopic, List<MessageExt> messages) {
-        List<MessageHandler> handlers = subscribers.get(logicalTopic);
+        List<QueueMessageHandler> handlers = subscribers.get(logicalTopic);
         if (handlers == null || handlers.isEmpty()) {
             return ConsumeConcurrentlyStatus.CONSUME_SUCCESS;
         }
@@ -248,7 +249,7 @@ public class RocketMqMessageQueue implements IMessageQueue {
         for (MessageExt ext : messages) {
             try {
                 Message msg = fromRocketMessage(ext);
-                for (MessageHandler handler : handlers) {
+                for (QueueMessageHandler handler : handlers) {
                     handler.onMessage(msg);
                 }
             } catch (Exception e) {

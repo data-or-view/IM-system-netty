@@ -2,6 +2,7 @@ package com.im.core.mq;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.im.api.Message;
+import com.im.core.redis.CloseableRedisCommands;
 import com.im.core.redis.RedisConfiguration;
 import com.im.core.serialization.jackson.ObjectMapperProvider;
 import io.lettuce.core.Consumer;
@@ -36,7 +37,7 @@ class RedisMessageQueueTest {
         String messageId = "msg-pending-" + UUID.randomUUID();
         RedisMessageQueue queue = null;
         try {
-            try (RedisConfiguration.CloseableRedisCommands commands = redis.createSyncCommands()) {
+            try (CloseableRedisCommands commands = redis.createSyncCommands()) {
                 RedisCommands<String, String> sync = commands.sync();
                 sync.del(streamKey);
                 sync.xgroupCreate(XReadArgs.StreamOffset.from(streamKey, "0-0"), groupName,
@@ -70,7 +71,7 @@ class RedisMessageQueueTest {
             if (queue != null) {
                 queue.stop();
             }
-            try (RedisConfiguration.CloseableRedisCommands commands = redis.createSyncCommands()) {
+            try (CloseableRedisCommands commands = redis.createSyncCommands()) {
                 commands.<RedisCommands<String, String>>sync().del(streamKey);
             } finally {
                 redis.close();
@@ -90,7 +91,7 @@ class RedisMessageQueueTest {
                 "msg-pending-" + UUID.randomUUID());
         RedisMessageQueue queue = null;
         try {
-            try (RedisConfiguration.CloseableRedisCommands commands = redis.createSyncCommands()) {
+            try (CloseableRedisCommands commands = redis.createSyncCommands()) {
                 RedisCommands<String, String> sync = commands.sync();
                 sync.del(streamKey);
                 sync.xgroupCreate(XReadArgs.StreamOffset.from(streamKey, "0-0"), groupName,
@@ -123,7 +124,7 @@ class RedisMessageQueueTest {
             if (queue != null) {
                 queue.stop();
             }
-            try (RedisConfiguration.CloseableRedisCommands commands = redis.createSyncCommands()) {
+            try (CloseableRedisCommands commands = redis.createSyncCommands()) {
                 commands.<RedisCommands<String, String>>sync().del(streamKey);
             } finally {
                 redis.close();
@@ -141,7 +142,7 @@ class RedisMessageQueueTest {
                     .database(Integer.parseInt(env("IM_E2E_REDIS_DATABASE", env("IM_REDIS_DATABASE", "0"))))
                     .timeout(Duration.ofSeconds(2))
                     .build();
-            try (RedisConfiguration.CloseableRedisCommands commands = redis.createSyncCommands()) {
+            try (CloseableRedisCommands commands = redis.createSyncCommands()) {
                 commands.<RedisCommands<String, String>>sync().ping();
             }
             return redis;
@@ -156,7 +157,7 @@ class RedisMessageQueueTest {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         PendingMessages pending = null;
         while (System.nanoTime() <= deadline) {
-            try (RedisConfiguration.CloseableRedisCommands commands = redis.createSyncCommands()) {
+            try (CloseableRedisCommands commands = redis.createSyncCommands()) {
                 pending = commands.<RedisCommands<String, String>>sync().xpending(streamKey, groupName);
                 if (pending.getCount() == 0) {
                     return;

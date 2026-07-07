@@ -20,7 +20,7 @@ import java.util.Map;
 
 public class ClusterAwareSystemMessageNotifier implements SystemMessageNotifier {
 
-    public static final String OP_SYSTEM_MESSAGE = "system.message";
+    public static final String OP_SYSTEM_MESSAGE = ProtocolFields.OP_SYSTEM_MESSAGE;
 
     private static final Logger log = LoggerFactory.getLogger(ClusterAwareSystemMessageNotifier.class);
 

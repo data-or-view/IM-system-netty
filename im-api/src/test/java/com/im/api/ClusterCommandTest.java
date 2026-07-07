@@ -14,7 +14,7 @@ class ClusterCommandTest {
         ClusterMessage message = ClusterMessage.fromCommand("node-a", command);
 
         assertEquals(ClusterMessageKind.CLUSTER_COMMAND, message.getKind());
-        assertEquals("CLUSTER_COMMAND", message.getTopic());
+        assertEquals(ClusterMessageTopics.CLUSTER_COMMAND, message.getTopic());
         assertEquals("u1", message.getCommand().userId());
         assertEquals(PlatformID.IOS, message.getCommand().platformId());
         assertEquals("s1", message.getCommand().sessionId());
@@ -24,7 +24,8 @@ class ClusterCommandTest {
     @Test
     void missingRequiredFieldsThrowValidationException() {
         var missingType = assertThrows(com.im.common.exception.ValidationException.class,
-                () -> new ClusterCommand(null, "u1", -1, "default", "reason"));
+                () -> new ClusterCommand(null, "u1", ClusterCommand.ANY_PLATFORM_ID,
+                        ClusterCommand.DEFAULT_SESSION_ID, "reason"));
         assertEquals("type is required", missingType.getDetail());
 
         var missingUserId = assertThrows(com.im.common.exception.ValidationException.class,

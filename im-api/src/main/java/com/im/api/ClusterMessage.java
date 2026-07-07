@@ -8,6 +8,8 @@ import java.util.Objects;
  * 需要携带来源节点信息（fromNodeId）、消息类型和 TTL 防止无限循环。
  */
 public class ClusterMessage {
+    private static final int DEFAULT_TTL = 3;
+
     private final ClusterMessageKind kind;
     private final String fromNodeId;
     private final Message message;
@@ -17,7 +19,7 @@ public class ClusterMessage {
     private int ttl;
 
     public ClusterMessage(ClusterMessageKind kind, String fromNodeId, Message message) {
-        this(kind, fromNodeId, message, null, null, null, 3);
+        this(kind, fromNodeId, message, null, null, null, DEFAULT_TTL);
     }
 
     public ClusterMessage(ClusterMessageKind kind, String fromNodeId, Message message, int ttl) {
@@ -30,7 +32,7 @@ public class ClusterMessage {
     }
 
     public ClusterMessage(ClusterMessageKind kind, String fromNodeId, ClusterCommand command) {
-        this(kind, fromNodeId, null, command, null, null, 3);
+        this(kind, fromNodeId, null, command, null, null, DEFAULT_TTL);
     }
 
     public ClusterMessage(ClusterMessageKind kind, String fromNodeId, ClusterCommand command, int ttl) {
@@ -65,7 +67,7 @@ public class ClusterMessage {
     public static ClusterMessage fromMessage(String fromNodeId, Message message, RouteBinding targetBinding) {
         Objects.requireNonNull(targetBinding, "targetBinding");
         return new ClusterMessage(ClusterMessageKind.USER_MESSAGE, fromNodeId, message,
-                targetBinding.platformId(), targetBinding.sessionId(), 3);
+                targetBinding.platformId(), targetBinding.sessionId(), DEFAULT_TTL);
     }
 
     public static ClusterMessage fromCommand(String fromNodeId, ClusterCommand command) {
@@ -114,9 +116,9 @@ public class ClusterMessage {
      */
     public String getTopic() {
         if (kind == ClusterMessageKind.CLUSTER_COMMAND) {
-            return "CLUSTER_COMMAND";
+            return ClusterMessageTopics.CLUSTER_COMMAND;
         }
-        return message.getGroupId() != null ? "GROUP_CHAT" : "SINGLE_CHAT";
+        return message.getGroupId() != null ? ClusterMessageTopics.GROUP_CHAT : ClusterMessageTopics.SINGLE_CHAT;
     }
 
     @Override

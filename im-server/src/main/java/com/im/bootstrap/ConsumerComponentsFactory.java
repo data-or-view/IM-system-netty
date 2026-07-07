@@ -1,5 +1,6 @@
 package com.im.bootstrap;
 
+import com.im.api.ClusterMessageTopics;
 import com.im.config.Config;
 import com.im.core.delivery.ClusterDeliveryHandler;
 import com.im.core.delivery.ClusterSessionCommandHandler;
@@ -14,10 +15,10 @@ final class ConsumerComponentsFactory {
 
     static ConsumerDependencies createConsumers(Config config,
                                                 String nodeId,
-                                                ServerComponentsFactory.RuntimeDependencies runtime,
-                                                ServerComponentsFactory.ClusterDependencies cluster,
-                                                ServerComponentsFactory.StorageDependencies storage,
-                                                ServerComponentsFactory.BusinessDependencies business) {
+                                                RuntimeDependencies runtime,
+                                                ClusterDependencies cluster,
+                                                StorageDependencies storage,
+                                                BusinessDependencies business) {
         PersistenceConsumer persistenceConsumer = new PersistenceConsumer(
                 storage.messageQueue(), storage.singleMessageStore(), storage.groupMessageStore(),
                 business.conversationManager(), business.groupManager(),
@@ -37,15 +38,15 @@ final class ConsumerComponentsFactory {
 
         ClusterDeliveryHandler clusterDeliveryHandler = new ClusterDeliveryHandler(
                 runtime.sessionManager(), cluster.routeTable(), nodeId);
-        cluster.clusterMessageBus().subscribe("SINGLE_CHAT", clusterDeliveryHandler);
-        cluster.clusterMessageBus().subscribe("GROUP_CHAT", clusterDeliveryHandler);
+        cluster.clusterMessageBus().subscribe(ClusterMessageTopics.SINGLE_CHAT, clusterDeliveryHandler);
+        cluster.clusterMessageBus().subscribe(ClusterMessageTopics.GROUP_CHAT, clusterDeliveryHandler);
         cluster.clusterMessageBus().subscribe(
-                "CLUSTER_COMMAND",
+                ClusterMessageTopics.CLUSTER_COMMAND,
                 new ClusterSessionCommandHandler(runtime.sessionManager()));
-        cluster.clusterMessageBus().subscribe("CLUSTER_COMMAND", runtime.friendApplyNotifier()::handleClusterPush);
-        cluster.clusterMessageBus().subscribe("CLUSTER_COMMAND", runtime.groupApplyNotifier()::handleClusterPush);
-        cluster.clusterMessageBus().subscribe("CLUSTER_COMMAND", runtime.systemMessageNotifier()::handleClusterPush);
-        cluster.clusterMessageBus().subscribe("CLUSTER_COMMAND", runtime.messageRevokeNotifier()::handleClusterPush);
+        cluster.clusterMessageBus().subscribe(ClusterMessageTopics.CLUSTER_COMMAND, runtime.friendApplyNotifier()::handleClusterPush);
+        cluster.clusterMessageBus().subscribe(ClusterMessageTopics.CLUSTER_COMMAND, runtime.groupApplyNotifier()::handleClusterPush);
+        cluster.clusterMessageBus().subscribe(ClusterMessageTopics.CLUSTER_COMMAND, runtime.systemMessageNotifier()::handleClusterPush);
+        cluster.clusterMessageBus().subscribe(ClusterMessageTopics.CLUSTER_COMMAND, runtime.messageRevokeNotifier()::handleClusterPush);
         return new ConsumerDependencies(persistenceConsumer, deliveryConsumer, businessMessageDlqCompensator);
     }
 }

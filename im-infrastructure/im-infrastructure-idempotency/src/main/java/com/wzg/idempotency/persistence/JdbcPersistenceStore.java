@@ -186,7 +186,7 @@ public class JdbcPersistenceStore extends BasePersistenceStore {
 
         return new DataRecord(
                 rs.getString("idempotency_key"),
-                DataRecord.Status.valueOf(rs.getString("status")),
+                DataRecordStatus.valueOf(rs.getString("status")),
                 rs.getLong("expiry_timestamp"),
                 rs.getString("response_data"),
                 rs.getString("payload_hash"),

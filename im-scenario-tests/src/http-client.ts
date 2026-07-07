@@ -1,3 +1,9 @@
+import {
+  SCENARIO_HTTP_CONTENT_TYPE,
+  SCENARIO_HTTP_HEADER,
+  SCENARIO_SUCCESS_CODE,
+} from "./protocol.js";
+
 export interface HttpClientOptions {
   baseUrl: string;
   getToken?: () => string | undefined;
@@ -19,7 +25,7 @@ export class ScenarioHttpClient {
     const url = new URL(path, this.options.baseUrl);
     return this.request<T>(url, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { [SCENARIO_HTTP_HEADER.CONTENT_TYPE]: SCENARIO_HTTP_CONTENT_TYPE.JSON },
       body: JSON.stringify(body ?? {}),
     });
   }
@@ -30,8 +36,8 @@ export class ScenarioHttpClient {
     try {
       const headers = new Headers(init.headers);
       const token = this.options.getToken?.();
-      if (token) headers.set("Authorization", token);
-      headers.set("X-Request-Id", requestId());
+      if (token) headers.set(SCENARIO_HTTP_HEADER.AUTHORIZATION, token);
+      headers.set(SCENARIO_HTTP_HEADER.REQUEST_ID, requestId());
 
       const response = await fetch(url, { ...init, headers, signal: controller.signal });
       const text = await response.text();
@@ -41,7 +47,7 @@ export class ScenarioHttpClient {
       }
       if (parsed && typeof parsed === "object" && "code" in parsed) {
         const envelope = parsed as { code?: number; msg?: string; data?: T };
-        if (envelope.code !== undefined && envelope.code !== 0) {
+        if (envelope.code !== undefined && envelope.code !== SCENARIO_SUCCESS_CODE) {
           throw new Error(`API ${envelope.code}: ${envelope.msg ?? "unknown error"}`);
         }
         return envelope.data as T;

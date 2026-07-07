@@ -77,9 +77,13 @@ final class TransportServer implements Lifecycle {
         startHttpIfEnabled(useEpoll);
 
         log.info("Server transport started: nodeId={}, WS={}, HTTP={}",
-                config.getString("im.node.id", "node-1"),
-                config.getBoolean("im.ws.enabled", true) ? config.getInt("im.ws.port", 8081) : "disabled",
-                config.getBoolean("im.http.enabled", true) ? config.getInt("im.http.port", 8082) : "disabled");
+                config.getString("im.node.id", BootstrapDefaults.NODE_ID),
+                config.getBoolean("im.ws.enabled", true)
+                        ? config.getInt("im.ws.port", BootstrapDefaults.WS_PORT)
+                        : "disabled",
+                config.getBoolean("im.http.enabled", true)
+                        ? config.getInt("im.http.port", BootstrapDefaults.HTTP_PORT)
+                        : "disabled");
     }
 
     @Override
@@ -118,7 +122,7 @@ final class TransportServer implements Lifecycle {
             return;
         }
         wsChannel = WsServerBootstrap.start(bossGroup, workerGroup,
-                config.getInt("im.ws.port", 8081), useEpoll,
+                config.getInt("im.ws.port", BootstrapDefaults.WS_PORT), useEpoll,
                 connectionEventHandler, dispatcher, virtualExecutor, requestAdmission);
     }
 
@@ -128,9 +132,13 @@ final class TransportServer implements Lifecycle {
         }
         JsonResponse.configureErrorDetail(config.getBoolean("im.http.error-detail-enabled", false));
         httpChannel = HttpServerBootstrap.start(bossGroup, workerGroup,
-                config.getInt("im.http.port", 8082), useEpoll,
-                config.getString("im.http.cors.allowed-origins").orElse("http://127.0.0.1:39073,http://localhost:39073"),
-                new com.im.bootstrap.http.HttpRequestAdapter(dispatcher, virtualExecutor, requestAdmission));
+                config.getInt("im.http.port", BootstrapDefaults.HTTP_PORT), useEpoll,
+                config.getString("im.http.cors.allowed-origins").orElse(BootstrapDefaults.CORS_ALLOWED_ORIGINS),
+                new com.im.bootstrap.http.HttpRequestAdapter(
+                        dispatcher,
+                        virtualExecutor,
+                        requestAdmission,
+                        config.getString("im.node.id", BootstrapDefaults.NODE_ID)));
     }
 
     private void closeChannels() {

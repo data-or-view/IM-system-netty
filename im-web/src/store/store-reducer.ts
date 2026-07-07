@@ -17,6 +17,7 @@ import {
   sortConversations,
   upsertConversation,
 } from "@/store/domain";
+import { toRevokedMessage } from "@/lib/messages";
 import type { Action, State } from "@/store/store-types";
 
 export const initialState: State = {
@@ -98,7 +99,7 @@ export function reducer(state: State, action: Action): State {
         messages: {
           ...state.messages,
           [action.conversationId]: existing.map((message) =>
-            message.seq === action.seq ? { ...message, contentType: 101, content: "消息已撤回" } : message
+            message.seq === action.seq ? toRevokedMessage(message) : message
           ),
         },
       };

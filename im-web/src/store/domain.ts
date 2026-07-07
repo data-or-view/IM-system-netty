@@ -9,7 +9,7 @@ import {
   type MessageRevoked,
   type SystemMessageSummary,
 } from "im-sdk";
-import { toViewMessage, type ViewMessage } from "@/lib/messages";
+import { REVOKED_MESSAGE_TEXT, toRevokedMessage, toViewMessage, type ViewMessage } from "@/lib/messages";
 
 export type Conversation = SDKConversation;
 export type Message = ViewMessage;
@@ -277,13 +277,13 @@ function applyMessageRevoked(state: DomainStateShape, event: MessageRevoked): Do
   const existing = state.messages[event.conversationId] || [];
   const target = existing.find((message) => message.seq === event.seq);
   const messages = existing.map((message) =>
-    message.seq === event.seq ? { ...message, contentType: 101, content: "消息已撤回" } : message
+    message.seq === event.seq ? toRevokedMessage(message) : message
   );
   const currentLatest = latestMessage(existing);
   const shouldUpdateLatest = !currentLatest || !target || currentLatest.seq === event.seq;
   const conversations = state.conversations.map((conversation) =>
     conversation.conversationId === event.conversationId && shouldUpdateLatest
-      ? { ...conversation, latestMsg: "消息已撤回", latestMsgSendTime: Date.now() }
+      ? { ...conversation, latestMsg: REVOKED_MESSAGE_TEXT, latestMsgSendTime: Date.now() }
       : conversation
   );
   return {

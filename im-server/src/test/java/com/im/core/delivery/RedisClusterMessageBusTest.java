@@ -4,6 +4,7 @@ import com.im.api.ClusterCommand;
 import com.im.api.ClusterMessage;
 import com.im.api.ClusterCommandType;
 import com.im.api.ClusterMessageKind;
+import com.im.api.ClusterMessageTopics;
 import com.im.api.PlatformID;
 import org.junit.jupiter.api.Test;
 
@@ -21,7 +22,7 @@ class RedisClusterMessageBusTest {
         ClusterMessage decoded = bus.deserialize(bus.serialize(original));
 
         assertEquals(ClusterMessageKind.CLUSTER_COMMAND, decoded.getKind());
-        assertEquals("CLUSTER_COMMAND", decoded.getTopic());
+        assertEquals(ClusterMessageTopics.CLUSTER_COMMAND, decoded.getTopic());
         assertEquals(ClusterCommandType.KICK_SESSION, decoded.getCommand().type());
         assertEquals("u1", decoded.getCommand().userId());
         assertEquals(PlatformID.IOS, decoded.getCommand().platformId());

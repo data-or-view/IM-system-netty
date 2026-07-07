@@ -6,6 +6,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.im.api.IMessageQueue;
 import com.im.api.Message;
+import com.im.api.QueueMessageHandler;
 import com.im.api.BusinessMessageDlqRecord;
 import com.im.core.db.DatabaseConfiguration;
 import com.im.core.db.MyBatisPlusFactory;
@@ -301,8 +302,8 @@ class DbBusinessMessageDlqStoreIT {
         @Override public void publish(String topic, Message msg) {
             throw new MessageBusException("publish unavailable");
         }
-        @Override public void subscribe(String topic, MessageHandler handler) {}
-        @Override public void unsubscribe(String topic, MessageHandler handler) {}
+        @Override public void subscribe(String topic, QueueMessageHandler handler) {}
+        @Override public void unsubscribe(String topic, QueueMessageHandler handler) {}
         @Override public boolean hasSubscribers(String topic) { return false; }
     }
 }

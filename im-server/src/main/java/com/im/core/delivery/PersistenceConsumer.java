@@ -30,7 +30,7 @@ public class PersistenceConsumer implements Lifecycle {
     private final SendMessageIdempotency idempotency;
     private final BusinessMessageDlqStore failureStore;
 
-    private volatile IMessageQueue.MessageHandler handler;
+    private volatile QueueMessageHandler handler;
 
     public PersistenceConsumer(IMessageQueue messageQueue,
                                ISingleMessageStore singleMessageStore,
@@ -76,7 +76,7 @@ public class PersistenceConsumer implements Lifecycle {
 
     @Override
     public void start() {
-        IMessageQueue.MessageHandler delegate = workflow::persist;
+        QueueMessageHandler delegate = workflow::persist;
 
         this.handler = retryExecutor != null
                 ? new ReliableMessageHandler(MessageQueueTopics.PERSIST, delegate,

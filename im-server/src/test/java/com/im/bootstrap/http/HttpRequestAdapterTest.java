@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.im.core.dispatcher.ApiDispatcher;
 import com.im.bootstrap.RequestAdmission;
 import com.im.bootstrap.RequestScope;
+import com.im.bootstrap.health.HealthEndpoints;
 import com.im.common.enums.ImErrorCode;
 import com.im.common.exception.InfrastructureException;
 import com.im.core.serialization.jackson.ObjectMapperProvider;
@@ -180,6 +181,53 @@ class HttpRequestAdapterTest {
         Map<String, Object> body = readBody(response);
         assertEquals(ImErrorCode.MQ_UNAVAILABLE.getCode(), body.get("code"));
         assertEquals("消息服务暂不可用，请稍后再试", body.get("msg"));
+    }
+
+    @Test
+    void liveHealthBypassesBusinessRoutes() {
+        ApiDispatcher dispatcher = new ApiDispatcher();
+        EmbeddedChannel channel = new EmbeddedChannel(new HttpRequestAdapter(
+                dispatcher, new RejectingExecutorService(), new ClosedAdmission(), "node-test"));
+        DefaultFullHttpRequest request = new DefaultFullHttpRequest(
+                HttpVersion.HTTP_1_1,
+                HttpMethod.GET,
+                HealthEndpoints.LIVE
+        );
+
+        assertFalse(channel.writeInbound(request));
+
+        FullHttpResponse response = channel.readOutbound();
+        assertNotNull(response);
+        assertEquals(HttpResponseStatus.OK, response.status());
+        Map<String, Object> body = readBody(response);
+        assertEquals(0, body.get("code"));
+        Map<?, ?> data = (Map<?, ?>) body.get("data");
+        assertEquals("UP", data.get("status"));
+        assertEquals("node-test", data.get("nodeId"));
+    }
+
+    @Test
+    void readinessReportsDownWhenAdmissionIsClosed() {
+        ApiDispatcher dispatcher = new ApiDispatcher();
+        EmbeddedChannel channel = new EmbeddedChannel(new HttpRequestAdapter(
+                dispatcher, new DirectExecutorService(), new ClosedAdmission(), "node-test"));
+        DefaultFullHttpRequest request = new DefaultFullHttpRequest(
+                HttpVersion.HTTP_1_1,
+                HttpMethod.GET,
+                HealthEndpoints.READY
+        );
+
+        assertFalse(channel.writeInbound(request));
+
+        FullHttpResponse response = channel.readOutbound();
+        assertNotNull(response);
+        assertEquals(HttpResponseStatus.SERVICE_UNAVAILABLE, response.status());
+        Map<String, Object> body = readBody(response);
+        assertEquals(0, body.get("code"));
+        Map<?, ?> data = (Map<?, ?>) body.get("data");
+        assertEquals("DOWN", data.get("status"));
+        assertEquals("node-test", data.get("nodeId"));
+        assertEquals("DOWN", ((Map<?, ?>) data.get("checks")).get("requestAdmission"));
     }
 
     private static Map<String, Object> readBody(FullHttpResponse response) {

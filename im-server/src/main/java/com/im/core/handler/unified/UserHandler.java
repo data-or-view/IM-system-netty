@@ -3,6 +3,7 @@ package com.im.core.handler.unified;
 import com.im.api.ApiRequest;
 import com.im.api.IFriendManager;
 import com.im.api.IUserManager;
+import com.im.api.Operation;
 import com.im.api.RequestPreconditions;
 import com.im.api.RequestHandler;
 import com.im.api.UserInformation;
@@ -46,12 +47,14 @@ public class UserHandler implements RequestHandler {
 
     @Override
     public Object handle(ApiRequest req) {
-        return switch (req.operation()) {
-            case "user.register" -> handleRegister(req);
-            case "user.me" -> handleMe(req);
-            case "user.info" -> handleInfo(req);
-            case "user.search" -> handleSearch(req);
-            case "user.update" -> handleUpdate(req);
+        Operation operation = Operation.fromOpName(req.operation());
+        if (operation == null) throw new NotFoundException("unsupported: " + req.operation());
+        return switch (operation) {
+            case USER_REGISTER -> handleRegister(req);
+            case USER_ME -> handleMe(req);
+            case USER_INFO -> handleInfo(req);
+            case USER_SEARCH -> handleSearch(req);
+            case USER_UPDATE -> handleUpdate(req);
             default -> throw new NotFoundException("unsupported: " + req.operation());
         };
     }

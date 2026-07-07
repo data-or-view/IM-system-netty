@@ -4,11 +4,12 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.im.api.Message;
 import com.im.api.IMessageQueue;
+import com.im.api.QueueMessageHandler;
 import com.im.common.exception.RedisPersistenceException;
 import com.im.common.util.IMExecutors;
 import com.im.core.observability.MessageObservability;
+import com.im.core.redis.CloseableRedisCommands;
 import com.im.core.redis.RedisConfiguration;
-import com.im.core.redis.RedisConfiguration.CloseableRedisCommands;
 import com.im.core.serialization.jackson.ObjectMapperProvider;
 import io.lettuce.core.Consumer;
 import io.lettuce.core.XAutoClaimArgs;
@@ -77,7 +78,7 @@ public class RedisMessageQueue implements IMessageQueue {
     private final int pendingClaimBatchSize;
 
     /** topic → handler 列表 */
-    private final ConcurrentHashMap<String, List<MessageHandler>> subscribers = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, List<QueueMessageHandler>> subscribers = new ConcurrentHashMap<>();
 
     /** topic → 消费者任务 */
     private final ConcurrentHashMap<String, ConsumerTask> consumerTasks = new ConcurrentHashMap<>();
@@ -166,7 +167,7 @@ public class RedisMessageQueue implements IMessageQueue {
     }
 
     @Override
-    public void subscribe(String topic, MessageHandler handler) {
+    public void subscribe(String topic, QueueMessageHandler handler) {
         subscribers.computeIfAbsent(topic, k -> new CopyOnWriteArrayList<>()).add(handler);
         if (running.get()) {
             startConsumer(topic);
@@ -175,8 +176,8 @@ public class RedisMessageQueue implements IMessageQueue {
     }
 
     @Override
-    public void unsubscribe(String topic, MessageHandler handler) {
-        List<MessageHandler> handlers = subscribers.get(topic);
+    public void unsubscribe(String topic, QueueMessageHandler handler) {
+        List<QueueMessageHandler> handlers = subscribers.get(topic);
         if (handlers != null) {
             handlers.remove(handler);
             if (handlers.isEmpty()) {
@@ -192,7 +193,7 @@ public class RedisMessageQueue implements IMessageQueue {
 
     @Override
     public boolean hasSubscribers(String topic) {
-        List<MessageHandler> handlers = subscribers.get(topic);
+        List<QueueMessageHandler> handlers = subscribers.get(topic);
         return handlers != null && !handlers.isEmpty();
     }
 
@@ -237,7 +238,7 @@ public class RedisMessageQueue implements IMessageQueue {
             String groupName = groupName(topic);
 
             while (!stopped && running.get() && !Thread.currentThread().isInterrupted()) {
-                try (RedisConfiguration.CloseableRedisCommands redis = redisConfig.createSyncCommands()) {
+                try (CloseableRedisCommands redis = redisConfig.createSyncCommands()) {
                     RedisCommands<String, String> sync = redis.sync();
 
                     // 确保 Consumer Group 存在（幂等）
@@ -347,9 +348,9 @@ public class RedisMessageQueue implements IMessageQueue {
                     log.debug("Redis stream message received: stream={}, group={}, fields={}",
                             streamKey, groupName, MessageObservability.fields(topic, cmd));
 
-                    List<MessageHandler> handlers = subscribers.get(topic);
+                    List<QueueMessageHandler> handlers = subscribers.get(topic);
                     if (handlers != null) {
-                        for (MessageHandler handler : handlers) {
+                        for (QueueMessageHandler handler : handlers) {
                             handler.onMessage(cmd);
                         }
                     }

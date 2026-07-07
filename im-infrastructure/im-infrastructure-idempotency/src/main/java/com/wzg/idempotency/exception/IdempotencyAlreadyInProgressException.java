@@ -36,7 +36,7 @@ package com.wzg.idempotency.exception;
  * </ul>
  * 
  * @see com.wzg.idempotency.core.IdempotencyHandler
- * @see com.wzg.idempotency.persistence.DataRecord.Status#INPROGRESS
+ * @see com.wzg.idempotency.persistence.DataRecordStatus#INPROGRESS
  */
 public class IdempotencyAlreadyInProgressException extends RuntimeException {
     private static final long serialVersionUID = 7229475093418832265L;

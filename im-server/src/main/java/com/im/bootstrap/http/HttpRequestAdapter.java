@@ -8,6 +8,7 @@ import com.im.api.Operation;
 import com.im.api.ResponseWriter;
 import com.im.bootstrap.DispatchSubmitter;
 import com.im.bootstrap.RequestAdmission;
+import com.im.bootstrap.health.HealthProbeHandler;
 import com.im.common.enums.ImErrorCode;
 import com.im.common.trace.RequestIds;
 import com.im.core.dispatcher.ApiDispatcher;
@@ -49,6 +50,7 @@ public class HttpRequestAdapter extends SimpleChannelInboundHandler<FullHttpRequ
     private final ApiDispatcher dispatcher;
     private final ExecutorService virtualExecutor;
     private final RequestAdmission requestAdmission;
+    private final HealthProbeHandler healthProbeHandler;
 
     public HttpRequestAdapter(ApiDispatcher dispatcher, ExecutorService virtualExecutor) {
         this(dispatcher, virtualExecutor, null);
@@ -57,9 +59,17 @@ public class HttpRequestAdapter extends SimpleChannelInboundHandler<FullHttpRequ
     public HttpRequestAdapter(ApiDispatcher dispatcher,
                               ExecutorService virtualExecutor,
                               RequestAdmission requestAdmission) {
+        this(dispatcher, virtualExecutor, requestAdmission, null);
+    }
+
+    public HttpRequestAdapter(ApiDispatcher dispatcher,
+                              ExecutorService virtualExecutor,
+                              RequestAdmission requestAdmission,
+                              String nodeId) {
         this.dispatcher = dispatcher;
         this.virtualExecutor = virtualExecutor;
         this.requestAdmission = requestAdmission;
+        this.healthProbeHandler = new HealthProbeHandler(nodeId, requestAdmission);
     }
 
     @Override
@@ -68,6 +78,10 @@ public class HttpRequestAdapter extends SimpleChannelInboundHandler<FullHttpRequ
         // CORS 预检
         if (req.method() == HttpMethod.OPTIONS) {
             JsonResponse.ok(ctx, Map.of(), null, requestOrigin);
+            return;
+        }
+
+        if (healthProbeHandler.handleIfHealthProbe(ctx, req)) {
             return;
         }
 
@@ -110,7 +124,7 @@ public class HttpRequestAdapter extends SimpleChannelInboundHandler<FullHttpRequ
             byte[] bytes = new byte[buf.readableBytes()];
             buf.getBytes(buf.readerIndex(), bytes);
 
-            if (operation.opName().equals("file.upload") || operation.opName().equals("file.multipart.upload")) {
+            if (operation == Operation.FILE_UPLOAD || operation == Operation.FILE_MULTIPART_UPLOAD) {
                 // 文件上传：body 是文件二进制数据，不当作 JSON 解析。
                 // fileName/mimeType 等元信息通过 query string 传入，已在上一步合并到 params。
                 bodyRaw = bytes;

@@ -3,6 +3,12 @@ import { nextClientMsgId } from "../src/client-msg-id.js";
 import { readNumberArg, readStringArg } from "../src/cli.js";
 import { loadScenarioConfig } from "../src/config.js";
 import { hasTextContent } from "../src/message-content.js";
+import {
+  GROUP_JOIN_VERIFICATION_CODE,
+  SCENARIO_CONTENT_TYPE,
+  SCENARIO_OP,
+  SCENARIO_PUSH_OP,
+} from "../src/protocol.js";
 import { ScenarioReporter } from "../src/reporter.js";
 import { ScenarioUser } from "../src/scenario-user.js";
 import type { GroupInfo, MessagePush, SendMessageAck } from "../src/types.js";
@@ -40,7 +46,7 @@ try {
   const group = await owner.http.post<GroupInfo>("/api/group/create", {
     groupName,
     members: memberIds,
-    needVerification: 0,
+    needVerification: GROUP_JOIN_VERIFICATION_CODE.DIRECT,
   });
   assertOk(group.groupId, "group.create did not return groupId");
   reporter.metric("groupId", group.groupId);
@@ -55,10 +61,10 @@ try {
   for (let i = 0; i < messageCount; i++) {
     const text = `scenario message ${i + 1}/${messageCount}`;
     sentTexts.push(text);
-    const ack = await owner.ws.request<SendMessageAck>("chat.send.group", {
+    const ack = await owner.ws.request<SendMessageAck>(SCENARIO_OP.CHAT_SEND_GROUP, {
       groupId: group.groupId,
       clientMsgId: nextClientMsgId("scenario-group"),
-      _ct: "text",
+      _ct: SCENARIO_CONTENT_TYPE.TEXT,
       content: { text },
     });
     assertOk(ack.data?.seq !== undefined, `message ${i + 1} did not return seq`);
@@ -69,7 +75,7 @@ try {
   await Promise.all(receiverCursors.flatMap(({ user, cursor }) =>
     sentTexts.map((text) => user.ws.waitForPushAfter(cursor, (push) => {
       const data = push.data as MessagePush | undefined;
-      return push.op === "message" &&
+      return push.op === SCENARIO_PUSH_OP.MESSAGE &&
         data?.groupId === group.groupId &&
         data.fromUserId === owner.userId &&
         hasTextContent(data.content, text);

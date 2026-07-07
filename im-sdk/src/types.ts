@@ -6,6 +6,16 @@ import type { Message, NormalizedSignalingContent, OutgoingMessageContentTypeVal
 export * from "./errors.js";
 export { OP, PUSH_OP } from "./protocol/ops.js";
 export type { OpValue } from "./protocol/ops.js";
+export {
+  ACK_OP,
+  AUTH_SCHEME,
+  HTTP_CONTENT_TYPE,
+  HTTP_HEADER,
+  PROTOCOL_SUCCESS_CODE,
+  WS_FRAME_FIELD,
+  WS_HEARTBEAT_SEQ,
+} from "./protocol/constants.js";
+export { SDK_DEFAULTS } from "./config/defaults.js";
 export * from "./models/message.js";
 
 export type ConnectionState = "disconnected" | "connecting" | "connected" | "reconnecting";
@@ -116,6 +126,13 @@ export const GroupMemberRole = {
 } as const;
 export type GroupMemberRoleValue = (typeof GroupMemberRole)[keyof typeof GroupMemberRole];
 
+export const GROUP_MEMBER_ROLE_RANK: Record<GroupMemberRoleValue, number> = {
+  [GroupMemberRole.OWNER]: 200,
+  [GroupMemberRole.ADMIN]: 100,
+  [GroupMemberRole.MEMBER]: 1,
+  [GroupMemberRole.REMOVED]: -1,
+};
+
 export const UserAdminLevel = {
   NORMAL: "NORMAL",
   ADMIN: "ADMIN",
@@ -124,17 +141,7 @@ export const UserAdminLevel = {
 export type UserAdminLevelValue = (typeof UserAdminLevel)[keyof typeof UserAdminLevel];
 
 export function groupMemberRoleRank(role?: GroupMemberRoleValue): number {
-  switch (role) {
-    case GroupMemberRole.OWNER:
-      return 200;
-    case GroupMemberRole.ADMIN:
-      return 100;
-    case GroupMemberRole.REMOVED:
-      return -1;
-    case GroupMemberRole.MEMBER:
-    default:
-      return 1;
-  }
+  return role ? GROUP_MEMBER_ROLE_RANK[role] : GROUP_MEMBER_ROLE_RANK[GroupMemberRole.MEMBER];
 }
 
 export function isGroupConversation(conversation: { conversationType: ConversationTypeValue }): boolean {
@@ -393,19 +400,19 @@ export interface IMOptions {
   getToken?: () => string | null;
   getRefreshToken?: () => string | null;
   onTokenChanged?: (tokens: TokenPair) => void;
-  /** 自动重连次数上限（默认 10） */
+  /** 自动重连次数上限（默认见 SDK_DEFAULTS.maxReconnect） */
   maxReconnect?: number;
-  /** 心跳间隔 ms（默认 7000） */
+  /** 心跳间隔 ms（默认见 SDK_DEFAULTS.heartbeatIntervalMs） */
   heartbeatInterval?: number;
-  /** 请求超时 ms（默认 30000） */
+  /** 请求超时 ms（默认见 SDK_DEFAULTS.requestTimeoutMs） */
   requestTimeout?: number;
   /** 生成请求关联 ID。默认自动生成 req_xxx，用于前后端日志串联。 */
   requestIdFactory?: () => string;
-  /** 消息推送批处理窗口 ms（默认 16，一帧内合并）。设为 0 可关闭批处理延迟。 */
+  /** 消息推送批处理窗口 ms（默认见 SDK_DEFAULTS.messageBatchIntervalMs）。设为 0 可关闭批处理延迟。 */
   messageBatchInterval?: number;
-  /** 单批消息数量上限（默认 100）。超过后立即刷出，避免缓冲过大。 */
+  /** 单批消息数量上限（默认见 SDK_DEFAULTS.messageBatchSize）。超过后立即刷出，避免缓冲过大。 */
   messageBatchSize?: number;
-  /** ready()/waitConnected() 默认等待连接超时 ms（默认 10000）。 */
+  /** ready()/waitConnected() 默认等待连接超时 ms（默认见 SDK_DEFAULTS.connectTimeoutMs）。 */
   connectTimeout?: number;
   /** 重连成功后是否按宿主提供的游标补消息（默认 false）。 */
   syncOnReconnect?: boolean;

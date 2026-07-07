@@ -8,6 +8,7 @@ import com.im.api.IRouteTable;
 import com.im.api.Message;
 import com.im.api.MessageQueueTopics;
 import com.im.api.PlatformID;
+import com.im.api.QueueMessageHandler;
 import com.im.api.RouteBinding;
 import com.im.api.RouteNode;
 import com.im.core.session.NettyConnectionRef;
@@ -159,7 +160,7 @@ class DeliveryConsumerTest {
     }
 
     private static final class TestMessageQueue implements IMessageQueue {
-        private final Map<String, IMessageQueue.MessageHandler> handlers = new ConcurrentHashMap<>();
+        private final Map<String, QueueMessageHandler> handlers = new ConcurrentHashMap<>();
 
         @Override
         public void start() {
@@ -174,12 +175,12 @@ class DeliveryConsumerTest {
         }
 
         @Override
-        public void subscribe(String topic, MessageHandler handler) {
+        public void subscribe(String topic, QueueMessageHandler handler) {
             handlers.put(topic, handler);
         }
 
         @Override
-        public void unsubscribe(String topic, MessageHandler handler) {
+        public void unsubscribe(String topic, QueueMessageHandler handler) {
             handlers.remove(topic, handler);
         }
 
@@ -188,7 +189,7 @@ class DeliveryConsumerTest {
             return handlers.containsKey(topic);
         }
 
-        MessageHandler handler(String topic) {
+        QueueMessageHandler handler(String topic) {
             return handlers.get(topic);
         }
     }

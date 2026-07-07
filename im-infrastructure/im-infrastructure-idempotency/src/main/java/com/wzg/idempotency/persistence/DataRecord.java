@@ -287,7 +287,7 @@ public class DataRecord {
                 : OptionalLong.empty();
     }
 
-    public DataRecord(String idempotencyKey, Status status, long expiryTimestamp, String responseData,
+    public DataRecord(String idempotencyKey, DataRecordStatus status, long expiryTimestamp, String responseData,
             String payloadHash) {
         this.idempotencyKey = idempotencyKey;
         this.status = status.toString();
@@ -297,7 +297,7 @@ public class DataRecord {
         this.inProgressExpiryTimestamp = OptionalLong.empty();
     }
 
-    public DataRecord(String idempotencyKey, Status status, long expiryTimestamp, String responseData,
+    public DataRecord(String idempotencyKey, DataRecordStatus status, long expiryTimestamp, String responseData,
             String payloadHash, OptionalLong inProgressExpiryTimestamp) {
         this.idempotencyKey = idempotencyKey;
         this.status = status.toString();
@@ -317,12 +317,12 @@ public class DataRecord {
         return expiryTimestamp != 0 && now.isAfter(Instant.ofEpochSecond(expiryTimestamp));
     }
 
-    public Status getStatus() {
+    public DataRecordStatus getStatus() {
         Instant now = Instant.now();
         if (isExpired(now)) {
-            return Status.EXPIRED;
+            return DataRecordStatus.EXPIRED;
         } else {
-            return Status.valueOf(status);
+            return DataRecordStatus.valueOf(status);
         }
     }
 
@@ -377,19 +377,5 @@ public class DataRecord {
                 ", expiryTimestamp=" + expiryTimestamp +
                 ", payloadHash='" + payloadHash + '\'' +
                 '}';
-    }
-
-    public enum Status {
-        INPROGRESS("INPROGRESS"), COMPLETED("COMPLETED"), EXPIRED("EXPIRED");
-
-        private final String status;
-
-        Status(String status) {
-            this.status = status;
-        }
-
-        public String toString() {
-            return status;
-        }
     }
 }

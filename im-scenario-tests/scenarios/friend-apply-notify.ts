@@ -1,5 +1,6 @@
 import { assertOk } from "../src/assertions.js";
 import { loadScenarioConfig } from "../src/config.js";
+import { SCENARIO_PUSH_OP } from "../src/protocol.js";
 import { ScenarioReporter } from "../src/reporter.js";
 import { ScenarioUser } from "../src/scenario-user.js";
 import type { FriendApplyInfo, FriendInfo } from "../src/types.js";
@@ -39,7 +40,7 @@ try {
   await applicant.http.post("/api/friend/apply", { toUserId: receiver.userId, reqMsg });
   const createdPush = await receiver.ws.waitForPushAfter(receiverCursor, (push) => {
     const data = push.data as FriendApplyInfo | undefined;
-    return push.op === "friend.apply" &&
+    return push.op === SCENARIO_PUSH_OP.FRIEND_APPLY &&
       data?.fromUserId === applicant.userId &&
       data?.toUserId === receiver.userId &&
       data?.handleResult === "PENDING";
@@ -65,7 +66,7 @@ try {
   await receiver.http.post("/api/friend/approve", { fromUserId: applicant.userId, agreed: true, handleMsg: "ok" });
   await applicant.ws.waitForPushAfter(applicantCursor, (push) => {
     const data = push.data as FriendApplyInfo | undefined;
-    return push.op === "friend.apply" &&
+    return push.op === SCENARIO_PUSH_OP.FRIEND_APPLY &&
       data?.fromUserId === applicant.userId &&
       data?.toUserId === receiver.userId &&
       data?.handleResult === "AGREED";

@@ -43,19 +43,7 @@ public class ApiDispatcher {
 
     private final Map<String, RequestHandler> handlerMap = new ConcurrentHashMap<>();
     private final List<ApiInterceptor> interceptors = new CopyOnWriteArrayList<>();
-    private final Map<Class<? extends Throwable>, ExceptionHandler> exceptionHandlers = new LinkedHashMap<>();
-
-    /**
-     * 自定义异常处理器，用于为特定异常类型定制错误响应。
-     *
-     * <p>注册后，handler 执行中抛出该类型异常时优先调用此处理器。
-     * 处理器需自行通过 {@link ApiRequest#responseWriter()} 写回响应。
-     * 查找时按继承链向上匹配（子类 → 父类）。</p>
-     */
-    @FunctionalInterface
-    public interface ExceptionHandler {
-        void handle(Exception e, ApiRequest request);
-    }
+    private final Map<Class<? extends Throwable>, ApiExceptionHandler> exceptionHandlers = new LinkedHashMap<>();
 
     public ApiDispatcher() {
     }
@@ -66,9 +54,9 @@ public class ApiDispatcher {
      * @param type    异常类型（如 {@code RetryExecutionException.class}）
      * @param handler 自定义处理逻辑
      */
-    public ApiDispatcher registerExceptionHandler(Class<? extends Throwable> type, ExceptionHandler handler) {
+    public ApiDispatcher registerExceptionHandler(Class<? extends Throwable> type, ApiExceptionHandler handler) {
         exceptionHandlers.put(type, handler);
-        log.info("ExceptionHandler registered: {}", type.getSimpleName());
+        log.info("ApiExceptionHandler registered: {}", type.getSimpleName());
         return this;
     }
 
@@ -215,7 +203,7 @@ public class ApiDispatcher {
             writeImError(request, e);
         } catch (Exception e) {
             handlerEx = e;
-            ExceptionHandler customHandler = findExceptionHandler(e.getClass());
+            ApiExceptionHandler customHandler = findExceptionHandler(e.getClass());
             if (customHandler != null) {
                 log.warn("Handler error handled by custom handler: op={}, ex={}",
                         request.operation(), e.getClass().getSimpleName());
@@ -257,10 +245,10 @@ public class ApiDispatcher {
         request.responseWriter().writeError(e.getErrorCode(), detail);
     }
 
-    /** 按异常类型的继承链查找匹配的 ExceptionHandler。 */
-    private ExceptionHandler findExceptionHandler(Class<? extends Throwable> exceptionClass) {
+    /** 按异常类型的继承链查找匹配的 ApiExceptionHandler。 */
+    private ApiExceptionHandler findExceptionHandler(Class<? extends Throwable> exceptionClass) {
         for (Class<?> cls = exceptionClass; cls != null && cls != Throwable.class; cls = cls.getSuperclass()) {
-            ExceptionHandler handler = exceptionHandlers.get(cls);
+            ApiExceptionHandler handler = exceptionHandlers.get(cls);
             if (handler != null) return handler;
         }
         return null;

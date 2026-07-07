@@ -47,6 +47,19 @@ public class RedisClusterMessageBus implements IClusterMessageBus {
     private static final String NODE_CHANNEL_PREFIX = "im:node:";
     private static final String NODE_CHANNEL_SUFFIX = ":msgs";
     private static final long PUBLISH_TIMEOUT_SECONDS = 3;
+    private static final String FIELD_KIND = "kind";
+    private static final String FIELD_FROM_NODE_ID = "fromNodeId";
+    private static final String FIELD_TTL = "ttl";
+    private static final String FIELD_COMMAND = "command";
+    private static final String FIELD_MESSAGE = "message";
+    private static final String FIELD_TARGET_PLATFORM_ID = "targetPlatformId";
+    private static final String FIELD_TARGET_SESSION_ID = "targetSessionId";
+    private static final String FIELD_COMMAND_TYPE = "type";
+    private static final String FIELD_COMMAND_USER_ID = "userId";
+    private static final String FIELD_COMMAND_PLATFORM_ID = "platformId";
+    private static final String FIELD_COMMAND_SESSION_ID = "sessionId";
+    private static final String FIELD_COMMAND_REASON = "reason";
+    private static final String FIELD_COMMAND_PAYLOAD = "payload";
 
     private static final ObjectMapper MAPPER = ObjectMapperProvider.get();
 
@@ -210,17 +223,17 @@ public class RedisClusterMessageBus implements IClusterMessageBus {
      */
     String serialize(ClusterMessage msg) throws Exception {
         Map<String, Object> root = new LinkedHashMap<>();
-        root.put("kind", msg.getKind().name());
-        root.put("fromNodeId", msg.getFromNodeId());
-        root.put("ttl", msg.getTtl());
+        root.put(FIELD_KIND, msg.getKind().name());
+        root.put(FIELD_FROM_NODE_ID, msg.getFromNodeId());
+        root.put(FIELD_TTL, msg.getTtl());
         if (msg.getKind() == ClusterMessageKind.CLUSTER_COMMAND) {
-            root.put("command", commandToMap(msg.getCommand()));
+            root.put(FIELD_COMMAND, commandToMap(msg.getCommand()));
         } else {
             Message message = msg.getMessage();
-            root.put("message", message.toJsonMap());
+            root.put(FIELD_MESSAGE, message.toJsonMap());
             if (msg.hasTargetBinding()) {
-                root.put("targetPlatformId", msg.getTargetPlatformId());
-                root.put("targetSessionId", msg.getTargetSessionId());
+                root.put(FIELD_TARGET_PLATFORM_ID, msg.getTargetPlatformId());
+                root.put(FIELD_TARGET_SESSION_ID, msg.getTargetSessionId());
             }
         }
 
@@ -233,46 +246,48 @@ public class RedisClusterMessageBus implements IClusterMessageBus {
     ClusterMessage deserialize(String json) throws Exception {
         Map<String, Object> root = MAPPER.readValue(json, new TypeReference<Map<String, Object>>() {});
 
-        String kindStr = (String) root.get("kind");
-        String fromNodeId = (String) root.get("fromNodeId");
-        int ttl = ((Number) root.get("ttl")).intValue();
+        String kindStr = (String) root.get(FIELD_KIND);
+        String fromNodeId = (String) root.get(FIELD_FROM_NODE_ID);
+        int ttl = ((Number) root.get(FIELD_TTL)).intValue();
 
         ClusterMessageKind kind = ClusterMessageKind.valueOf(kindStr);
         if (kind == ClusterMessageKind.CLUSTER_COMMAND) {
             @SuppressWarnings("unchecked")
-            Map<String, Object> commandMap = (Map<String, Object>) root.get("command");
+            Map<String, Object> commandMap = (Map<String, Object>) root.get(FIELD_COMMAND);
             return new ClusterMessage(kind, fromNodeId, commandFromMap(commandMap), ttl);
         }
 
         @SuppressWarnings("unchecked")
-        Map<String, Object> msgMap = (Map<String, Object>) root.get("message");
-        Integer targetPlatformId = root.containsKey("targetPlatformId")
-                ? ((Number) root.get("targetPlatformId")).intValue()
+        Map<String, Object> msgMap = (Map<String, Object>) root.get(FIELD_MESSAGE);
+        Integer targetPlatformId = root.containsKey(FIELD_TARGET_PLATFORM_ID)
+                ? ((Number) root.get(FIELD_TARGET_PLATFORM_ID)).intValue()
                 : null;
-        String targetSessionId = (String) root.get("targetSessionId");
+        String targetSessionId = (String) root.get(FIELD_TARGET_SESSION_ID);
         return new ClusterMessage(kind, fromNodeId, Message.fromJsonMap(msgMap),
                 targetPlatformId, targetSessionId, ttl);
     }
 
     private static Map<String, Object> commandToMap(ClusterCommand command) {
         Map<String, Object> map = new LinkedHashMap<>();
-        map.put("type", command.type().name());
-        map.put("userId", command.userId());
-        map.put("platformId", command.platformId());
-        map.put("sessionId", command.sessionId());
-        map.put("reason", command.reason());
-        map.put("payload", command.payload());
+        map.put(FIELD_COMMAND_TYPE, command.type().name());
+        map.put(FIELD_COMMAND_USER_ID, command.userId());
+        map.put(FIELD_COMMAND_PLATFORM_ID, command.platformId());
+        map.put(FIELD_COMMAND_SESSION_ID, command.sessionId());
+        map.put(FIELD_COMMAND_REASON, command.reason());
+        map.put(FIELD_COMMAND_PAYLOAD, command.payload());
         return map;
     }
 
     private static ClusterCommand commandFromMap(Map<String, Object> map) {
-        ClusterCommandType type = ClusterCommandType.valueOf((String) map.get("type"));
-        String userId = (String) map.get("userId");
-        int platformId = ((Number) map.getOrDefault("platformId", -1)).intValue();
-        String sessionId = (String) map.getOrDefault("sessionId", "default");
-        String reason = (String) map.get("reason");
+        ClusterCommandType type = ClusterCommandType.valueOf((String) map.get(FIELD_COMMAND_TYPE));
+        String userId = (String) map.get(FIELD_COMMAND_USER_ID);
+        int platformId = ((Number) map.getOrDefault(FIELD_COMMAND_PLATFORM_ID,
+                ClusterCommand.ANY_PLATFORM_ID)).intValue();
+        String sessionId = (String) map.getOrDefault(FIELD_COMMAND_SESSION_ID,
+                ClusterCommand.DEFAULT_SESSION_ID);
+        String reason = (String) map.get(FIELD_COMMAND_REASON);
         @SuppressWarnings("unchecked")
-        Map<String, Object> payload = (Map<String, Object>) map.getOrDefault("payload", Map.of());
+        Map<String, Object> payload = (Map<String, Object>) map.getOrDefault(FIELD_COMMAND_PAYLOAD, Map.of());
         return new ClusterCommand(type, userId, platformId, sessionId, reason, payload);
     }
 

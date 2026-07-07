@@ -71,19 +71,19 @@ class DispatcherFactoryTest {
 
         return new DispatcherDependencies(
                 "node-test",
-                new ServerComponentsFactory.RuntimeDependencies(
+                new RuntimeDependencies(
                         sessionManager,
                         new PendingAcknowledgementManager(),
                         fake(ExecutorService.class),
                         null,
                         null,
                         null,
-                        new ServerComponentsFactory.RuntimeMessageRevokeNotifier("node-test", sessionManager)),
-                new ServerComponentsFactory.ClusterDependencies(
+                        new RuntimeMessageRevokeNotifier("node-test", sessionManager)),
+                new ClusterDependencies(
                         fake(IRouteTable.class),
                         fake(IClusterMessageBus.class),
                         fake(com.im.api.INodeDiscovery.class)),
-                new ServerComponentsFactory.BusinessDependencies(
+                new BusinessDependencies(
                         authenticator,
                         fake(RetryExecutor.class),
                         fake(IGroupManager.class),
@@ -92,7 +92,7 @@ class DispatcherFactoryTest {
                         userManager,
                         fake(IUserCredentialStore.class),
                         fake(IPasswordHasher.class)),
-                new ServerComponentsFactory.StorageDependencies(
+                new StorageDependencies(
                         fake(ISequenceManager.class),
                         fake(IMessageStore.class),
                         fake(ISingleMessageStore.class),
@@ -103,7 +103,7 @@ class DispatcherFactoryTest {
                         fake(IFileStorageService.class),
                         directFileTransferUseCase(),
                         fake(ISystemMessageStore.class)),
-                new ServerComponentsFactory.CallDependencies(
+                new CallDependencies(
                         fake(ICallManager.class),
                         (CallStateManager) null,
                         new GroupCallManager(fake(IGroupManager.class), fake(ICallManager.class),

@@ -79,9 +79,9 @@ class ContentValidationTest {
     @Test
     void imageContentValid() {
         ImageContent c = new ImageContent(
-                new ImageContent.PictureInfo("u1", "image/png", 65536L, 800, 600, "https://cdn.example.com/source.png"),
-                new ImageContent.PictureInfo("u2", "image/png", 16384L, 400, 300, "https://cdn.example.com/big.png"),
-                new ImageContent.PictureInfo("u3", "image/png", 4096L, 200, 150, "https://cdn.example.com/snap.png"));
+                new PictureInfo("u1", "image/png", 65536L, 800, 600, "https://cdn.example.com/source.png"),
+                new PictureInfo("u2", "image/png", 16384L, 400, 300, "https://cdn.example.com/big.png"),
+                new PictureInfo("u3", "image/png", 4096L, 200, 150, "https://cdn.example.com/snap.png"));
         assertDoesNotThrow(c::validate);
     }
 
@@ -94,7 +94,7 @@ class ContentValidationTest {
     @Test
     void imageContentBadPictureInfoThrows() {
         ImageContent c = new ImageContent(
-                new ImageContent.PictureInfo("u1", "", 0, 0, 0, ""),
+                new PictureInfo("u1", "", 0, 0, 0, ""),
                 null, null);
         assertThrows(IllegalArgumentException.class, c::validate);
     }
@@ -213,7 +213,7 @@ class ContentValidationTest {
         assertEquals(ContentType.TEXT, new TextContent("x").getContentType());
         assertEquals(ContentType.FILE, new FileContent("u", "a.txt", 1, "http://u").getContentType());
         assertEquals(ContentType.IMAGE, new ImageContent(
-                new ImageContent.PictureInfo("u", "image/png", 1, 1, 1, "http://u"),
+                new PictureInfo("u", "image/png", 1, 1, 1, "http://u"),
                 null, null).getContentType());
         assertEquals(ContentType.SYSTEM, new SystemContent("t", null).getContentType());
         assertEquals(ContentType.VOICE, new VoiceContent("u", "http://u", 1, 1).getContentType());

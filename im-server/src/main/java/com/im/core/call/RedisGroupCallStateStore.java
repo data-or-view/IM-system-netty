@@ -1,5 +1,6 @@
 package com.im.core.call;
 
+import com.im.core.redis.CloseableRedisCommands;
 import com.im.core.redis.RedisConfiguration;
 import io.lettuce.core.api.sync.RedisCommands;
 
@@ -27,7 +28,7 @@ public class RedisGroupCallStateStore implements GroupCallStateStore {
 
     @Override
     public GroupCallSession getActiveByGroup(String groupId) {
-        try (RedisConfiguration.CloseableRedisCommands redis = redisConfig.createSyncCommands()) {
+        try (CloseableRedisCommands redis = redisConfig.createSyncCommands()) {
             RedisCommands<String, String> sync = redis.sync();
             return read(sync, groupId);
         }
@@ -35,7 +36,7 @@ public class RedisGroupCallStateStore implements GroupCallStateStore {
 
     @Override
     public GroupCallSession createIfAbsent(GroupCallSession session) {
-        try (RedisConfiguration.CloseableRedisCommands redis = redisConfig.createSyncCommands()) {
+        try (CloseableRedisCommands redis = redisConfig.createSyncCommands()) {
             RedisCommands<String, String> sync = redis.sync();
             String key = groupKey(session.groupId());
             Boolean created = sync.hsetnx(key, "roomId", session.roomId());
@@ -59,7 +60,7 @@ public class RedisGroupCallStateStore implements GroupCallStateStore {
 
     @Override
     public GroupCallSession addParticipant(String groupId, String userId) {
-        try (RedisConfiguration.CloseableRedisCommands redis = redisConfig.createSyncCommands()) {
+        try (CloseableRedisCommands redis = redisConfig.createSyncCommands()) {
             RedisCommands<String, String> sync = redis.sync();
             if (!sync.exists(groupKey(groupId)).equals(1L)) return null;
             sync.hset(memberKey(groupId), userId, String.valueOf(System.currentTimeMillis()));
@@ -72,7 +73,7 @@ public class RedisGroupCallStateStore implements GroupCallStateStore {
 
     @Override
     public GroupCallSession removeParticipant(String groupId, String userId) {
-        try (RedisConfiguration.CloseableRedisCommands redis = redisConfig.createSyncCommands()) {
+        try (CloseableRedisCommands redis = redisConfig.createSyncCommands()) {
             RedisCommands<String, String> sync = redis.sync();
             GroupCallSession before = read(sync, groupId);
             if (before == null) return null;
@@ -89,7 +90,7 @@ public class RedisGroupCallStateStore implements GroupCallStateStore {
 
     @Override
     public GroupCallSession end(String groupId) {
-        try (RedisConfiguration.CloseableRedisCommands redis = redisConfig.createSyncCommands()) {
+        try (CloseableRedisCommands redis = redisConfig.createSyncCommands()) {
             RedisCommands<String, String> sync = redis.sync();
             GroupCallSession before = read(sync, groupId);
             sync.del(groupKey(groupId), memberKey(groupId));

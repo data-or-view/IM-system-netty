@@ -1,5 +1,6 @@
 package com.im.core.call;
 
+import com.im.core.redis.CloseableRedisCommands;
 import com.im.core.redis.RedisConfiguration;
 import io.lettuce.core.ScriptOutputType;
 import io.lettuce.core.api.sync.RedisCommands;
@@ -79,7 +80,7 @@ public class RedisSingleCallStateStore implements SingleCallStateStore {
     @Override
     public SingleCallSession getByRoom(String roomId) {
         if (!hasText(roomId)) return null;
-        try (RedisConfiguration.CloseableRedisCommands redis = redisConfig.createSyncCommands()) {
+        try (CloseableRedisCommands redis = redisConfig.createSyncCommands()) {
             RedisCommands<String, String> sync = redis.sync();
             return read(sync, roomId);
         }
@@ -88,7 +89,7 @@ public class RedisSingleCallStateStore implements SingleCallStateStore {
     @Override
     public SingleCallSession getActiveByUser(String userId) {
         if (!hasText(userId)) return null;
-        try (RedisConfiguration.CloseableRedisCommands redis = redisConfig.createSyncCommands()) {
+        try (CloseableRedisCommands redis = redisConfig.createSyncCommands()) {
             RedisCommands<String, String> sync = redis.sync();
             String roomId = sync.get(userKey(userId));
             return hasText(roomId) ? read(sync, roomId) : null;
@@ -97,7 +98,7 @@ public class RedisSingleCallStateStore implements SingleCallStateStore {
 
     @Override
     public SingleCallSession createIfUsersIdle(SingleCallSession session) {
-        try (RedisConfiguration.CloseableRedisCommands redis = redisConfig.createSyncCommands()) {
+        try (CloseableRedisCommands redis = redisConfig.createSyncCommands()) {
             RedisCommands<String, String> sync = redis.sync();
             Long created = sync.eval(CREATE_IF_IDLE_SCRIPT, ScriptOutputType.INTEGER,
                     new String[]{roomKey(session.roomId()), userKey(session.callerId()), userKey(session.calleeId())},
@@ -117,7 +118,7 @@ public class RedisSingleCallStateStore implements SingleCallStateStore {
     @Override
     public SingleCallSession accept(String roomId) {
         if (!hasText(roomId)) return null;
-        try (RedisConfiguration.CloseableRedisCommands redis = redisConfig.createSyncCommands()) {
+        try (CloseableRedisCommands redis = redisConfig.createSyncCommands()) {
             RedisCommands<String, String> sync = redis.sync();
             SingleCallSession session = read(sync, roomId);
             if (session == null) return null;
@@ -135,7 +136,7 @@ public class RedisSingleCallStateStore implements SingleCallStateStore {
     @Override
     public SingleCallSession acceptBy(String roomId, String actorId) {
         if (!hasText(roomId) || !hasText(actorId)) return null;
-        try (RedisConfiguration.CloseableRedisCommands redis = redisConfig.createSyncCommands()) {
+        try (CloseableRedisCommands redis = redisConfig.createSyncCommands()) {
             RedisCommands<String, String> sync = redis.sync();
             SingleCallSession before = read(sync, roomId);
             if (before == null) return null;
@@ -153,7 +154,7 @@ public class RedisSingleCallStateStore implements SingleCallStateStore {
     @Override
     public SingleCallSession timeoutIfRinging(String roomId) {
         if (!hasText(roomId)) return null;
-        try (RedisConfiguration.CloseableRedisCommands redis = redisConfig.createSyncCommands()) {
+        try (CloseableRedisCommands redis = redisConfig.createSyncCommands()) {
             RedisCommands<String, String> sync = redis.sync();
             SingleCallSession session = read(sync, roomId);
             if (session == null) return null;
@@ -167,7 +168,7 @@ public class RedisSingleCallStateStore implements SingleCallStateStore {
     @Override
     public SingleCallSession end(String roomId) {
         if (!hasText(roomId)) return null;
-        try (RedisConfiguration.CloseableRedisCommands redis = redisConfig.createSyncCommands()) {
+        try (CloseableRedisCommands redis = redisConfig.createSyncCommands()) {
             RedisCommands<String, String> sync = redis.sync();
             SingleCallSession session = read(sync, roomId);
             if (session == null) return null;
@@ -179,7 +180,7 @@ public class RedisSingleCallStateStore implements SingleCallStateStore {
     @Override
     public SingleCallSession endBy(String roomId, String actorId) {
         if (!hasText(roomId) || !hasText(actorId)) return null;
-        try (RedisConfiguration.CloseableRedisCommands redis = redisConfig.createSyncCommands()) {
+        try (CloseableRedisCommands redis = redisConfig.createSyncCommands()) {
             RedisCommands<String, String> sync = redis.sync();
             SingleCallSession session = read(sync, roomId);
             if (session == null) return null;

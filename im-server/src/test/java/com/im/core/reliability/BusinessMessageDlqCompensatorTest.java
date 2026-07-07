@@ -3,6 +3,7 @@ package com.im.core.reliability;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.im.api.IMessageQueue;
 import com.im.api.Message;
+import com.im.api.QueueMessageHandler;
 import com.im.api.BusinessMessageDlqRecord;
 import com.im.api.BusinessMessageDlqStore;
 import com.im.core.serialization.jackson.ObjectMapperProvider;
@@ -64,8 +65,8 @@ class BusinessMessageDlqCompensatorTest {
         @Override public void start() {}
         @Override public void stop() {}
         @Override public void publish(String topic, Message msg) { published.add(new Published(topic, msg)); }
-        @Override public void subscribe(String topic, MessageHandler handler) {}
-        @Override public void unsubscribe(String topic, MessageHandler handler) {}
+        @Override public void subscribe(String topic, QueueMessageHandler handler) {}
+        @Override public void unsubscribe(String topic, QueueMessageHandler handler) {}
         @Override public boolean hasSubscribers(String topic) { return false; }
     }
 

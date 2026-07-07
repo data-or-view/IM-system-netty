@@ -1,4 +1,5 @@
 import { ScenarioHttpClient } from "./http-client.js";
+import { SCENARIO_OP } from "./protocol.js";
 import { ScenarioWsClient } from "./ws-client.js";
 import type { RegisterResult, TokenPair } from "./types.js";
 
@@ -42,7 +43,7 @@ export class ScenarioUser {
   async connectAndLogin(): Promise<void> {
     if (!this.userId) throw new Error("register must be called before login");
     await this.ws.connect();
-    const response = await this.ws.request<TokenPair>("login", {
+    const response = await this.ws.request<TokenPair>(SCENARIO_OP.LOGIN, {
       userId: this.userId,
       password: this.options.password,
     });

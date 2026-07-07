@@ -48,6 +48,24 @@
 | `ImException` | 业务异常类 |
 | `MessageQueueTopics` | MQ 主题常量 |
 
+### 协议与权限门禁
+
+| 类 | 用途 |
+|----|------|
+| `Operation` | HTTP/WS 协议单点真理，定义 opName、HTTP method/path、是否需要认证和传输类型。 |
+| `OperationContract` | 每个公开操作的机器可读协议 contract，记录分类、请求形态和响应形态。 |
+| `AuthzPolicy` | 每个公开操作的权限 scope、资源规则和执行 owner。 |
+
+`OperationContract` 和 `AuthzPolicy` 都使用不带 `default` 的 exhaustive `switch`。新增 `Operation` 后如果没有同步补协议 contract 和权限矩阵，Java 编译或 `im-api` 测试会失败。
+
+本地门禁命令：
+
+```bash
+mvn -pl im-api -am -Dtest=OperationContractTest,AuthzPolicyTest -Dsurefire.failIfNoSpecifiedTests=false test
+```
+
+权限矩阵的人类可读版本见 [docs/authz-matrix.md](../docs/authz-matrix.md)。
+
 ### 内容类型
 | 类 | 用途 |
 |----|------|

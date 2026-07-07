@@ -3,6 +3,7 @@ package com.im.core.handler.unified;
 import com.im.api.ApiRequest;
 import com.im.api.ISystemMessageStore;
 import com.im.api.IUserManager;
+import com.im.api.Operation;
 import com.im.api.RequestPreconditions;
 import com.im.api.RequestHandler;
 import com.im.api.SystemMessage;
@@ -33,14 +34,16 @@ public class SystemMessageHandler implements RequestHandler {
 
     @Override
     public Object handle(ApiRequest req) {
-        return switch (req.operation()) {
-            case "system.channel.list" -> handleChannelList(req);
-            case "system.message.list" -> handleMessageList(req);
-            case "system.message.detail" -> handleMessageDetail(req);
-            case "system.message.read" -> handleMessageRead(req);
-            case "system.message.read_all" -> handleMessageReadAll(req);
-            case "system.message.unread_count" -> handleUnreadCount(req);
-            case "admin.system.message.publish" -> handlePublish(req);
+        Operation operation = Operation.fromOpName(req.operation());
+        if (operation == null) throw new NotFoundException("unsupported: " + req.operation());
+        return switch (operation) {
+            case SYSTEM_CHANNEL_LIST -> handleChannelList(req);
+            case SYSTEM_MESSAGE_LIST -> handleMessageList(req);
+            case SYSTEM_MESSAGE_DETAIL -> handleMessageDetail(req);
+            case SYSTEM_MESSAGE_READ -> handleMessageRead(req);
+            case SYSTEM_MESSAGE_READ_ALL -> handleMessageReadAll(req);
+            case SYSTEM_MESSAGE_UNREAD_COUNT -> handleUnreadCount(req);
+            case ADMIN_SYSTEM_MESSAGE_PUBLISH -> handlePublish(req);
             default -> throw new NotFoundException("unsupported: " + req.operation());
         };
     }

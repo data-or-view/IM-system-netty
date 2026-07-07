@@ -33,7 +33,7 @@ public class DeliveryConsumer implements Lifecycle {
     private final SendMessageIdempotency idempotency;
     private final BusinessMessageDlqStore failureStore;
 
-    private volatile IMessageQueue.MessageHandler handler;
+    private volatile QueueMessageHandler handler;
 
     public DeliveryConsumer(
             IMessageQueue messageQueue,
@@ -79,7 +79,7 @@ public class DeliveryConsumer implements Lifecycle {
 
     @Override
     public void start() {
-        IMessageQueue.MessageHandler delegate = workflow::deliver;
+        QueueMessageHandler delegate = workflow::deliver;
 
         this.handler = retryExecutor != null
                 ? new ReliableMessageHandler(MessageQueueTopics.DELIVER, delegate,

@@ -165,6 +165,48 @@ IM_* 环境变量
 | `im.call.*` | LiveKit 通话配置。多机部署时 `sfu-endpoint` 不能是 localhost。 |
 | `im.http.cors.allowed-origins` | 前端 dev server 默认 `39073`。 |
 
+## P0 质量门禁
+
+这五项是企业级开发的第一层门禁：
+
+| 门禁 | 资产 | 本地命令 |
+|------|------|----------|
+| CI | `.github/workflows/p0-quality-gate.yml` | 见 workflow；本地可按下方命令逐项运行。 |
+| Protocol contract | `OperationContract.java`、`OperationContractTest.java` | `mvn -pl im-api -am -Dtest=OperationContractTest -Dsurefire.failIfNoSpecifiedTests=false test` |
+| Authz matrix | `AuthzPolicy.java`、`AuthzPolicyTest.java`、`docs/authz-matrix.md` | `mvn -pl im-api -am -Dtest=AuthzPolicyTest -Dsurefire.failIfNoSpecifiedTests=false test` |
+| Health/readiness | `/health/live`、`/health/ready`、`HealthProbeHandler.java` | `mvn -pl im-server -am -Dtest=HttpRequestAdapterTest -Dsurefire.failIfNoSpecifiedTests=false test` |
+| Scenario layering | `im-scenario-tests/package.json`、`im-scenario-tests/README.md` | `pnpm --dir im-scenario-tests scenario:ci` |
+
+完整离线门禁：
+
+```bash
+mvn -B test
+pnpm --dir im-web test:engineering
+pnpm --dir im-web build
+npm --prefix im-sdk test
+pnpm --dir im-scenario-tests scenario:ci
+```
+
+本地集群和依赖服务都启动后，再跑真实协议场景：
+
+```bash
+pnpm --dir im-scenario-tests scenario:p0
+pnpm --dir im-scenario-tests scenario:full
+```
+
+这两个命令默认把非 cluster 场景指向本地集群 node-1 (`HTTP=8088`、`WS=8081`)，最后再跑 `cluster-ha`。
+
+`*E2ETest` 是本地依赖型 Maven E2E，`im-server` 的 Surefire 默认排除它；需要 MySQL/Redis 等依赖和正确凭据时用 `-Dtest='*E2ETest'` 单独运行。
+
+## 健康检查
+
+健康检查不属于 `Operation`，也不需要鉴权。它在 HTTP 适配器进入业务路由前处理，便于负载均衡器和本地脚本在服务限流或停机排水时仍能观察节点状态。
+
+| Endpoint | HTTP | 含义 |
+|----------|------|------|
+| `/health/live` | `200` | 进程存活，返回当前 `nodeId` 和 `process=UP`。 |
+| `/health/ready` | `200` / `503` | 请求接纳状态；`requestAdmission=DOWN` 时返回 `503`，用于摘流和停止接入。 |
+
 ## 后端关键类
 
 | 类 | 作用 |

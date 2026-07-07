@@ -41,6 +41,19 @@ pnpm --dir im-scenario-tests test
 
 编译并运行测试基座单元测试。
 
+### 场景分层
+
+| 层级 | 命令 | 何时运行 |
+|------|------|----------|
+| 静态基座 | `pnpm --dir im-scenario-tests scenario:ci` | CI 默认运行；只验证 TypeScript 编译和测试基座配置，不要求后端启动。 |
+| 冒烟 | `pnpm --dir im-scenario-tests scenario:smoke` | 后端单节点启动后快速确认 HTTP/WS 基础链路。 |
+| 核心业务 | `pnpm --dir im-scenario-tests scenario:core` | 单节点或本地开发集群稳定后，覆盖群聊、群通话、离线同步、申请通知、系统消息和会话副作用。 |
+| 混沌/幂等 | `pnpm --dir im-scenario-tests scenario:chaos` | 改消息投递、幂等、重试逻辑后运行。 |
+| P0 本地门禁 | `pnpm --dir im-scenario-tests scenario:p0` | 本地双节点集群和依赖服务已启动后运行，包含 smoke、core、chaos、cluster-ha。单节点层默认打到 node-1。 |
+| 全量场景 | `pnpm --dir im-scenario-tests scenario:full` | 发布前或大重构后运行，包含所有场景和 cluster-ha。单节点层默认打到 node-1。 |
+
+`scenario:p0` 和 `scenario:full` 需要真实 Redis/MySQL/MQ/MinIO 依赖和本地双节点后端。默认会把非 cluster 场景的 `IM_SCENARIO_HTTP_URL` / `IM_SCENARIO_WS_URL` 指向 node-1 (`8088` / `8081`)；如果你改了集群端口，同时覆盖 `IM_SCENARIO_HTTP_URL`、`IM_SCENARIO_WS_URL` 和 `IM_SCENARIO_NODE*_URL`。CI 默认只运行 `scenario:ci`，避免把环境凭据问题误报成代码失败。
+
 ```bash
 pnpm --dir im-scenario-tests scenario:smoke
 ```

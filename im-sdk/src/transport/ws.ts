@@ -1,6 +1,9 @@
 import { type ConnectionState, type TokenPair, type WSResponse, type WSPush, PUSH_OP, IMConnectionError, IMError } from "../types.js";
 import { EventBus } from "../event-bus.js";
 import { RequestManager } from "../protocol/request-manager.js";
+import { SDK_DEFAULTS } from "../config/defaults.js";
+import { ACK_OP, PROTOCOL_SUCCESS_CODE, WS_FRAME_FIELD, WS_HEARTBEAT_SEQ } from "../protocol/constants.js";
+import { OP } from "../protocol/ops.js";
 
 export type WsEvents = {
   response: (resp: WSResponse) => void;
@@ -55,8 +58,8 @@ export class WsTransport {
     this.getToken = opts.getToken || (() => null);
     this.getRefreshToken = opts.getRefreshToken || (() => null);
     this.onTokenChanged = opts.onTokenChanged;
-    this.maxReconnect = opts.maxReconnect ?? 10;
-    this.heartbeatInterval = opts.heartbeatInterval ?? 7000;
+    this.maxReconnect = opts.maxReconnect ?? SDK_DEFAULTS.maxReconnect;
+    this.heartbeatInterval = opts.heartbeatInterval ?? SDK_DEFAULTS.heartbeatIntervalMs;
     this.reqManager = new RequestManager(opts.requestTimeout);
     this.reqManager.requestIdFactory = opts.requestIdFactory;
   }
@@ -112,12 +115,12 @@ export class WsTransport {
     // 自动注入 Authorization token
     const token = this.getToken();
     if (token) {
-      frame.Authorization = token;
+      frame[WS_FRAME_FIELD.AUTHORIZATION] = token;
     }
-    if (frame.op === "heartbeat") {
+    if (frame.op === OP.HEARTBEAT) {
       const refreshToken = this.getRefreshToken();
       if (refreshToken) {
-        frame.refreshToken = refreshToken;
+        frame[WS_FRAME_FIELD.REFRESH_TOKEN] = refreshToken;
       }
     }
     this.ws.send(JSON.stringify(frame));
@@ -219,7 +222,7 @@ export class WsTransport {
   }
 
   private handleTokenRefresh(resp: WSResponse): void {
-    if (resp.code !== 0 || resp.op !== "heartbeat_ack" || !resp.data || typeof resp.data !== "object") {
+    if (resp.code !== PROTOCOL_SUCCESS_CODE || resp.op !== ACK_OP.HEARTBEAT || !resp.data || typeof resp.data !== "object") {
       return;
     }
     const data = resp.data as TokenPair;
@@ -238,7 +241,10 @@ export class WsTransport {
     this.reconnectAttempts++;
     this.reqManager.rejectAll(`Reconnecting (attempt ${this.reconnectAttempts})`);
     this.setState("reconnecting");
-    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
+    const delay = Math.min(
+      SDK_DEFAULTS.reconnectBackoffBaseMs * Math.pow(2, this.reconnectAttempts),
+      SDK_DEFAULTS.reconnectBackoffMaxMs,
+    );
     this.reconnectTimer = setTimeout(() => this.doConnect(generation), delay);
   }
 
@@ -250,7 +256,11 @@ export class WsTransport {
   }
 
   private sendHeartbeat(): void {
-    this.send({ op: "heartbeat", seq: 0, _requestId: this.reqManager.nextRequestId() });
+    this.send({
+      op: OP.HEARTBEAT,
+      seq: WS_HEARTBEAT_SEQ,
+      [WS_FRAME_FIELD.REQUEST_ID]: this.reqManager.nextRequestId(),
+    });
   }
 
   private stopHeartbeat(): void {

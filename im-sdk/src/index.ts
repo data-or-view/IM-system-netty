@@ -32,6 +32,7 @@
  */
 
 import { EventBus } from "./event-bus.js";
+import { SDK_DEFAULTS } from "./config/defaults.js";
 
 // ── 导出类型 ──
 export * from "./types.js";
@@ -103,14 +104,14 @@ export class IMSDK {
   private connectTimeout: number;
   private wasConnected = false;
   private reconnectSyncRunning = false;
-  private readonly maxSeenMessageKeys = 1000;
+  private readonly maxSeenMessageKeys = SDK_DEFAULTS.maxSeenMessageKeys;
 
   constructor(private opts: IMOptions) {
     this.getToken = () => this.accessToken ?? opts.getToken?.() ?? null;
     this.getRefreshToken = () => this.refreshTokenValue ?? opts.getRefreshToken?.() ?? null;
-    this.messageBatchInterval = opts.messageBatchInterval ?? 16;
-    this.messageBatchSize = Math.max(1, opts.messageBatchSize ?? 100);
-    this.connectTimeout = opts.connectTimeout ?? 10000;
+    this.messageBatchInterval = opts.messageBatchInterval ?? SDK_DEFAULTS.messageBatchIntervalMs;
+    this.messageBatchSize = Math.max(1, opts.messageBatchSize ?? SDK_DEFAULTS.messageBatchSize);
+    this.connectTimeout = opts.connectTimeout ?? SDK_DEFAULTS.connectTimeoutMs;
     this.transport = new WsTransport({
       getToken: this.getToken,
       getRefreshToken: this.getRefreshToken,

@@ -3,6 +3,11 @@ import { nextClientMsgId } from "../src/client-msg-id.js";
 import { readNumberArg, readStringArg } from "../src/cli.js";
 import { loadScenarioConfig } from "../src/config.js";
 import { isSignalingContent } from "../src/message-content.js";
+import {
+  GROUP_JOIN_VERIFICATION_CODE,
+  SCENARIO_CONTENT_TYPE,
+  SCENARIO_PUSH_OP,
+} from "../src/protocol.js";
 import { ScenarioReporter } from "../src/reporter.js";
 import { ScenarioUser } from "../src/scenario-user.js";
 import type { GroupCallJoinResult, GroupCallSession, GroupInfo, MessagePush } from "../src/types.js";
@@ -39,7 +44,7 @@ try {
   const group = await owner.http.post<GroupInfo>("/api/group/create", {
     groupName: `scenario_group_call_${suffix}`,
     members: memberIds,
-    needVerification: 0,
+    needVerification: GROUP_JOIN_VERIFICATION_CODE.DIRECT,
   });
   assertOk(group.groupId, "group.create did not return groupId");
   reporter.metric("groupId", group.groupId);
@@ -58,10 +63,10 @@ try {
   reporter.step("checking online members receive group call signal push");
   await Promise.all(users.slice(1).map((user) => user.ws.waitForPush((push) => {
     const data = push.data as MessagePush | undefined;
-    return push.op === "message" &&
+    return push.op === SCENARIO_PUSH_OP.MESSAGE &&
       data?.groupId === group.groupId &&
       data.fromUserId === owner.userId &&
-      data.contentType === 5 &&
+      data.contentType === SCENARIO_CONTENT_TYPE.SIGNAL &&
       isSignalingContent(data.content, {
         roomId: started.roomId,
         action: "CALLING",

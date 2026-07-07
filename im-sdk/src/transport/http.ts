@@ -1,4 +1,11 @@
 import { IMHttpError, IMProtocolError, IMServerError, IMTimeoutError, type FileUploadResult } from "../types.js";
+import { SDK_DEFAULTS } from "../config/defaults.js";
+import {
+  AUTH_SCHEME,
+  HTTP_CONTENT_TYPE,
+  HTTP_HEADER,
+  PROTOCOL_SUCCESS_CODE,
+} from "../protocol/constants.js";
 
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
@@ -30,7 +37,7 @@ export class HttpTransport {
     this.getToken = opts.getToken ?? (() => null);
     this.fetchImpl = opts.fetchImpl ?? ((input, init) => globalThis.fetch(input, init));
     this.requestIdFactory = opts.requestIdFactory ?? defaultRequestId;
-    this.requestTimeout = opts.requestTimeout ?? 30_000;
+    this.requestTimeout = opts.requestTimeout ?? SDK_DEFAULTS.requestTimeoutMs;
   }
 
   get<T>(path: string, query: Record<string, unknown> = {}): Promise<T> {
@@ -63,7 +70,7 @@ export class HttpTransport {
     return this.postJson<PresignedPartResponse>("/api/file/multipart/part-sign", { uploadId, partNumber })
       .then(async (signed) => {
         const response = await this.putObject(signed.uploadUrl, data, signed.headers);
-        return response.headers.get("ETag") ?? response.headers.get("etag") ?? "";
+        return response.headers.get(HTTP_HEADER.ETAG) ?? response.headers.get(HTTP_HEADER.ETAG_LOWERCASE) ?? "";
       });
   }
 
@@ -84,7 +91,7 @@ export class HttpTransport {
       method: "POST",
       headers: {
         ...this.authHeader(),
-        "Content-Type": "application/json",
+        [HTTP_HEADER.CONTENT_TYPE]: HTTP_CONTENT_TYPE.JSON,
       },
       body: JSON.stringify(body),
     });
@@ -105,7 +112,7 @@ export class HttpTransport {
   private async request<T>(path: string, init: RequestInit): Promise<T> {
     const headers = {
       ...(init.headers as Record<string, string> | undefined),
-      "X-Request-Id": this.requestIdFactory(),
+      [HTTP_HEADER.REQUEST_ID]: this.requestIdFactory(),
     };
     const resp = await this.fetchWithTimeout(`${this.baseUrl}${path}`, { ...init, headers });
     let payload: unknown;
@@ -119,7 +126,7 @@ export class HttpTransport {
       throw new IMProtocolError("Invalid HTTP envelope", "Expected { code, msg, data } response");
     }
 
-    if (!resp.ok || payload.code !== 0) {
+    if (!resp.ok || payload.code !== PROTOCOL_SUCCESS_CODE) {
       throw this.envelopeError(resp, payload);
     }
     return payload.data as T;
@@ -142,7 +149,9 @@ export class HttpTransport {
 
   private authHeader(): Record<string, string> {
     const token = this.getToken();
-    return token ? { Authorization: token.startsWith("Bearer ") ? token : `Bearer ${token}` } : {};
+    return token
+      ? { [HTTP_HEADER.AUTHORIZATION]: token.startsWith(AUTH_SCHEME.BEARER) ? token : `${AUTH_SCHEME.BEARER}${token}` }
+      : {};
   }
 
   private async fetchWithTimeout(input: string, init: RequestInit): Promise<Response> {

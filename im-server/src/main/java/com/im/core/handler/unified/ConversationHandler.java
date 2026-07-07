@@ -4,6 +4,7 @@ import com.im.api.ApiRequest;
 import com.im.api.Conversation;
 import com.im.api.IConversationAccessChecker;
 import com.im.api.IConversationManager;
+import com.im.api.Operation;
 import com.im.api.RequestPreconditions;
 import com.im.api.RequestHandler;
 import com.im.common.exception.NotFoundException;
@@ -33,10 +34,12 @@ public class ConversationHandler implements RequestHandler {
 
     @Override
     public Object handle(ApiRequest req) {
-        return switch (req.operation()) {
-            case "conversation.list" -> handleList(req);
-            case "conversation.set" -> handleSet(req);
-            case "conversation.read" -> handleRead(req);
+        Operation operation = Operation.fromOpName(req.operation());
+        if (operation == null) throw new NotFoundException("unsupported: " + req.operation());
+        return switch (operation) {
+            case CONVERSATION_LIST -> handleList(req);
+            case CONVERSATION_SET -> handleSet(req);
+            case CONVERSATION_READ -> handleRead(req);
             default -> throw new NotFoundException("unsupported: " + req.operation());
         };
     }

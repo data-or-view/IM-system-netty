@@ -3,6 +3,9 @@ package com.im.core.discovery;
 import com.im.api.NodeInformation;
 import com.im.api.INodeDiscovery;
 import com.im.api.IRouteTable;
+import com.im.api.NodeEvent;
+import com.im.api.NodeEventListener;
+import com.im.api.NodeEventType;
 import com.im.common.util.IMExecutors;
 import com.im.core.redis.RedisConfiguration;
 import io.lettuce.core.cluster.api.async.RedisClusterAsyncCommands;
@@ -100,7 +103,7 @@ public class RedisNodeDiscovery implements INodeDiscovery {
         doHeartbeat();
         addToAliveSet(node.getNodeId());
         log.info("Node registered (redis): {}", node);
-        notifyListeners(NodeEventListener.EventType.NODE_ADDED, node);
+        notifyListeners(NodeEventType.NODE_ADDED, node);
     }
 
     @Override
@@ -118,7 +121,7 @@ public class RedisNodeDiscovery implements INodeDiscovery {
         NodeInformation old = this.self;
         this.self = null;
         if (old != null) {
-            notifyListeners(NodeEventListener.EventType.NODE_REMOVED, old);
+            notifyListeners(NodeEventType.NODE_REMOVED, old);
         }
     }
 
@@ -251,7 +254,7 @@ public class RedisNodeDiscovery implements INodeDiscovery {
             for (String nodeId : nodeIds) {
                 // 构造一个最小 NodeInformation 用于通知
                 NodeInformation staleNode = new NodeInformation(nodeId, "unknown", 0);
-                notifyListeners(NodeEventListener.EventType.NODE_REMOVED, staleNode);
+                notifyListeners(NodeEventType.NODE_REMOVED, staleNode);
             }
         } catch (Exception e) {
             log.warn("Redis cleanup failed: {}", e.getMessage());
@@ -272,8 +275,8 @@ public class RedisNodeDiscovery implements INodeDiscovery {
         }
     }
 
-    private void notifyListeners(NodeEventListener.EventType type, NodeInformation node) {
-        NodeEventListener.Event event = new NodeEventListener.Event(type, node);
+    private void notifyListeners(NodeEventType type, NodeInformation node) {
+        NodeEvent event = new NodeEvent(type, node);
         for (NodeEventListener listener : listeners) {
             try {
                 listener.onEvent(event);

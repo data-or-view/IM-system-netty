@@ -14,7 +14,7 @@ import {
   useRef,
   type ReactNode,
 } from "react";
-import { createClientMsgId } from "im-sdk";
+import { OutgoingMessageContentType, createClientMsgId } from "im-sdk";
 import { im } from "@/sdk/im-sdk";
 import { APP_BEHAVIOR } from "@/config/app-behavior";
 import { AUTH_LOGOUT_EVENT_KEY, AUTH_USER_ID_KEY } from "@/config/storage-keys";
@@ -301,9 +301,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const messageContent = { text: content };
     const clientMsgId = createClientMsgId();
     await im.waitConnected();
-    const ack = await im.message.send({ toUserId, contentType: "text", content: messageContent, clientMsgId });
+    const ack = await im.message.send({
+      toUserId,
+      contentType: OutgoingMessageContentType.TEXT,
+      content: messageContent,
+      clientMsgId,
+    });
     const currentUserId = currentStoredUserId(state.userId) || "";
-    const msg = toOptimisticMessage(ack, currentUserId, "text", messageContent);
+    const msg = toOptimisticMessage(ack, currentUserId, OutgoingMessageContentType.TEXT, messageContent);
     if (msg.conversationId) {
       dispatch({ type: "APPEND_MESSAGE", conversationId: msg.conversationId, msg });
       dispatch({

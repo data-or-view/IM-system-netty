@@ -28,25 +28,27 @@ final class RedisComponentsFactory {
         return redisConfig;
     }
 
-    static ServerComponentsFactory.ClusterDependencies createCluster(RedisConfiguration redisConfig,
-                                                                     SessionManager sessionManager,
-                                                                     String nodeId) {
+    static ClusterDependencies createCluster(RedisConfiguration redisConfig,
+                                             SessionManager sessionManager,
+                                             String nodeId) {
         IRouteTable routeTable = new RedisRouteTable(redisConfig, sessionManager, nodeId);
-        return new ServerComponentsFactory.ClusterDependencies(
+        return new ClusterDependencies(
                 routeTable,
                 new RedisClusterMessageBus(redisConfig, nodeId),
                 nodeDiscovery(redisConfig, routeTable));
     }
 
     static NodeInformation buildNodeInformation(Config config, String nodeId) {
-        String host = "127.0.0.1";
+        String host = BootstrapDefaults.LOOPBACK_HOST;
         try {
             host = InetAddress.getLocalHost().getHostAddress();
         } catch (Exception ignored) {
             // Keep startup tolerant in local/dev networks where host discovery can fail;
             // Redis node discovery still needs a stable fallback address.
         }
-        int servicePort = config.getBoolean("im.ws.enabled", true) ? config.getInt("im.ws.port", 8081) : 0;
+        int servicePort = config.getBoolean("im.ws.enabled", true)
+                ? config.getInt("im.ws.port", BootstrapDefaults.WS_PORT)
+                : 0;
         Map<String, String> attrs = new HashMap<>();
         attrs.put("webSocketPort", String.valueOf(servicePort));
         return new NodeInformation(nodeId, host, servicePort, attrs);
@@ -60,7 +62,7 @@ final class RedisComponentsFactory {
         String redisHost = config.getString("im.redis.host").orElse(null);
         if (redisHost == null || redisHost.isEmpty()) return null;
 
-        int redisPort = config.getInt("im.redis.port", 6379);
+        int redisPort = config.getInt("im.redis.port", BootstrapDefaults.REDIS_PORT);
         String redisUsername = config.getString("im.redis.username").orElse("");
         String redisPassword = config.getString("im.redis.password").orElse("");
         int redisDatabase = config.getInt("im.redis.database", 0);

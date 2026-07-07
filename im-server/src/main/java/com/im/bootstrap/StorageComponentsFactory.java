@@ -32,14 +32,18 @@ import java.time.Duration;
 import java.util.Locale;
 
 final class StorageComponentsFactory {
+    private static final String MQ_TYPE_KEY = "im.mq.type";
+    private static final String MQ_TYPE_REDIS = "redis";
+    private static final String MQ_TYPE_REDIS_STREAMS = "redis-streams";
+    private static final String MQ_TYPE_ROCKETMQ = "rocketmq";
 
     private StorageComponentsFactory() {
     }
 
-    static ServerComponentsFactory.StorageDependencies createStorage(Config config,
-                                                                     RedisConfiguration redisConfig,
-                                                                     String nodeId,
-                                                                     RetryExecutor retryExecutor) {
+    static StorageDependencies createStorage(Config config,
+                                             RedisConfiguration redisConfig,
+                                             String nodeId,
+                                             RetryExecutor retryExecutor) {
         ISequenceManager sequenceManager = new RedisSequenceManager(redisConfig);
         IMessageStore messageStore = new DbMessageStore(retryExecutor);
         ISingleMessageStore singleMessageStore = new SingleMessageStoreAdapter(messageStore);
@@ -47,7 +51,9 @@ final class StorageComponentsFactory {
         IMessageQueue messageQueue = createMessageQueue(config, redisConfig, nodeId);
         SendMessageIdempotency sendMessageIdempotency = new WzgSendMessageIdempotency(
                 new MyBatisPlusPersistenceStore(MyBatisPlusFactory.getSqlSessionFactory()),
-                Duration.ofSeconds(config.getLong("im.idempotency.send-expire-seconds", 24 * 60 * 60L)));
+                Duration.ofSeconds(config.getLong(
+                        "im.idempotency.send-expire-seconds",
+                        BootstrapDefaults.SEND_IDEMPOTENCY_TTL_SECONDS)));
         BusinessMessageDlqStore businessMessageDlqStore = new DbBusinessMessageDlqStore();
         String minioAccessKey = config.getString("im.minio.access-key")
                 .orElse(BootstrapSecurityChecks.DEFAULT_MINIO_ACCESS_KEY);
@@ -58,7 +64,7 @@ final class StorageComponentsFactory {
         BootstrapSecurityChecks.requireSafeSecret(config, "im.minio.secret-key", minioSecretKey,
                 BootstrapSecurityChecks.DEFAULT_MINIO_SECRET_KEY);
         IFileStorageService fileStorage = new MinioFileStorageService(
-                config.getString("im.minio.endpoint").orElse("http://127.0.0.1:9000"),
+                config.getString("im.minio.endpoint").orElse(BootstrapDefaults.MINIO_ENDPOINT),
                 minioAccessKey,
                 minioSecretKey);
         String fileBucket = config.getString("im.minio.bucket").orElse("im-system");
@@ -70,18 +76,18 @@ final class StorageComponentsFactory {
                 config.getInt("im.minio.presign-expire-seconds", 900),
                 config.getLong("im.minio.max-file-size", 100L * 1024 * 1024));
         ISystemMessageStore systemMessageStore = new DbSystemMessageStore();
-        return new ServerComponentsFactory.StorageDependencies(
+        return new StorageDependencies(
                 sequenceManager, messageStore, singleMessageStore, groupMessageStore, messageQueue,
                 sendMessageIdempotency, businessMessageDlqStore,
                 fileStorage, directFileTransferUseCase, systemMessageStore);
     }
 
     static IMessageQueue createMessageQueue(Config config, RedisConfiguration redisConfig, String nodeId) {
-        String type = config.getString("im.mq.type", "redis").trim().toLowerCase(Locale.ROOT);
+        String type = config.getString(MQ_TYPE_KEY, MQ_TYPE_REDIS).trim().toLowerCase(Locale.ROOT);
         return switch (type) {
-            case "redis", "redis-streams" -> new RedisMessageQueue(redisConfig, nodeId);
-            case "rocketmq" -> new RocketMqMessageQueue(config, nodeId);
-            default -> throw new IllegalArgumentException("Unsupported im.mq.type: " + type);
+            case MQ_TYPE_REDIS, MQ_TYPE_REDIS_STREAMS -> new RedisMessageQueue(redisConfig, nodeId);
+            case MQ_TYPE_ROCKETMQ -> new RocketMqMessageQueue(config, nodeId);
+            default -> throw new IllegalArgumentException("Unsupported " + MQ_TYPE_KEY + ": " + type);
         };
     }
 }

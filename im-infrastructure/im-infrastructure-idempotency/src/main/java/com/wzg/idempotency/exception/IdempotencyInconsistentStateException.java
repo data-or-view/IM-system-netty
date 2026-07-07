@@ -75,7 +75,7 @@ package com.wzg.idempotency.exception;
  * </ul>
  * 
  * @see com.wzg.idempotency.core.IdempotencyHandler
- * @see com.wzg.idempotency.persistence.DataRecord.Status
+ * @see com.wzg.idempotency.persistence.DataRecordStatus
  */
 public class IdempotencyInconsistentStateException extends RuntimeException {
     private static final long serialVersionUID = -4293951999802300672L;

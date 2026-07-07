@@ -20,7 +20,7 @@ import java.util.Map;
 
 public class ClusterAwareGroupApplyNotifier implements GroupApplyNotifier {
 
-    public static final String OP_GROUP_APPLY = "group.apply";
+    public static final String OP_GROUP_APPLY = ProtocolFields.OP_GROUP_APPLY;
 
     private static final Logger log = LoggerFactory.getLogger(ClusterAwareGroupApplyNotifier.class);
 

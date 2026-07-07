@@ -1,5 +1,6 @@
 import WebSocket from "ws";
 import { waitFor } from "./assertions.js";
+import { SCENARIO_SUCCESS_CODE, SCENARIO_WS_FIELD } from "./protocol.js";
 
 export interface WsResponse<T = unknown> {
   op: string;
@@ -52,8 +53,8 @@ export class ScenarioWsClient {
     const frame = {
       op,
       seq,
-      _requestId: `scenario-ws-${Date.now().toString(36)}-${seq}`,
-      ...(token ? { Authorization: token } : {}),
+      [SCENARIO_WS_FIELD.REQUEST_ID]: `scenario-ws-${Date.now().toString(36)}-${seq}`,
+      ...(token ? { [SCENARIO_WS_FIELD.AUTHORIZATION]: token } : {}),
       ...params,
     };
     const promise = new Promise<WsResponse>((resolve, reject) => {
@@ -65,7 +66,7 @@ export class ScenarioWsClient {
     });
     ws.send(JSON.stringify(frame));
     const response = await promise;
-    if (response.code !== 0) {
+    if (response.code !== SCENARIO_SUCCESS_CODE) {
       const detail = response.detail ?? response.msg ?? "unknown";
       throw new Error(`WS ${op} failed: code=${response.code} detail=${detail}`);
     }

@@ -135,7 +135,7 @@ public class MyBatisPlusPersistenceStore extends BasePersistenceStore {
 
         return new DataRecord(
                 entity.getIdempotencyKey(),
-                DataRecord.Status.valueOf(entity.getStatus()),
+                DataRecordStatus.valueOf(entity.getStatus()),
                 entity.getExpiryTimestamp(),
                 entity.getResponseData(),
                 entity.getPayloadHash(),

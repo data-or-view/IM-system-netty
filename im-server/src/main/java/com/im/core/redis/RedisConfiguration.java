@@ -28,6 +28,7 @@ import java.util.Objects;
 public class RedisConfiguration implements Lifecycle, AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(RedisConfiguration.class);
+    private static final int DEFAULT_REDIS_PORT = 6379;
 
     /** 统一的命令接口（单机 {@code RedisAsyncCommands} / 集群 {@code RedisAdvancedClusterAsyncCommands} 都赋值给此父接口） */
     private final RedisClusterAsyncCommands<String, String> async;
@@ -88,30 +89,6 @@ public class RedisConfiguration implements Lifecycle, AutoCloseable {
     }
 
     /**
-     * 可关闭的同步命令封装，管理底层连接生命周期。
-     */
-    public static class CloseableRedisCommands implements AutoCloseable {
-        private final AutoCloseable connection;
-        private final Object sync;
-
-        CloseableRedisCommands(AutoCloseable connection, Object sync) {
-            this.connection = connection;
-            this.sync = sync;
-        }
-
-        /** 获取同步命令接口，调用方按需转型。 */
-        @SuppressWarnings("unchecked")
-        public <T> T sync() {
-            return (T) sync;
-        }
-
-        @Override
-        public void close() {
-            try { connection.close(); } catch (Exception ignored) { }
-        }
-    }
-
-    /**
      * 创建专用的 pub/sub 连接。
      * <p>必须与 {@code async()} 返回的命令接口分开使用独立的连接，
      * 因为 Lettuce 的 pub/sub 是连接级阻塞的。</p>
@@ -150,7 +127,7 @@ public class RedisConfiguration implements Lifecycle, AutoCloseable {
 
     public static class Builder {
         private String host = "localhost";
-        private int port = 6379;
+        private int port = DEFAULT_REDIS_PORT;
         private List<String> clusterNodes = Collections.emptyList();
         private String username;
         private String password;
@@ -183,7 +160,7 @@ public class RedisConfiguration implements Lifecycle, AutoCloseable {
                     String[] p = node.split(":");
                     RedisURI.Builder b = RedisURI.builder()
                             .withHost(p[0])
-                            .withPort(p.length > 1 ? Integer.parseInt(p[1]) : 6379)
+                            .withPort(p.length > 1 ? Integer.parseInt(p[1]) : DEFAULT_REDIS_PORT)
                             .withTimeout(timeout);
                     applyAuthentication(b);
                     uris.add(b.build());

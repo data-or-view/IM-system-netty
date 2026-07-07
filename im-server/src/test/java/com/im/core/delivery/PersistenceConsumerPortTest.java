@@ -5,6 +5,7 @@ import com.im.api.IMessageQueue;
 import com.im.api.ISingleMessageStore;
 import com.im.api.Message;
 import com.im.api.MessageQueueTopics;
+import com.im.api.QueueMessageHandler;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
@@ -57,7 +58,7 @@ class PersistenceConsumerPortTest {
     }
 
     private static final class TestMessageQueue implements IMessageQueue {
-        private final Map<String, MessageHandler> handlers = new ConcurrentHashMap<>();
+        private final Map<String, QueueMessageHandler> handlers = new ConcurrentHashMap<>();
 
         @Override
         public void start() {
@@ -72,12 +73,12 @@ class PersistenceConsumerPortTest {
         }
 
         @Override
-        public void subscribe(String topic, MessageHandler handler) {
+        public void subscribe(String topic, QueueMessageHandler handler) {
             handlers.put(topic, handler);
         }
 
         @Override
-        public void unsubscribe(String topic, MessageHandler handler) {
+        public void unsubscribe(String topic, QueueMessageHandler handler) {
             handlers.remove(topic);
         }
 
@@ -86,7 +87,7 @@ class PersistenceConsumerPortTest {
             return handlers.containsKey(topic);
         }
 
-        MessageHandler handler(String topic) {
+        QueueMessageHandler handler(String topic) {
             return handlers.get(topic);
         }
     }

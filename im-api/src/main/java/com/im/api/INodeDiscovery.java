@@ -67,27 +67,4 @@ public interface INodeDiscovery extends Lifecycle {
      * 注册节点变更监听器。
      */
     void addListener(NodeEventListener listener);
-
-    /**
-     * 节点变更事件。
-     */
-    @FunctionalInterface
-    interface NodeEventListener {
-        void onEvent(Event event);
-
-        enum EventType { NODE_ADDED, NODE_REMOVED, NODE_UPDATED }
-
-        class Event {
-            private final EventType type;
-            private final NodeInformation node;
-
-            public Event(EventType type, NodeInformation node) {
-                this.type = type;
-                this.node = node;
-            }
-
-            public EventType getType() { return type; }
-            public NodeInformation getNode() { return node; }
-        }
-    }
 }

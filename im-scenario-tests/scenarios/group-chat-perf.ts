@@ -4,6 +4,12 @@ import { nextClientMsgId } from "../src/client-msg-id.js";
 import { readNumberArg, readStringArg } from "../src/cli.js";
 import { loadScenarioConfig } from "../src/config.js";
 import { hasTextContent } from "../src/message-content.js";
+import {
+  GROUP_JOIN_VERIFICATION_CODE,
+  SCENARIO_CONTENT_TYPE,
+  SCENARIO_OP,
+  SCENARIO_PUSH_OP,
+} from "../src/protocol.js";
 import { ScenarioReporter } from "../src/reporter.js";
 import { ScenarioUser } from "../src/scenario-user.js";
 import type { GroupInfo, MessagePush, SendMessageAck } from "../src/types.js";
@@ -41,7 +47,7 @@ try {
   const group = await owner.http.post<GroupInfo>("/api/group/create", {
     groupName,
     members: memberIds,
-    needVerification: 0,
+    needVerification: GROUP_JOIN_VERIFICATION_CODE.DIRECT,
   });
   assertOk(group.groupId, "group.create did not return groupId");
   reporter.metric("groupId", group.groupId);
@@ -58,10 +64,10 @@ try {
   const workers = Array.from({ length: concurrency }, async () => {
     while (nextMessage < messageCount) {
       const current = ++nextMessage;
-      const ack = await owner.ws.request<SendMessageAck>("chat.send.group", {
+      const ack = await owner.ws.request<SendMessageAck>(SCENARIO_OP.CHAT_SEND_GROUP, {
         groupId: group.groupId,
         clientMsgId: nextClientMsgId("scenario-perf"),
-        _ct: "text",
+        _ct: SCENARIO_CONTENT_TYPE.TEXT,
           content: { text: expectedTexts[current - 1] },
       });
       assertOk(ack.data?.seq !== undefined, `message ${current} did not return seq`);
@@ -80,7 +86,7 @@ try {
     const received = new Set<string>();
     for (const push of user.ws.pushesAfter(cursor)) {
       const data = push.data as MessagePush | undefined;
-      if (push.op !== "message" || data?.groupId !== group.groupId || data.fromUserId !== owner.userId) {
+      if (push.op !== SCENARIO_PUSH_OP.MESSAGE || data?.groupId !== group.groupId || data.fromUserId !== owner.userId) {
         continue;
       }
       for (const text of expectedTexts) {

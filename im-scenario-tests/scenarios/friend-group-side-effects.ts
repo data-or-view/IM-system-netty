@@ -1,6 +1,11 @@
 import { assertOk, sleep } from "../src/assertions.js";
 import { nextClientMsgId } from "../src/client-msg-id.js";
 import { loadScenarioConfig } from "../src/config.js";
+import {
+  GROUP_JOIN_VERIFICATION_CODE,
+  SCENARIO_CONTENT_TYPE,
+  SCENARIO_OP,
+} from "../src/protocol.js";
 import { ScenarioReporter } from "../src/reporter.js";
 import { ScenarioUser } from "../src/scenario-user.js";
 import type { GroupInfo, SendMessageAck, SystemMessageInboxItem } from "../src/types.js";
@@ -37,20 +42,20 @@ try {
   await member.http.post("/api/friend/approve", { fromUserId: owner.userId, agreed: true, handleMsg: "ok" });
 
   reporter.step("checking friend message works before removal");
-  const singleAck = await owner.ws.request<SendMessageAck>("chat.send", {
+  const singleAck = await owner.ws.request<SendMessageAck>(SCENARIO_OP.CHAT_SEND, {
     toUserId: member.userId,
     clientMsgId: nextClientMsgId("scenario-single"),
-    _ct: "text",
+    _ct: SCENARIO_CONTENT_TYPE.TEXT,
     content: { text: "hello before delete" },
   });
   assertOk(singleAck.data?.conversationId, "single chat did not return conversationId before delete");
 
   reporter.step("removing friend and checking deleted side cannot send");
   await owner.http.post("/api/friend/remove", { friendUserId: member.userId });
-  const rejectedByFriendRemoval = await captureWsError(() => member.ws.request("chat.send", {
+  const rejectedByFriendRemoval = await captureWsError(() => member.ws.request(SCENARIO_OP.CHAT_SEND, {
     toUserId: owner.userId,
     clientMsgId: nextClientMsgId("scenario-single"),
-    _ct: "text",
+    _ct: SCENARIO_CONTENT_TYPE.TEXT,
     content: { text: "hello after delete" },
   }));
   assertOk(
@@ -62,23 +67,23 @@ try {
   const group = await owner.http.post<GroupInfo>("/api/group/create", {
     groupName,
     members: [member.userId],
-    needVerification: 0,
+    needVerification: GROUP_JOIN_VERIFICATION_CODE.DIRECT,
   });
   assertOk(group.groupId, "group.create did not return groupId");
-  const groupAck = await member.ws.request<SendMessageAck>("chat.send.group", {
+  const groupAck = await member.ws.request<SendMessageAck>(SCENARIO_OP.CHAT_SEND_GROUP, {
     groupId: group.groupId,
     clientMsgId: nextClientMsgId("scenario-group"),
-    _ct: "text",
+    _ct: SCENARIO_CONTENT_TYPE.TEXT,
     content: { text: "hello before disband" },
   });
   assertOk(groupAck.data?.conversationId, "group chat did not return conversationId before disband");
 
   reporter.step("disbanding group and checking member cannot send");
   await owner.http.post("/api/group/disband", { groupId: group.groupId });
-  const rejectedByDisband = await captureWsError(() => member.ws.request("chat.send.group", {
+  const rejectedByDisband = await captureWsError(() => member.ws.request(SCENARIO_OP.CHAT_SEND_GROUP, {
     groupId: group.groupId,
     clientMsgId: nextClientMsgId("scenario-group"),
-    _ct: "text",
+    _ct: SCENARIO_CONTENT_TYPE.TEXT,
     content: { text: "hello after disband" },
   }));
   assertOk(
@@ -121,7 +126,7 @@ async function waitForGroupDisbandSystemMessage(
       message.contentType === "group_disbanded" && message.content?.includes(groupName)
     );
     if (found) return found;
-    await sleep(200);
+    await sleep(config.pollIntervalMs);
   }
   throw new Error(`Timed out waiting for group disband system inbox message; last=${JSON.stringify(lastMessages.slice(0, 5))}`);
 }

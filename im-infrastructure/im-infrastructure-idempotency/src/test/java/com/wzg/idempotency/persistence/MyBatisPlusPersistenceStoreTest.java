@@ -92,14 +92,14 @@ class MyBatisPlusPersistenceStoreTest {
 
         store.updateRecord(new DataRecord(
                 "complete-key",
-                DataRecord.Status.COMPLETED,
+                DataRecordStatus.COMPLETED,
                 now.plusSeconds(300).getEpochSecond(),
                 "{\"ok\":true}",
                 "payload",
                 OptionalLong.empty()));
 
         DataRecord stored = store.getRecord("complete-key");
-        assertEquals(DataRecord.Status.COMPLETED, stored.getStatus());
+        assertEquals(DataRecordStatus.COMPLETED, stored.getStatus());
         assertEquals("{\"ok\":true}", stored.getResponseData());
         assertEquals("payload", stored.getPayloadHash());
     }
@@ -108,7 +108,7 @@ class MyBatisPlusPersistenceStoreTest {
     void updateRecordIgnoresMissingRecordLikeJdbcStore() {
         assertDoesNotThrow(() -> store.updateRecord(new DataRecord(
                 "missing-key",
-                DataRecord.Status.COMPLETED,
+                DataRecordStatus.COMPLETED,
                 Instant.now().plusSeconds(60).getEpochSecond(),
                 "ok",
                 "")));
@@ -127,7 +127,7 @@ class MyBatisPlusPersistenceStoreTest {
     private static DataRecord inProgress(String key, long expiryTimestamp) {
         return new DataRecord(
                 key,
-                DataRecord.Status.INPROGRESS,
+                DataRecordStatus.INPROGRESS,
                 expiryTimestamp,
                 null,
                 "",

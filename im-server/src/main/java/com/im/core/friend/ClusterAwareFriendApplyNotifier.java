@@ -20,7 +20,7 @@ import java.util.Map;
 
 public class ClusterAwareFriendApplyNotifier implements FriendApplyNotifier {
 
-    public static final String OP_FRIEND_APPLY = "friend.apply";
+    public static final String OP_FRIEND_APPLY = ProtocolFields.OP_FRIEND_APPLY;
 
     private static final Logger log = LoggerFactory.getLogger(ClusterAwareFriendApplyNotifier.class);
 

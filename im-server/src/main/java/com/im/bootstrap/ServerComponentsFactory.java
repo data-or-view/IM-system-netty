@@ -1,11 +1,7 @@
 package com.im.bootstrap;
 
-import com.im.api.BusinessMessageDlqStore;
-import com.im.api.FriendApplyNotifier;
-import com.im.api.GroupApplyNotifier;
 import com.im.api.IAuthenticator;
 import com.im.api.ICallManager;
-import com.im.api.IClusterMessageBus;
 import com.im.api.IConversationManager;
 import com.im.api.IFileStorageService;
 import com.im.api.IFriendManager;
@@ -13,7 +9,6 @@ import com.im.api.IGroupManager;
 import com.im.api.IGroupMessageStore;
 import com.im.api.IMessageQueue;
 import com.im.api.IMessageStore;
-import com.im.api.INodeDiscovery;
 import com.im.api.IPasswordHasher;
 import com.im.api.IRouteTable;
 import com.im.api.ISequenceManager;
@@ -23,7 +18,6 @@ import com.im.api.IUserCredentialStore;
 import com.im.api.IUserManager;
 import com.im.api.MultiLoginStrategy;
 import com.im.api.SendMessageIdempotency;
-import com.im.api.SystemMessageNotifier;
 import com.im.common.retry.RetryExecutor;
 import com.im.common.util.IMExecutors;
 import com.im.config.Config;
@@ -43,27 +37,21 @@ import com.im.core.conversation.ConversationListSnapshot;
 import com.im.core.dispatcher.ApiDispatcher;
 import com.im.core.dispatcher.PendingAcknowledgementManager;
 import com.im.core.file.DirectFileTransferUseCase;
-import com.im.core.friend.ClusterAwareFriendApplyNotifier;
 import com.im.core.friend.DbFriendManager;
-import com.im.core.group.ClusterAwareGroupApplyNotifier;
 import com.im.core.group.CachedGroupManager;
 import com.im.core.group.DbGroupManager;
 import com.im.core.group.GroupMemberIdsSnapshot;
 import com.im.core.group.GroupMemberListSnapshot;
 import com.im.core.handler.ConnectionEventHandler;
-import com.im.core.message.ClusterAwareMessageRevokeNotifier;
 import com.im.core.redis.RedisConfiguration;
 import com.im.core.retry.FailsafeRetryExecutor;
 import com.im.core.serialization.jackson.JacksonSerializer;
 import com.im.core.session.RedisSessionManager;
 import com.im.core.session.SessionManager;
-import com.im.core.system.ClusterAwareSystemMessageNotifier;
 import com.im.core.user.CachedUserManager;
 import com.im.core.user.DbUserManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import java.util.concurrent.ExecutorService;
 
 /**
  * Production composition root.
@@ -88,7 +76,7 @@ final class ServerComponentsFactory {
         DatabaseComponentsFactory.requireDatabaseEnabled(config);
         DatabaseComponentsFactory.initDatabase(config);
 
-        String nodeId = config.getString("im.node.id", "node-1");
+        String nodeId = config.getString("im.node.id", BootstrapDefaults.NODE_ID);
         // Keep construction order explicit here: these objects are tightly coupled by
         // lifecycle and cluster guarantees, so hiding them behind broader abstractions
         // makes a single production dependency change harder to audit.
@@ -116,7 +104,7 @@ final class ServerComponentsFactory {
                 RedisComponentsFactory.buildNodeInformation(config, nodeId),
                 requestAdmission,
                 config.getDuration("im.server.request-drain-timeout")
-                        .orElse(java.time.Duration.ofSeconds(30)),
+                        .orElse(BootstrapDefaults.REQUEST_DRAIN_TIMEOUT),
                 cluster.clusterMessageBus(),
                 storage.messageQueue(),
                 consumers.persistenceConsumer(),
@@ -221,7 +209,7 @@ final class ServerComponentsFactory {
                                                RedisConfiguration redisConfig) {
         ICallManager callManager = null;
         if (config.getBoolean("im.call.enabled", false)) {
-            String sfuEndpoint = config.getString("im.call.sfu-endpoint", "ws://localhost:7880");
+            String sfuEndpoint = config.getString("im.call.sfu-endpoint", BootstrapDefaults.LIVEKIT_SFU_ENDPOINT);
             String apiKey = config.getString("im.call.api-key", BootstrapSecurityChecks.DEFAULT_CALL_API_KEY);
             String apiSecret = config.getString("im.call.api-secret", "");
             BootstrapSecurityChecks.requireSafeSecret(config, "im.call.api-key", apiKey,
@@ -232,7 +220,8 @@ final class ServerComponentsFactory {
                     apiSecret,
                     sfuEndpoint);
             log.info("LiveKitCallManager enabled: endpoint={}", sfuEndpoint);
-            if (sfuEndpoint.contains("localhost") || sfuEndpoint.contains("127.0.0.1")) {
+            if (sfuEndpoint.contains(BootstrapDefaults.LOCALHOST_NAME)
+                    || sfuEndpoint.contains(BootstrapDefaults.LOOPBACK_HOST)) {
                 log.warn("[CALL] im.call.sfu-endpoint={} 是本机地址。" +
                          " 跨机器通话时其他用户会收到此地址但无法连接 LiveKit。" +
                          " 请将 im.call.sfu-endpoint 改为所有客户端都能访问的公网 IP 或域名，" +
@@ -252,160 +241,14 @@ final class ServerComponentsFactory {
     }
 
     private static void applyMultiLoginStrategy(Config config, SessionManager sessionManager) {
-        String strategyName = config.getString("im.login.multi-strategy", "ALLOW_MULTIPLE");
+        String strategyName = config.getString("im.login.multi-strategy", BootstrapDefaults.MULTI_LOGIN_STRATEGY);
         try {
             MultiLoginStrategy strategy = MultiLoginStrategy.valueOf(strategyName);
             sessionManager.setLoginStrategy(strategy);
             log.info("Multi-login strategy set: {}", strategy);
         } catch (IllegalArgumentException e) {
-            log.warn("Invalid multi-login strategy '{}', using ALLOW_MULTIPLE", strategyName);
+            log.warn("Invalid multi-login strategy '{}', using {}", strategyName, BootstrapDefaults.MULTI_LOGIN_STRATEGY);
         }
-    }
-
-    static final class RuntimeFriendApplyNotifier implements FriendApplyNotifier {
-        private final String nodeId;
-        private final SessionManager sessionManager;
-        private volatile ClusterAwareFriendApplyNotifier delegate;
-
-        private RuntimeFriendApplyNotifier(String nodeId, SessionManager sessionManager) {
-            this.nodeId = nodeId;
-            this.sessionManager = sessionManager;
-        }
-
-        void bindCluster(IRouteTable routeTable, IClusterMessageBus clusterMessageBus) {
-            this.delegate = new ClusterAwareFriendApplyNotifier(nodeId, sessionManager, routeTable, clusterMessageBus);
-        }
-
-        @Override
-        public void notifyApplyCreated(String toUserId, com.im.api.FriendApply apply) {
-            if (delegate != null) delegate.notifyApplyCreated(toUserId, apply);
-        }
-
-        @Override
-        public void notifyApplyHandled(String fromUserId, com.im.api.FriendApply apply) {
-            if (delegate != null) delegate.notifyApplyHandled(fromUserId, apply);
-        }
-
-        void handleClusterPush(com.im.api.ClusterMessage message) {
-            if (delegate != null) delegate.handleClusterPush(message);
-        }
-    }
-
-    static final class RuntimeGroupApplyNotifier implements GroupApplyNotifier {
-        private final String nodeId;
-        private final SessionManager sessionManager;
-        private volatile ClusterAwareGroupApplyNotifier delegate;
-
-        private RuntimeGroupApplyNotifier(String nodeId, SessionManager sessionManager) {
-            this.nodeId = nodeId;
-            this.sessionManager = sessionManager;
-        }
-
-        void bindCluster(IRouteTable routeTable, IClusterMessageBus clusterMessageBus) {
-            this.delegate = new ClusterAwareGroupApplyNotifier(nodeId, sessionManager, routeTable, clusterMessageBus);
-        }
-
-        @Override
-        public void notifyApplyCreated(java.util.List<String> managerUserIds, com.im.api.GroupApply apply) {
-            if (delegate != null) delegate.notifyApplyCreated(managerUserIds, apply);
-        }
-
-        @Override
-        public void notifyApplyHandled(String applicantUserId, com.im.api.GroupApply apply) {
-            if (delegate != null) delegate.notifyApplyHandled(applicantUserId, apply);
-        }
-
-        void handleClusterPush(com.im.api.ClusterMessage message) {
-            if (delegate != null) delegate.handleClusterPush(message);
-        }
-    }
-
-    static final class RuntimeSystemMessageNotifier implements SystemMessageNotifier {
-        private final String nodeId;
-        private final SessionManager sessionManager;
-        private volatile ClusterAwareSystemMessageNotifier delegate;
-
-        private RuntimeSystemMessageNotifier(String nodeId, SessionManager sessionManager) {
-            this.nodeId = nodeId;
-            this.sessionManager = sessionManager;
-        }
-
-        void bindCluster(IRouteTable routeTable, IClusterMessageBus clusterMessageBus) {
-            this.delegate = new ClusterAwareSystemMessageNotifier(nodeId, sessionManager, routeTable, clusterMessageBus);
-        }
-
-        @Override
-        public void notify(java.util.List<String> userIds, com.im.api.SystemMessageSummary summary) {
-            if (delegate != null) delegate.notify(userIds, summary);
-        }
-
-        void handleClusterPush(com.im.api.ClusterMessage message) {
-            if (delegate != null) delegate.handleClusterPush(message);
-        }
-    }
-
-    static final class RuntimeMessageRevokeNotifier {
-        private final String nodeId;
-        private final SessionManager sessionManager;
-        private volatile ClusterAwareMessageRevokeNotifier delegate;
-
-        RuntimeMessageRevokeNotifier(String nodeId, SessionManager sessionManager) {
-            this.nodeId = nodeId;
-            this.sessionManager = sessionManager;
-        }
-
-        void bindCluster(IRouteTable routeTable, IClusterMessageBus clusterMessageBus) {
-            this.delegate = new ClusterAwareMessageRevokeNotifier(nodeId, sessionManager, routeTable, clusterMessageBus);
-        }
-
-        void notify(com.im.core.usecase.RevokeResult result) {
-            if (delegate != null) delegate.notify(result);
-        }
-
-        void handleClusterPush(com.im.api.ClusterMessage message) {
-            if (delegate != null) delegate.handleClusterPush(message);
-        }
-    }
-
-    record RuntimeDependencies(SessionManager sessionManager,
-                               PendingAcknowledgementManager pendingAcknowledgementManager,
-                               ExecutorService virtualExecutor,
-                               RuntimeFriendApplyNotifier friendApplyNotifier,
-                               RuntimeGroupApplyNotifier groupApplyNotifier,
-                               RuntimeSystemMessageNotifier systemMessageNotifier,
-                               RuntimeMessageRevokeNotifier messageRevokeNotifier) {
-    }
-
-    record ClusterDependencies(IRouteTable routeTable,
-                               IClusterMessageBus clusterMessageBus,
-                               INodeDiscovery nodeDiscovery) {
-    }
-
-    record BusinessDependencies(IAuthenticator authenticator,
-                                RetryExecutor retryExecutor,
-                                IGroupManager groupManager,
-                                IConversationManager conversationManager,
-                                IFriendManager friendManager,
-                                IUserManager userManager,
-                                IUserCredentialStore credentialStore,
-                                IPasswordHasher passwordHasher) {
-    }
-
-    record StorageDependencies(ISequenceManager sequenceManager,
-                               IMessageStore messageStore,
-                               ISingleMessageStore singleMessageStore,
-                               IGroupMessageStore groupMessageStore,
-                               IMessageQueue messageQueue,
-                               SendMessageIdempotency sendMessageIdempotency,
-                               BusinessMessageDlqStore businessMessageDlqStore,
-                               IFileStorageService fileStorage,
-                               DirectFileTransferUseCase directFileTransferUseCase,
-                               ISystemMessageStore systemMessageStore) {
-    }
-
-    record CallDependencies(ICallManager callManager,
-                            CallStateManager callStateManager,
-                            GroupCallManager groupCallManager) {
     }
 
 }

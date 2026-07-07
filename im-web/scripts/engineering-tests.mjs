@@ -116,9 +116,10 @@ test("message media URLs reject executable and local schemes", () => {
 test("message revoke menu is only exposed for persisted successful messages", () => {
   const source = readSource("src/components/chat/MessageList.tsx");
 
-  assert.match(source, /const canRevoke = .*message\.seq > 0/);
+  assert.match(source, /const isPending = .*VIEW_MESSAGE_STATUS\.PENDING.*message\.seq <= LOCAL_PENDING_SEQ/);
+  assert.match(source, /const canRevoke = .*message\.seq > LOCAL_PENDING_SEQ/);
   assert.match(source, /canRevoke &&/);
-  assert.match(source, /message\.status !== -1/);
+  assert.match(source, /message\.status !== VIEW_MESSAGE_STATUS\.FAILED/);
   assert.match(source, /aria-label="更多消息操作"/);
 });
 

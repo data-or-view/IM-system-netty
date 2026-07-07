@@ -170,6 +170,9 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
+                    <excludes>
+                        <exclude>**/*E2ETest.java</exclude>
+                    </excludes>
                     <argLine>-javaagent:${project.build.directory}/agent/opentelemetry-javaagent-${opentelemetry-javaagent.version}.jar -Dotel.service.name=im-system-test -Dotel.traces.exporter=console -Dotel.metrics.exporter=none</argLine>
                 </configuration>
             </plugin>

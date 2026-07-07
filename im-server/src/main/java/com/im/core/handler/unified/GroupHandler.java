@@ -9,6 +9,7 @@ import com.im.api.GroupMemberInformation;
 import com.im.api.GroupMemberRole;
 import com.im.api.IConversationManager;
 import com.im.api.IGroupManager;
+import com.im.api.Operation;
 import com.im.api.RequestPreconditions;
 import com.im.api.RequestHandler;
 import com.im.common.exception.ValidationException;
@@ -68,24 +69,26 @@ public class GroupHandler implements RequestHandler {
 
     @Override
     public Object handle(ApiRequest req) {
-        return switch (req.operation()) {
-            case "group.create" -> handleCreate(req);
-            case "group.join" -> handleJoin(req);
-            case "group.quit" -> handleQuit(req);
-            case "group.kick" -> handleKick(req);
-            case "group.disband" -> handleDisband(req);
-            case "group.info.update" -> handleInfoUpdate(req);
-            case "group.owner.transfer" -> handleOwnerTransfer(req);
-            case "group.member.role.set" -> handleMemberRoleSet(req);
-            case "group.member.info.update" -> handleMemberInfoUpdate(req);
-            case "group.info" -> handleInfo(req);
-            case "group.list" -> handleList(req);
-            case "group.search" -> handleSearch(req);
-            case "group.members" -> handleMembers(req);
-            case "group.mute_all" -> handleMuteAll(req);
-            case "group.apply.list" -> handleApplyList(req);
-            case "group.apply.unhandled.count" -> handleApplyUnhandledCount(req);
-            case "group.apply.approve" -> handleApplyApprove(req);
+        Operation operation = Operation.fromOpName(req.operation());
+        if (operation == null) throw new NotFoundException("unsupported: " + req.operation());
+        return switch (operation) {
+            case GROUP_CREATE -> handleCreate(req);
+            case GROUP_JOIN -> handleJoin(req);
+            case GROUP_QUIT -> handleQuit(req);
+            case GROUP_KICK -> handleKick(req);
+            case GROUP_DISBAND -> handleDisband(req);
+            case GROUP_INFO_UPDATE -> handleInfoUpdate(req);
+            case GROUP_OWNER_TRANSFER -> handleOwnerTransfer(req);
+            case GROUP_MEMBER_ROLE_SET -> handleMemberRoleSet(req);
+            case GROUP_MEMBER_INFO_UPDATE -> handleMemberInfoUpdate(req);
+            case GROUP_INFO -> handleInfo(req);
+            case GROUP_LIST -> handleList(req);
+            case GROUP_SEARCH -> handleSearch(req);
+            case GROUP_MEMBERS -> handleMembers(req);
+            case GROUP_MUTE_ALL -> handleMuteAll(req);
+            case GROUP_APPLY_LIST -> handleApplyList(req);
+            case GROUP_APPLY_UNHANDLED_COUNT -> handleApplyUnhandledCount(req);
+            case GROUP_APPLY_APPROVE -> handleApplyApprove(req);
             default -> throw new NotFoundException("unsupported: " + req.operation());
         };
     }

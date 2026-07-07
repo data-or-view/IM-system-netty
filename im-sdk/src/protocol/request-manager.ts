@@ -1,4 +1,6 @@
 import { type WSRequest, type WSResponse, IMConnectionError, IMError, IMServerError, IMTimeoutError } from "../types.js";
+import { SDK_DEFAULTS } from "../config/defaults.js";
+import { PROTOCOL_SUCCESS_CODE, WS_FRAME_FIELD } from "./constants.js";
 
 /**
  * 请求管理器 —— 通过 seq 关联请求和响应，提供 Promise API。
@@ -18,14 +20,14 @@ export class RequestManager {
   private requestTimeout: number;
   requestIdFactory?: () => string;
 
-  constructor(requestTimeout = 30000) {
+  constructor(requestTimeout: number = SDK_DEFAULTS.requestTimeoutMs) {
     this.requestTimeout = requestTimeout;
   }
 
   /** 创建一个 WS 请求帧，返回 Promise */
   createRequest(op: string, params: Record<string, unknown> = {}): { frame: WSRequest; promise: Promise<WSResponse> } {
     const seq = ++this.seq;
-    const frame: WSRequest = { op, seq, _requestId: this.nextRequestId(), ...params };
+    const frame: WSRequest = { op, seq, [WS_FRAME_FIELD.REQUEST_ID]: this.nextRequestId(), ...params };
 
     const promise = new Promise<WSResponse>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -47,7 +49,7 @@ export class RequestManager {
     clearTimeout(pending.timer);
     this.pending.delete(resp.seq);
 
-    if (resp.code !== 0) {
+    if (resp.code !== PROTOCOL_SUCCESS_CODE) {
       pending.reject(new IMServerError(resp.code, resp.msg || "Unknown error", resp.detail));
     } else {
       pending.resolve(resp);

@@ -2,16 +2,17 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import { WebSocketServer } from "ws";
+import { SCENARIO_PUSH_OP, SCENARIO_SUCCESS_CODE } from "../src/protocol.js";
 import { ScenarioWsClient } from "../src/ws-client.js";
 
 test("ScenarioWsClient can wait for pushes after a cursor", async () => {
   const { server, port } = await startServer();
   server.on("connection", (socket) => {
-    socket.send(JSON.stringify({ op: "message", data: { text: "old" } }));
+    socket.send(JSON.stringify({ op: SCENARIO_PUSH_OP.MESSAGE, data: { text: "old" } }));
     socket.on("message", (raw) => {
       const frame = JSON.parse(raw.toString()) as { seq: number; op: string };
-      socket.send(JSON.stringify({ op: frame.op, seq: frame.seq, code: 0, data: { ok: true } }));
-      socket.send(JSON.stringify({ op: "message", data: { text: "new" } }));
+      socket.send(JSON.stringify({ op: frame.op, seq: frame.seq, code: SCENARIO_SUCCESS_CODE, data: { ok: true } }));
+      socket.send(JSON.stringify({ op: SCENARIO_PUSH_OP.MESSAGE, data: { text: "new" } }));
     });
   });
 
@@ -39,7 +40,7 @@ test("ScenarioWsClient timeout diagnostics include pushes received while waiting
   const { server, port } = await startServer();
   server.on("connection", (socket) => {
     setTimeout(() => {
-      socket.send(JSON.stringify({ op: "friend.apply", data: { fromUserId: "u1", toUserId: "u2" } }));
+      socket.send(JSON.stringify({ op: SCENARIO_PUSH_OP.FRIEND_APPLY, data: { fromUserId: "u1", toUserId: "u2" } }));
     }, 20);
   });
 

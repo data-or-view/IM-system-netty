@@ -3,6 +3,15 @@ import { nextClientMsgId } from "../src/client-msg-id.js";
 import { readNumberArg } from "../src/cli.js";
 import { loadScenarioConfig } from "../src/config.js";
 import { hasTextContent } from "../src/message-content.js";
+import {
+  CLUSTER_NODE_DEFAULTS,
+} from "../src/defaults.js";
+import {
+  GROUP_JOIN_VERIFICATION_CODE,
+  SCENARIO_CONTENT_TYPE,
+  SCENARIO_OP,
+  SCENARIO_PUSH_OP,
+} from "../src/protocol.js";
 import { ScenarioReporter } from "../src/reporter.js";
 import { ScenarioUser } from "../src/scenario-user.js";
 import type { GroupInfo, MessagePush, SendMessageAck } from "../src/types.js";
@@ -11,10 +20,10 @@ const config = loadScenarioConfig();
 const reporter = new ScenarioReporter();
 const suffix = Date.now().toString(36);
 
-const node1HttpUrl = process.env.IM_SCENARIO_NODE1_HTTP_URL ?? "http://127.0.0.1:8088";
-const node1WsUrl = process.env.IM_SCENARIO_NODE1_WS_URL ?? "ws://127.0.0.1:8081/ws";
-const node2HttpUrl = process.env.IM_SCENARIO_NODE2_HTTP_URL ?? "http://127.0.0.1:8089";
-const node2WsUrl = process.env.IM_SCENARIO_NODE2_WS_URL ?? "ws://127.0.0.1:8084/ws";
+const node1HttpUrl = process.env.IM_SCENARIO_NODE1_HTTP_URL ?? CLUSTER_NODE_DEFAULTS.node1.httpUrl;
+const node1WsUrl = process.env.IM_SCENARIO_NODE1_WS_URL ?? CLUSTER_NODE_DEFAULTS.node1.wsUrl;
+const node2HttpUrl = process.env.IM_SCENARIO_NODE2_HTTP_URL ?? CLUSTER_NODE_DEFAULTS.node2.httpUrl;
+const node2WsUrl = process.env.IM_SCENARIO_NODE2_WS_URL ?? CLUSTER_NODE_DEFAULTS.node2.wsUrl;
 const holdMs = readNumberArg("hold-ms", 0);
 
 const users: ScenarioUser[] = [];
@@ -58,10 +67,10 @@ try {
 
   reporter.step("sending cross-node single chat from node-1 to node-2");
   const singleText = `cluster-ha single ${suffix}`;
-  const singleAck = await sender.ws.request<SendMessageAck>("chat.send", {
+  const singleAck = await sender.ws.request<SendMessageAck>(SCENARIO_OP.CHAT_SEND, {
     toUserId: receiverPrimary.userId,
     clientMsgId: nextClientMsgId("cluster-single"),
-    _ct: "text",
+    _ct: SCENARIO_CONTENT_TYPE.TEXT,
     content: { text: singleText },
   });
   const singleAckData = singleAck.data;
@@ -97,17 +106,17 @@ try {
   const group = await sender.http.post<GroupInfo>("/api/group/create", {
     groupName: `cluster_ha_${suffix}`,
     members: [receiverPrimary.userId],
-    needVerification: 0,
+    needVerification: GROUP_JOIN_VERIFICATION_CODE.DIRECT,
   });
   assertOk(group.groupId, "group.create did not return groupId");
   reporter.metric("groupId", group.groupId);
 
   reporter.step("sending cross-node group chat from node-1 to node-2");
   const groupText = `cluster-ha group ${suffix}`;
-  const groupAck = await sender.ws.request<SendMessageAck>("chat.send.group", {
+  const groupAck = await sender.ws.request<SendMessageAck>(SCENARIO_OP.CHAT_SEND_GROUP, {
     groupId: group.groupId,
     clientMsgId: nextClientMsgId("cluster-group"),
-    _ct: "text",
+    _ct: SCENARIO_CONTENT_TYPE.TEXT,
     content: { text: groupText },
   });
   assertOk(groupAck.data?.seq !== undefined, "group chat did not return seq");
@@ -154,7 +163,7 @@ function createExistingUser(
 async function assertMessagePush(user: ScenarioUser, expectedText: string, description: string): Promise<void> {
   await user.ws.waitForPush((push) => {
     const data = push.data as MessagePush | undefined;
-    return push.op === "message" && messageContains(data, expectedText);
+    return push.op === SCENARIO_PUSH_OP.MESSAGE && messageContains(data, expectedText);
   }, description);
 }
 
@@ -166,7 +175,7 @@ async function assertGroupPush(
 ): Promise<void> {
   await user.ws.waitForPush((push) => {
     const data = push.data as MessagePush | undefined;
-    return push.op === "message" && data?.groupId === groupId && messageContains(data, expectedText);
+    return push.op === SCENARIO_PUSH_OP.MESSAGE && data?.groupId === groupId && messageContains(data, expectedText);
   }, description);
 }
 
@@ -180,7 +189,7 @@ async function assertRevokePushAfter(
 ): Promise<void> {
   await user.ws.waitForPushAfter(cursor, (push) => {
     const data = push.data as { conversationId?: string; seq?: number; revokerId?: string } | undefined;
-    return push.op === "msg_revoke" &&
+    return push.op === SCENARIO_PUSH_OP.MESSAGE_REVOKED &&
       data?.conversationId === conversationId &&
       data?.seq === seq &&
       data?.revokerId === revokerId;

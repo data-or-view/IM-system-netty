@@ -2,6 +2,7 @@ import { assertOk, waitForAsync } from "../src/assertions.js";
 import { nextClientMsgId } from "../src/client-msg-id.js";
 import { loadScenarioConfig } from "../src/config.js";
 import { hasTextContent } from "../src/message-content.js";
+import { SCENARIO_CONTENT_TYPE, SCENARIO_OP } from "../src/protocol.js";
 import { ScenarioReporter } from "../src/reporter.js";
 import { ScenarioUser } from "../src/scenario-user.js";
 import type { ConversationInfo, FriendInfo, ScenarioMessage, SendMessageAck } from "../src/types.js";
@@ -63,22 +64,22 @@ try {
   const text = `offline sync message ${suffix}`;
   const secondText = `offline sync second conversation ${suffix}`;
   const followupText = `offline sync followup ${suffix}`;
-  const ack = await sender.ws.request<SendMessageAck>("chat.send", {
+  const ack = await sender.ws.request<SendMessageAck>(SCENARIO_OP.CHAT_SEND, {
     toUserId: receiver.userId,
     clientMsgId: nextClientMsgId("scenario-offline"),
-    _ct: "text",
+    _ct: SCENARIO_CONTENT_TYPE.TEXT,
     content: { text },
   });
-  const followupAck = await sender.ws.request<SendMessageAck>("chat.send", {
+  const followupAck = await sender.ws.request<SendMessageAck>(SCENARIO_OP.CHAT_SEND, {
     toUserId: receiver.userId,
     clientMsgId: nextClientMsgId("scenario-offline"),
-    _ct: "text",
+    _ct: SCENARIO_CONTENT_TYPE.TEXT,
     content: { text: followupText },
   });
-  const secondAck = await secondSender.ws.request<SendMessageAck>("chat.send", {
+  const secondAck = await secondSender.ws.request<SendMessageAck>(SCENARIO_OP.CHAT_SEND, {
     toUserId: receiver.userId,
     clientMsgId: nextClientMsgId("scenario-offline-2"),
-    _ct: "text",
+    _ct: SCENARIO_CONTENT_TYPE.TEXT,
     content: { text: secondText },
   });
   assertOk(ack.data?.conversationId, "single chat did not return conversationId");
@@ -120,7 +121,7 @@ try {
     return first && followup && second ? [first, followup, second] : undefined;
   }, {
     timeoutMs: config.requestTimeoutMs,
-    intervalMs: 200,
+    intervalMs: config.pollIntervalMs,
     description: "offline multi-conversation messages in msg.sync",
   });
   assertOk(syncedMessages.length === 3, "sync did not return all offline messages");
@@ -133,7 +134,7 @@ try {
     return first && second ? [first, second] : undefined;
   }, {
     timeoutMs: config.requestTimeoutMs,
-    intervalMs: 200,
+    intervalMs: config.pollIntervalMs,
     description: "receiver single chat conversations after offline messages",
   });
   assertOk(conversations[0].conversationId === ack.data.conversationId, "conversation id mismatch after offline sync");

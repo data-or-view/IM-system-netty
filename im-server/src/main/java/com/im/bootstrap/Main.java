@@ -23,7 +23,7 @@ public class Main {
         Config config = loadConfig();
 
         // 节点 ID（命令行参数覆盖）
-        String nodeId = config.getString("im.node.id", "node-1");
+        String nodeId = config.getString("im.node.id", BootstrapDefaults.NODE_ID);
         if (args.length > 0) nodeId = args[0];
         log.info("Starting IM server with nodeId={}", nodeId);
 

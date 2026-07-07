@@ -5,6 +5,7 @@ import com.im.api.ApiRequest;
 import com.im.api.IConversationAccessChecker;
 import com.im.api.IMessageStore;
 import com.im.api.ISequenceManager;
+import com.im.api.Operation;
 import com.im.api.RequestPreconditions;
 import com.im.api.RequestHandler;
 import com.im.api.SearchMessagesParam;
@@ -49,11 +50,13 @@ public class MessageHandler implements RequestHandler {
 
     @Override
     public Object handle(ApiRequest req) {
-        return switch (req.operation()) {
-            case "chat.pull" -> handlePull(req);
-            case "chat.seq" -> handleSeq(req);
-            case "chat.sync" -> handleSync(req);
-            case "chat.search" -> handleSearch(req);
+        Operation operation = Operation.fromOpName(req.operation());
+        if (operation == null) throw new NotFoundException("unsupported: " + req.operation());
+        return switch (operation) {
+            case CHAT_PULL -> handlePull(req);
+            case CHAT_SEQ -> handleSeq(req);
+            case CHAT_SYNC -> handleSync(req);
+            case CHAT_SEARCH -> handleSearch(req);
             default -> throw new NotFoundException("unsupported: " + req.operation());
         };
     }

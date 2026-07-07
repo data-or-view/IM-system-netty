@@ -1,4 +1,4 @@
-import { toMessageContentType } from "im-sdk";
+import { MessageContentType, toMessageContentType } from "im-sdk";
 import type {
   Message as SDKMessage,
   OutgoingMessageContentTypeValue,
@@ -18,8 +18,19 @@ export interface ViewMessage {
   errorText?: string;
 }
 
+export const VIEW_MESSAGE_STATUS = {
+  FAILED: -1,
+  PENDING: 0,
+  SENT: 1,
+} as const;
+
+export type ViewMessageStatus = (typeof VIEW_MESSAGE_STATUS)[keyof typeof VIEW_MESSAGE_STATUS];
+
+export const LOCAL_PENDING_SEQ = 0;
+export const REVOKED_MESSAGE_TEXT = "消息已撤回";
+
 export function toViewMessage(sdkMsg: SDKMessage): ViewMessage {
-  const seq = sdkMsg.messageSeq ?? sdkMsg.sequenceId ?? 0;
+  const seq = sdkMsg.messageSeq ?? sdkMsg.sequenceId ?? LOCAL_PENDING_SEQ;
   return {
     messageId: sdkMsg.messageId,
     seq,
@@ -33,12 +44,12 @@ export function toViewMessage(sdkMsg: SDKMessage): ViewMessage {
   };
 }
 
-export function normalizeMessageStatus(status: unknown, seq = 0): number {
-  if (status === -1 || status === "FAILED") return -1;
-  if (status === 0 || status === "PENDING") {
-    return seq > 0 ? 1 : 0;
+export function normalizeMessageStatus(status: unknown, seq = LOCAL_PENDING_SEQ): number {
+  if (status === VIEW_MESSAGE_STATUS.FAILED || status === "FAILED") return VIEW_MESSAGE_STATUS.FAILED;
+  if (status === VIEW_MESSAGE_STATUS.PENDING || status === "PENDING") {
+    return seq > LOCAL_PENDING_SEQ ? VIEW_MESSAGE_STATUS.SENT : VIEW_MESSAGE_STATUS.PENDING;
   }
-  return 1;
+  return VIEW_MESSAGE_STATUS.SENT;
 }
 
 export function toOutgoingMessageContent(raw: unknown): string {
@@ -53,13 +64,13 @@ export function toOptimisticMessage(
 ): ViewMessage {
   return {
     messageId: ack.messageId,
-    seq: ack.seq ?? 0,
+    seq: ack.seq ?? LOCAL_PENDING_SEQ,
     senderUserId: currentUserId,
     conversationId: ack.conversationId,
     contentType: toMessageContentType(contentType),
     content: toOutgoingMessageContent(content),
     createTime: Date.now(),
-    status: 1,
+    status: VIEW_MESSAGE_STATUS.SENT,
   };
 }
 
@@ -73,20 +84,20 @@ export function toLocalPendingMessage(input: {
 }): ViewMessage {
   return {
     messageId: input.messageId ?? `local_${Date.now()}_${Math.random().toString(36).slice(2)}`,
-    seq: 0,
+    seq: LOCAL_PENDING_SEQ,
     senderUserId: input.senderUserId,
     conversationId: input.conversationId,
     contentType: typeof input.contentType === "number" ? input.contentType : toMessageContentType(input.contentType),
     content: toOutgoingMessageContent(input.content),
     createTime: input.createTime ?? Date.now(),
-    status: 0,
+    status: VIEW_MESSAGE_STATUS.PENDING,
   };
 }
 
 export function toLocalFailedMessage(message: ViewMessage, errorText: string): ViewMessage {
   return {
     ...message,
-    status: -1,
+    status: VIEW_MESSAGE_STATUS.FAILED,
     errorText,
   };
 }
@@ -104,4 +115,12 @@ export function messageRenderKey(msg: {
   if (msg.messageId) return msg.messageId;
   if (msg.seq && msg.seq > 0) return `seq:${msg.seq}`;
   return `tmp:${msg.senderUserId || "unknown"}:${msg.createTime || 0}:${msg.content || ""}`;
+}
+
+export function toRevokedMessage(message: ViewMessage): ViewMessage {
+  return {
+    ...message,
+    contentType: MessageContentType.REVOKED,
+    content: REVOKED_MESSAGE_TEXT,
+  };
 }

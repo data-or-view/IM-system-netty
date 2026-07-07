@@ -1,0 +1,115 @@
+name: P0 Quality Gate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - main-v1
+  workflow_dispatch:
+
+jobs:
+  backend:
+    name: Backend Contract And Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Run non-E2E Maven tests
+        run: mvn -B test
+
+  frontend:
+    name: Frontend Engineering Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.2
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: im-web/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm --dir im-web install --frozen-lockfile
+
+      - name: Run engineering tests
+        run: pnpm --dir im-web test:engineering
+
+      - name: Build frontend
+        run: pnpm --dir im-web build
+
+  sdk:
+    name: SDK Build And Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: im-sdk/package-lock.json
+
+      - name: Install dependencies
+        run: npm --prefix im-sdk ci
+
+      - name: Run SDK tests
+        run: npm --prefix im-sdk test
+
+  scenario-static:
+    name: Scenario Test Harness
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.2
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: im-scenario-tests/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm --dir im-scenario-tests install --frozen-lockfile
+
+      - name: Run scenario harness gate
+        run: pnpm --dir im-scenario-tests scenario:ci
+
+  scenario-smoke-docs:
+    name: Scenario And Probe Documentation Guard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify P0 docs mention executable gates
+        run: |
+          grep -q "scenario:p0" im-scenario-tests/README.md
+          grep -q "scenario:full" im-scenario-tests/README.md
+          grep -q "/health/live" docs/ai-project-guide.md
+          grep -q "/health/ready" docs/ai-project-guide.md
+          grep -q "AuthzPolicy" docs/authz-matrix.md

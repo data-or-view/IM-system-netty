@@ -1,5 +1,6 @@
 package com.im.infrastructure.storage.file;
 
+import com.im.api.PartInfo;
 import com.im.common.exception.FileStorageException;
 
 import javax.crypto.Mac;
@@ -282,8 +283,4 @@ public class S3MultipartUploader {
         return sb.toString();
     }
 
-    /**
-     * 分片信息。
-     */
-    public record PartInfo(int partNumber, String etag) {}
 }

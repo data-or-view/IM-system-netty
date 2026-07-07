@@ -1,6 +1,7 @@
 package com.im.core.handler.unified;
 
 import com.im.api.ApiRequest;
+import com.im.api.Operation;
 import com.im.api.PartInfo;
 import com.im.api.RequestHandler;
 import com.im.common.exception.NotFoundException;
@@ -20,20 +21,22 @@ public class FileDirectTransferHandler implements RequestHandler {
 
     @Override
     public Object handle(ApiRequest req) {
-        return switch (req.operation()) {
-            case "file.upload.sign" -> useCase.signSingleUpload(req.currentUserId(),
+        Operation operation = Operation.fromOpName(req.operation());
+        if (operation == null) throw new NotFoundException("unsupported: " + req.operation());
+        return switch (operation) {
+            case FILE_UPLOAD_SIGN -> useCase.signSingleUpload(req.currentUserId(),
                     req.getString("fileName"), req.getLong("fileSize", 0),
                     req.getString("mimeType"), req.getString("hash", ""), req.getString("fileGroup", "file"));
-            case "file.upload.complete" -> useCase.completeSingleUpload(req.currentUserId(), req.getString("fileId"));
-            case "file.download.sign" -> useCase.signDownload(req.currentUserId(), req.getString("fileId"));
-            case "file.multipart.init" -> useCase.initiateMultipartUpload(req.currentUserId(),
+            case FILE_UPLOAD_COMPLETE -> useCase.completeSingleUpload(req.currentUserId(), req.getString("fileId"));
+            case FILE_DOWNLOAD_SIGN -> useCase.signDownload(req.currentUserId(), req.getString("fileId"));
+            case FILE_MULTIPART_INIT -> useCase.initiateMultipartUpload(req.currentUserId(),
                     req.getString("fileName"), req.getLong("fileSize", 0),
                     req.getString("mimeType"), req.getString("hash", ""), req.getString("fileGroup", "file"));
-            case "file.multipart.part.sign" -> useCase.signMultipartPart(req.currentUserId(),
+            case FILE_MULTIPART_PART_SIGN -> useCase.signMultipartPart(req.currentUserId(),
                     req.getString("uploadId"), req.getInt("partNumber", -1));
-            case "file.multipart.complete" -> useCase.completeMultipartUpload(req.currentUserId(),
+            case FILE_MULTIPART_COMPLETE -> useCase.completeMultipartUpload(req.currentUserId(),
                     req.getString("uploadId"), toParts(req));
-            case "file.multipart.abort" -> {
+            case FILE_MULTIPART_ABORT -> {
                 useCase.abortMultipartUpload(req.currentUserId(), req.getString("uploadId"));
                 yield Map.of("status", "OK");
             }

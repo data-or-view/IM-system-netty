@@ -14,6 +14,7 @@ import {
   type LocalVideoTrack,
 } from "livekit-client";
 import {
+  OutgoingMessageContentType,
   SignalingAction,
   type CallSignalEvent,
   type SignalingActionName,
@@ -32,6 +33,7 @@ import { useLiveKitRoom } from "@/components/call/useLiveKitRoom";
 export type { CallState, RemoteMedia } from "@/components/call/call-types";
 
 const CallContext = createContext<CallContextValue | null>(null);
+const SEEN_CALL_SIGNAL_CACHE_LIMIT = 200;
 
 export function CallProvider({ children }: { children: ReactNode }) {
   const { state, dispatch } = useStore();
@@ -306,7 +308,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
     const key = `${signal.roomId || ""}:${signal.action}:${msg.messageId || msg.messageSeq || msg.timestamp}`;
     if (seenSignalsRef.current.has(key)) return;
     seenSignalsRef.current.add(key);
-    if (seenSignalsRef.current.size > 200) {
+    if (seenSignalsRef.current.size > SEEN_CALL_SIGNAL_CACHE_LIMIT) {
       seenSignalsRef.current.clear();
     }
     const current = callRef.current;
@@ -369,7 +371,7 @@ function appendLocalCallSignal(
   duration?: number,
 ) {
   if (!ack) return;
-  const msg = toOptimisticMessage(ack, currentUserId || "", "signal", {
+  const msg = toOptimisticMessage(ack, currentUserId || "", OutgoingMessageContentType.SIGNAL, {
     action,
     roomId: call.roomId,
     callType: call.callType,

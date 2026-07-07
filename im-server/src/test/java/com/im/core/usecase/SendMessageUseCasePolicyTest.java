@@ -5,6 +5,7 @@ import com.im.api.IMessageQueue;
 import com.im.api.ISequenceManager;
 import com.im.api.Message;
 import com.im.api.MessageQueueTopics;
+import com.im.api.QueueMessageHandler;
 import com.im.api.content.TextContent;
 import com.im.common.enums.ImErrorCode;
 import com.im.common.exception.ImException;
@@ -98,8 +99,8 @@ class SendMessageUseCasePolicyTest {
         @Override public void start() {}
         @Override public void stop() {}
         @Override public void publish(String topic, Message msg) { published.add(new Published(topic, msg)); }
-        @Override public void subscribe(String topic, MessageHandler handler) {}
-        @Override public void unsubscribe(String topic, MessageHandler handler) {}
+        @Override public void subscribe(String topic, QueueMessageHandler handler) {}
+        @Override public void unsubscribe(String topic, QueueMessageHandler handler) {}
         @Override public boolean hasSubscribers(String topic) { return false; }
     }
 
