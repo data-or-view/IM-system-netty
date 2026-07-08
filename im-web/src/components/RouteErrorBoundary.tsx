@@ -1,5 +1,10 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
+import { APP_EVENT_TYPES, emitAppEvent } from "@/lib/app-events";
+import { createLogger } from "@/lib/logger";
+import { toAppErrorNotice } from "@/lib/app-errors";
+
+const log = createLogger("ui.route-boundary");
 
 interface Props {
   children: ReactNode;
@@ -18,7 +23,8 @@ export default class RouteErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error("route render failed:", error, info);
+    log.error("route render failed", { error, componentStack: info.componentStack });
+    emitAppEvent(APP_EVENT_TYPES.appError, toAppErrorNotice(error, "页面显示异常", "route-boundary"));
   }
 
   render() {

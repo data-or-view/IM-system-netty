@@ -1,4 +1,8 @@
-export const APP_ERROR_EVENT = "im:app-error";
+import { APP_EVENT_TYPES, emitAppEvent } from "@/lib/app-events";
+import { createLogger } from "@/lib/logger";
+
+export const APP_ERROR_EVENT = APP_EVENT_TYPES.appError;
+const log = createLogger("app.errors");
 
 export type AppErrorSeverity = "info" | "warning" | "error";
 
@@ -64,10 +68,12 @@ export function toAppErrorNotice(error: unknown, fallback = "操作失败", sour
 }
 
 export function notifyAppError(error: unknown, fallback = "操作失败", source?: string): void {
-  if (typeof window === "undefined") return;
-  window.dispatchEvent(new CustomEvent(APP_ERROR_EVENT, {
-    detail: toAppErrorNotice(error, fallback, source),
-  }));
+  const notice = toAppErrorNotice(error, fallback, source);
+  log[notice.severity === "error" ? "error" : notice.severity === "warning" ? "warn" : "info"](
+    notice.message,
+    { source, error },
+  );
+  emitAppEvent(APP_EVENT_TYPES.appError, notice);
 }
 
 function asErrorShape(error: unknown): ErrorShape {

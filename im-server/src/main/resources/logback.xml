@@ -1,6 +1,11 @@
 <configuration>
     <property name="LOG_HOME" value="logs"/>
-    <property name="LOG_PATTERN" value="%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - [trace=%X{trace_id:-no-trace}] [req=%X{request_id:-no-request}] [user=%X{app.user.id:-}] [op=%X{app.operation:-}] [conn=%X{connection_id:-}] [seq=%X{ws.seq:-}] %msg%n"/>
+    <!--
+      MDC 字段是后续接入 Kafka/JSON appender 前的稳定日志契约：
+      node/trace/request/user/op/proto/client 用于请求排障，
+      msg/conv/topic 用于消息、MQ、跨节点异步链路排障。
+    -->
+    <property name="LOG_PATTERN" value="%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - [node=%X{node_id:-}] [trace=%X{trace_id:-no-trace}] [req=%X{request_id:-no-request}] [user=%X{app.user.id:-}] [op=%X{app.operation:-}] [proto=%X{app.protocol:-}] [client=%X{client_ip:-}] [conn=%X{connection_id:-}] [seq=%X{ws.seq:-}] [msg=%X{message_id:-}] [clientMsg=%X{client_msg_id:-}] [conv=%X{conversation_id:-}] [topic=%X{mq.topic:-}] %msg%n"/>
 
     <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
         <encoder>

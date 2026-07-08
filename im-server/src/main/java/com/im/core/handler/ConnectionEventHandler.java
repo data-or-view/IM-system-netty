@@ -5,6 +5,9 @@ import com.im.api.IRouteTable;
 import com.im.api.ISessionManager;
 import com.im.core.dispatcher.PendingAcknowledgementManager;
 import com.im.common.util.IMExecutors;
+import com.im.core.observability.LogEvents;
+import com.im.core.observability.LogFields;
+import com.im.core.observability.StructuredLog;
 import com.im.core.session.NettyConnectionRef;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
@@ -63,7 +66,11 @@ public class ConnectionEventHandler extends ChannelInboundHandlerAdapter {
     @Override
     public void channelActive(ChannelHandlerContext ctx) {
         sessionManager.createSession(new NettyConnectionRef(ctx.channel()));
-        log.info("Channel active: remote={}", ctx.channel().remoteAddress());
+        log.info(StructuredLog.event(LogEvents.CONNECTION_OPENED,
+                LogFields.NODE_ID, localNodeId,
+                LogFields.PROTOCOL, "ws",
+                LogFields.CONNECTION_ID, NettyConnectionRef.connectionId(ctx.channel()),
+                LogFields.CLIENT_IP, ctx.channel().remoteAddress()));
         ctx.fireChannelActive();
     }
 
@@ -71,7 +78,12 @@ public class ConnectionEventHandler extends ChannelInboundHandlerAdapter {
     public void userEventTriggered(ChannelHandlerContext ctx, Object evt) {
         if (evt instanceof IdleStateEvent idleEvent
                 && idleEvent.state() == IdleState.ALL_IDLE) {
-            log.warn("Connection idle timeout, closing: remote={}", ctx.channel().remoteAddress());
+            log.warn(StructuredLog.event(LogEvents.CONNECTION_CLOSED,
+                    LogFields.NODE_ID, localNodeId,
+                    LogFields.PROTOCOL, "ws",
+                    LogFields.CONNECTION_ID, NettyConnectionRef.connectionId(ctx.channel()),
+                    LogFields.CLIENT_IP, ctx.channel().remoteAddress(),
+                    LogFields.REASON, "idle_timeout"));
             // 在 close 前强制清理（close 会触发 channelInactive 二次入队），
             // 二次 failFastAll 是幂等的，但 session.remove 第二次返回 null 被跳过。
             cleanupSession(ctx);
@@ -89,7 +101,12 @@ public class ConnectionEventHandler extends ChannelInboundHandlerAdapter {
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
-        log.error("Channel exception: remote={}", ctx.channel().remoteAddress(), cause);
+        log.error(StructuredLog.event(LogEvents.CONNECTION_EXCEPTION,
+                LogFields.NODE_ID, localNodeId,
+                LogFields.PROTOCOL, "ws",
+                LogFields.CONNECTION_ID, NettyConnectionRef.connectionId(ctx.channel()),
+                LogFields.CLIENT_IP, ctx.channel().remoteAddress(),
+                LogFields.EXCEPTION_CLASS, cause.getClass().getSimpleName()), cause);
         eventExecutor.execute(() -> safeCleanupSession(ctx, "exceptionCaught"));
         ctx.close();
     }
@@ -98,7 +115,13 @@ public class ConnectionEventHandler extends ChannelInboundHandlerAdapter {
         try {
             cleanupSession(ctx);
         } catch (Exception e) {
-            log.error("Session cleanup failed: trigger={}, remote={}", trigger, ctx.channel().remoteAddress(), e);
+            log.error(StructuredLog.event(LogEvents.CONNECTION_EXCEPTION,
+                    LogFields.NODE_ID, localNodeId,
+                    LogFields.PROTOCOL, "ws",
+                    LogFields.CONNECTION_ID, NettyConnectionRef.connectionId(ctx.channel()),
+                    LogFields.CLIENT_IP, ctx.channel().remoteAddress(),
+                    LogFields.REASON, trigger,
+                    LogFields.EXCEPTION_CLASS, e.getClass().getSimpleName()), e);
         }
     }
 
@@ -110,7 +133,12 @@ public class ConnectionEventHandler extends ChannelInboundHandlerAdapter {
             int platformId = session.getPlatformId();
             routeTable.offline(userId, localNodeId, platformId, session.getSessionId());
             routeTable.setOffline(userId, platformId);
-            log.info("Session cleaned: userId={}, node={}", userId, localNodeId);
+            log.info(StructuredLog.event(LogEvents.SESSION_CLEANED,
+                    LogFields.NODE_ID, localNodeId,
+                    LogFields.USER_ID, userId,
+                    LogFields.PLATFORM_ID, platformId,
+                    LogFields.SESSION_ID, session.getSessionId(),
+                    LogFields.CONNECTION_ID, NettyConnectionRef.connectionId(ctx.channel())));
         }
         pendingAcknowledgementManager.failFastAll();
     }

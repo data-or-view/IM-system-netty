@@ -69,11 +69,11 @@ public class LocalWebhookManager implements IWebhookManager {
             int status = resp.statusCode();
 
             if (status >= 200 && status < 300) {
-                log.debug("Webhook before OK: event={}, status={}, url={}", event, status, url);
+                log.debug("Webhook before OK: event={}, status={}, endpoint={}", event, status, safeEndpoint(url));
                 return true;
             } else {
-                log.warn("Webhook before BLOCKED: event={}, status={}, body={}, url={}",
-                        event, status, truncate(resp.body(), 500), url);
+                log.warn("Webhook before BLOCKED: event={}, status={}, responseBytes={}, endpoint={}",
+                        event, status, bodySize(resp.body()), safeEndpoint(url));
                 return false;
             }
         } catch (Exception e) {
@@ -102,8 +102,8 @@ public class LocalWebhookManager implements IWebhookManager {
                 if (resp.statusCode() >= 200 && resp.statusCode() < 300) {
                     log.debug("Webhook after OK: event={}, status={}", event, resp.statusCode());
                 } else {
-                    log.warn("Webhook after failed: event={}, status={}, body={}",
-                            event, resp.statusCode(), truncate(resp.body(), 200));
+                    log.warn("Webhook after failed: event={}, status={}, responseBytes={}",
+                            event, resp.statusCode(), bodySize(resp.body()));
                 }
             } catch (Exception e) {
                 log.warn("Webhook after error: event={}, error={}", event, e.toString());
@@ -121,8 +121,29 @@ public class LocalWebhookManager implements IWebhookManager {
         return base + eventName;
     }
 
-    static String truncate(String s, int max) {
-        if (s == null) return "null";
-        return s.length() > max ? s.substring(0, max) + "..." : s;
+    private static int bodySize(String body) {
+        return body != null ? body.length() : 0;
+    }
+
+    private static String safeEndpoint(String url) {
+        try {
+            URI uri = URI.create(url);
+            StringBuilder endpoint = new StringBuilder();
+            if (uri.getScheme() != null) {
+                endpoint.append(uri.getScheme()).append("://");
+            }
+            if (uri.getHost() != null) {
+                endpoint.append(uri.getHost());
+            }
+            if (uri.getPort() >= 0) {
+                endpoint.append(':').append(uri.getPort());
+            }
+            if (uri.getPath() != null) {
+                endpoint.append(uri.getPath());
+            }
+            return endpoint.isEmpty() ? "configured" : endpoint.toString();
+        } catch (Exception ignored) {
+            return "configured";
+        }
     }
 }

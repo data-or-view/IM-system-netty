@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useStore } from "@/store/store";
-import { FRIEND_APPLY_UPDATED_EVENT } from "@/store/store";
+import { APP_EVENT_TYPES, listenAppEvent } from "@/lib/app-events";
+import { createLogger } from "@/lib/logger";
 import { im } from "@/sdk/im-sdk";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -9,6 +10,8 @@ import { Check, Inbox, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 import { DialogBody, EmptyState, ResultRow } from "./DialogParts";
 import { getErrorText } from "im-sdk";
+
+const log = createLogger("ui.friend-requests");
 
 interface Props {
   open: boolean;
@@ -35,7 +38,7 @@ export default function FriendRequestDialog({ open, onOpenChange }: Props) {
       const list = await im.friend.receivedApplyList(true);
       setApplies(list as unknown as ApplyItem[]);
     } catch (err) {
-      console.error("load friend applies failed:", err);
+      log.error("load friend applies failed", { error: err });
       toast(`加载好友申请失败：${getErrorText(err)}`);
     } finally {
       setLoading(false);
@@ -49,8 +52,7 @@ export default function FriendRequestDialog({ open, onOpenChange }: Props) {
   useEffect(() => {
     if (!open) return;
     const reload = () => void loadApplies();
-    window.addEventListener(FRIEND_APPLY_UPDATED_EVENT, reload);
-    return () => window.removeEventListener(FRIEND_APPLY_UPDATED_EVENT, reload);
+    return listenAppEvent(APP_EVENT_TYPES.friendApplyUpdated, reload);
   }, [open, loadApplies]);
 
   const handleApprove = async (fromUserId: string, agreed: boolean) => {

@@ -3,10 +3,13 @@ import { toast } from "sonner";
 import { im } from "@/sdk/im-sdk";
 import { APP_BEHAVIOR } from "@/config/app-behavior";
 import {
-  APP_ERROR_EVENT,
   toAppErrorNotice,
   type AppErrorNotice,
 } from "@/lib/app-errors";
+import { APP_EVENT_TYPES, listenAppEvent } from "@/lib/app-events";
+import { createLogger } from "@/lib/logger";
+
+const log = createLogger("ui.global-errors");
 
 export default function GlobalErrorHandler() {
   const recentNoticesRef = useRef<Map<string, number>>(new Map());
@@ -32,32 +35,32 @@ export default function GlobalErrorHandler() {
     };
 
     const onWindowError = (event: ErrorEvent) => {
+      log.error("window error captured", { error: event.error, message: event.message });
       showNotice(toAppErrorNotice(event.error ?? event.message, "页面运行异常", "runtime"));
     };
 
     const onUnhandledRejection = (event: PromiseRejectionEvent) => {
+      log.error("unhandled promise rejection captured", { error: event.reason });
       showNotice(toAppErrorNotice(event.reason, "异步操作失败", "promise"));
     };
 
-    const onAppError = (event: Event) => {
-      const detail = (event as CustomEvent<AppErrorNotice>).detail;
+    const unsubscribeSdkError = im.on("error", (err) => {
+      log.error("sdk error captured", { error: err });
+      showNotice(toAppErrorNotice(err, "SDK 运行异常", "sdk"));
+    });
+    const unsubscribeAppError = listenAppEvent(APP_EVENT_TYPES.appError, (detail: AppErrorNotice) => {
       if (!detail) return;
       showNotice(detail);
-    };
-
-    const unsubscribeSdkError = im.on("error", (err) => {
-      showNotice(toAppErrorNotice(err, "SDK 运行异常", "sdk"));
     });
 
     window.addEventListener("error", onWindowError);
     window.addEventListener("unhandledrejection", onUnhandledRejection);
-    window.addEventListener(APP_ERROR_EVENT, onAppError);
 
     return () => {
       unsubscribeSdkError();
+      unsubscribeAppError();
       window.removeEventListener("error", onWindowError);
       window.removeEventListener("unhandledrejection", onUnhandledRejection);
-      window.removeEventListener(APP_ERROR_EVENT, onAppError);
     };
   }, []);
 
@@ -78,6 +81,8 @@ function sourceLabel(source: string): string {
       return "页面";
     case "promise":
       return "异步任务";
+    case "route-boundary":
+      return "页面渲染";
     default:
       return source;
   }

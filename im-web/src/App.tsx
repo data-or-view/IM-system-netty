@@ -8,7 +8,8 @@ import { CallProvider } from "@/components/call/CallProvider";
 import RouteErrorBoundary from "@/components/RouteErrorBoundary";
 import GlobalErrorHandler from "@/components/GlobalErrorHandler";
 import { LoadingState } from "@/components/design-system";
-import { APP_ROUTES, getRedirectTarget } from "@/config/routes";
+import { resolveAuthRoute } from "@/config/route-guards";
+import { APP_ROUTES } from "@/config/routes";
 import { authCheckFailureMessage, isAuthExpiredError, notifyAppError } from "@/lib/app-errors";
 
 const ChatLayout = lazy(() => import("@/pages/ChatLayout"));
@@ -77,9 +78,13 @@ function AuthGate() {
     };
   }, [logout, state.token, state.userId]);
 
-  const redirectTarget = getRedirectTarget(location.search);
-  const currentPath = `${location.pathname}${location.search}${location.hash}`;
-  const isLoginRoute = location.pathname === APP_ROUTES.login;
+  const routeDecision = resolveAuthRoute({
+    authenticated: Boolean(state.token && state.userId),
+    pathname: location.pathname,
+    search: location.search,
+    hash: location.hash,
+  });
+  const redirectTarget = "redirectTarget" in routeDecision ? routeDecision.redirectTarget : APP_ROUTES.chat;
 
   const handleLogin = useCallback(
     async (userId: string, password?: string) => {
@@ -140,10 +145,11 @@ function AuthGate() {
     );
   }
 
-  if (!state.token || !state.userId) {
-    if (!isLoginRoute) {
-      return <Navigate to={APP_ROUTES.loginWithRedirect(currentPath)} replace />;
-    }
+  if (routeDecision.kind === "redirect") {
+    return <Navigate to={routeDecision.to} replace />;
+  }
+
+  if (routeDecision.kind === "show-login") {
     return (
       <LoginPage
         onLogin={handleLogin}
@@ -152,10 +158,6 @@ function AuthGate() {
         statusMsg={statusMsg}
       />
     );
-  }
-
-  if (isLoginRoute) {
-    return <Navigate to={redirectTarget} replace />;
   }
 
   return (

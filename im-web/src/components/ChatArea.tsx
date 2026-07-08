@@ -20,11 +20,14 @@ import { useActiveGroupCall } from "@/components/chat/useActiveGroupCall";
 import { useConversationHistory } from "@/components/chat/useConversationHistory";
 import { im } from "@/sdk/im-sdk";
 import { APP_ROUTES } from "@/config/routes";
+import { createLogger } from "@/lib/logger";
 import {
   toLocalFailedMessage,
   toLocalPendingMessage,
   toOptimisticMessage,
 } from "@/lib/messages";
+
+const log = createLogger("ui.chat-area");
 
 export default function ChatArea() {
   const { state, fetchConversations, fetchGroupMembers, dispatch } = useStore();
@@ -126,7 +129,7 @@ export default function ChatArea() {
     const content = input.trim();
     setInput("");
     void sendCurrentTextMessage(content).catch((err) => {
-      console.error("send message failed:", err);
+      log.error("send message failed", { conversationId: conversation.conversationId, error: err });
     });
   };
 
@@ -166,7 +169,7 @@ export default function ChatArea() {
           toast("文件已发送");
         }
       } catch (err) {
-        console.error("send file failed:", err);
+        log.error("send file failed", { conversationId: conversation.conversationId, fileName: file.name, error: err });
         toast(`文件发送失败：${getErrorText(err)}`);
       } finally {
         setUploading(false);

@@ -3,6 +3,7 @@ package com.im.core.delivery;
 import com.im.api.*;
 import com.im.common.retry.RetryExecutor;
 import com.im.common.lifecycle.Lifecycle;
+import com.im.core.observability.MessageObservability;
 import com.im.core.reliability.ReliableMessageHandler;
 import com.im.api.BusinessMessageDlqStore;
 import com.im.api.SendMessageIdempotency;
@@ -76,7 +77,11 @@ public class PersistenceConsumer implements Lifecycle {
 
     @Override
     public void start() {
-        QueueMessageHandler delegate = workflow::persist;
+        QueueMessageHandler delegate = msg -> {
+            try (MessageObservability.Scope ignored = MessageObservability.bind(MessageQueueTopics.PERSIST, msg)) {
+                workflow.persist(msg);
+            }
+        };
 
         this.handler = retryExecutor != null
                 ? new ReliableMessageHandler(MessageQueueTopics.PERSIST, delegate,

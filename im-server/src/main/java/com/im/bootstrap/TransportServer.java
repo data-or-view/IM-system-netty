@@ -123,7 +123,8 @@ final class TransportServer implements Lifecycle {
         }
         wsChannel = WsServerBootstrap.start(bossGroup, workerGroup,
                 config.getInt("im.ws.port", BootstrapDefaults.WS_PORT), useEpoll,
-                connectionEventHandler, dispatcher, virtualExecutor, requestAdmission);
+                connectionEventHandler, dispatcher, virtualExecutor, requestAdmission,
+                config.getString("im.node.id", BootstrapDefaults.NODE_ID));
     }
 
     private void startHttpIfEnabled(boolean useEpoll) throws Exception {

@@ -14,7 +14,12 @@ import com.im.api.IGroupManager;
 import com.im.api.SystemMessage;
 import com.im.common.exception.ForbiddenException;
 import com.im.common.id.IdGenerator;
+import com.im.core.observability.LogEvents;
+import com.im.core.observability.LogFields;
+import com.im.core.observability.StructuredLog;
 import com.im.core.system.SystemMessagePublishUseCase;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -24,6 +29,8 @@ import java.util.List;
  * Coordinates group mutations with their conversation, notification, and system-message side effects.
  */
 public final class GroupWorkflow {
+
+    private static final Logger log = LoggerFactory.getLogger(GroupWorkflow.class);
 
     public record CreateResult(String groupId, GroupInformation groupInformation) {
     }
@@ -63,6 +70,10 @@ public final class GroupWorkflow {
         }
         groupSystemMessagePublisher.groupCreated(groupId, ownerId, allMemberIds);
         publishGroupCreatedMessage(groupId, groupName, ownerId, allMemberIds);
+        log.info(StructuredLog.event(LogEvents.GROUP_CREATED,
+                LogFields.GROUP_ID, groupId,
+                LogFields.USER_ID, ownerId,
+                LogFields.TARGET_COUNT, allMemberIds.size()));
         return new CreateResult(groupId, groupManager.getGroupInformation(groupId));
     }
 
@@ -77,6 +88,10 @@ public final class GroupWorkflow {
                 groupApplyNotifier.notifyApplyCreated(groupManager.getManagerIds(groupId), apply);
             }
         }
+        log.info(StructuredLog.event(LogEvents.GROUP_JOIN_REQUESTED,
+                LogFields.GROUP_ID, groupId,
+                LogFields.USER_ID, userId,
+                LogFields.STATUS, result.name()));
         return result;
     }
 
@@ -86,6 +101,11 @@ public final class GroupWorkflow {
             deleteConversation(userId, groupId);
             groupSystemMessagePublisher.memberLeft(groupId, userId, userId);
         }
+        log.info(StructuredLog.event(LogEvents.GROUP_MEMBER_REMOVED,
+                LogFields.GROUP_ID, groupId,
+                LogFields.USER_ID, userId,
+                LogFields.SUCCESS, removed,
+                LogFields.REASON, "quit"));
         return removed;
     }
 
@@ -93,6 +113,11 @@ public final class GroupWorkflow {
         groupManager.kickMember(groupId, operatorId, targetUserId);
         deleteConversation(targetUserId, groupId);
         groupSystemMessagePublisher.memberLeft(groupId, targetUserId, operatorId);
+        log.info(StructuredLog.event(LogEvents.GROUP_MEMBER_REMOVED,
+                LogFields.GROUP_ID, groupId,
+                LogFields.USER_ID, operatorId,
+                LogFields.TARGET_USER_ID, targetUserId,
+                LogFields.REASON, "kick"));
     }
 
     public void disbandGroup(String groupId, String operatorId) {
@@ -101,6 +126,10 @@ public final class GroupWorkflow {
             deleteConversation(memberId, groupId);
         }
         publishGroupDisbandedMessage(result);
+        log.info(StructuredLog.event(LogEvents.GROUP_DISBANDED,
+                LogFields.GROUP_ID, groupId,
+                LogFields.USER_ID, operatorId,
+                LogFields.TARGET_COUNT, result.getAffectedMemberIds().size()));
     }
 
     public void updateGroupInfo(String groupId,
@@ -115,6 +144,9 @@ public final class GroupWorkflow {
         groupManager.setGroupInformation(groupId, groupName, notification, introduction, faceUrl,
                 needVerification, lookMemberInfo, applyMemberFriend, operatorId);
         groupSystemMessagePublisher.groupInfoUpdated(groupId, operatorId);
+        log.info(StructuredLog.event(LogEvents.GROUP_INFO_UPDATED,
+                LogFields.GROUP_ID, groupId,
+                LogFields.USER_ID, operatorId));
     }
 
     public void transferOwner(String groupId, String operatorId, String targetUserId) {
@@ -149,6 +181,11 @@ public final class GroupWorkflow {
         if (agreed) {
             groupSystemMessagePublisher.memberJoined(groupId, userId, operatorId);
         }
+        log.info(StructuredLog.event(LogEvents.GROUP_APPLY_HANDLED,
+                LogFields.GROUP_ID, groupId,
+                LogFields.USER_ID, operatorId,
+                LogFields.TARGET_USER_ID, userId,
+                LogFields.STATUS, agreed ? "agreed" : "rejected"));
     }
 
     private void deleteConversation(String userId, String groupId) {

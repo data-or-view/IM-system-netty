@@ -18,6 +18,7 @@ import { OutgoingMessageContentType, createClientMsgId } from "im-sdk";
 import { im } from "@/sdk/im-sdk";
 import { APP_BEHAVIOR } from "@/config/app-behavior";
 import { AUTH_LOGOUT_EVENT_KEY, AUTH_USER_ID_KEY } from "@/config/storage-keys";
+import { createLogger } from "@/lib/logger";
 import { toOptimisticMessage } from "@/lib/messages";
 import {
   normalizeConversation,
@@ -46,8 +47,6 @@ import type {
   UserInfo,
 } from "@/store/store-types";
 export {
-  FRIEND_APPLY_UPDATED_EVENT,
-  GROUP_APPLY_UPDATED_EVENT,
   SYSTEM_CONVERSATION_ID,
 } from "@/store/store-types";
 export type {
@@ -63,6 +62,7 @@ export type {
 } from "@/store/store-types";
 
 const StoreContext = createContext<StoreContextType | null>(null);
+const log = createLogger("store");
 
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initialState);
@@ -80,7 +80,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const list = ((await im.conversation.list()) as unknown as Conversation[]).map(normalizeConversation);
       dispatch({ type: "SET_CONVERSATIONS", list });
     } catch (err) {
-      console.error("fetchConversations failed:", err);
+      log.error("fetch conversations failed", { error: err });
     }
   }, []);
 
@@ -111,7 +111,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         unreadCount: result.unreadCount ?? 0,
       });
     } catch (err) {
-      console.error("markConversationRead failed:", err);
+      log.error("mark conversation read failed", { conversationId, error: err });
     }
   }, []);
 
@@ -120,12 +120,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const groups = await im.group.list();
       dispatch({ type: "SET_MY_GROUPS", list: groups as unknown as GroupInfo[] });
     } catch (err) {
-      console.error("fetchMyGroups failed:", err);
+      log.error("fetch my groups failed", { error: err });
       try {
         const conversations = ((await im.conversation.list()) as unknown as Conversation[]).map(normalizeConversation);
         dispatch({ type: "SET_MY_GROUPS", list: groupInfoFromConversation(conversations) });
       } catch (fallbackErr) {
-        console.error("fetchMyGroups fallback failed:", fallbackErr);
+        log.error("fetch my groups fallback failed", { error: fallbackErr });
       }
     }
   }, []);
@@ -135,7 +135,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const list = await im.friend.list();
       dispatch({ type: "SET_FRIENDS", list: list as unknown as FriendInfo[] });
     } catch (err) {
-      console.error("fetchFriends failed:", err);
+      log.error("fetch friends failed", { error: err });
       if (options?.silent === false) throw err;
     }
   }, []);
@@ -145,7 +145,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const count = await im.friend.unhandledApplyCount();
       dispatch({ type: "SET_UNHANDLED_APPLY_COUNT", count });
     } catch (err) {
-      console.error("fetchUnhandledApplyCount failed:", err);
+      log.error("fetch unhandled friend apply count failed", { error: err });
     }
   }, []);
 
@@ -154,7 +154,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const count = await im.group.unhandledApplyCount();
       dispatch({ type: "SET_UNHANDLED_GROUP_APPLY_COUNT", count });
     } catch (err) {
-      console.error("fetchUnhandledGroupApplyCount failed:", err);
+      log.error("fetch unhandled group apply count failed", { error: err });
     }
   }, []);
 
@@ -166,7 +166,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       ]);
       dispatch({ type: "SET_SYSTEM_MESSAGES", messages, unreadCount: unread.count ?? 0 });
     } catch (err) {
-      console.error("refreshSystemMessages failed:", err);
+      log.error("refresh system messages failed", { error: err });
     }
   }, []);
 
@@ -212,7 +212,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         : await im.user.info(userId);
       dispatch({ type: "SET_USER_PROFILE", userId, info: info as unknown as UserInfo });
     } catch (err) {
-      console.error("fetchUserProfile failed:", err);
+      log.error("fetch user profile failed", { userId, error: err });
       if (options?.silent === false) throw err;
     }
   }, [state.userId]);
@@ -363,7 +363,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       await im.friend.approve(fromUserId, agreed);
       await Promise.all([fetchFriends(), fetchUnhandledApplyCount()]);
     } catch (err) {
-      console.error("approveFriend failed:", err);
+      log.error("approve friend failed", { fromUserId, agreed, error: err });
       throw err;
     }
   }, [fetchFriends, fetchUnhandledApplyCount]);
@@ -373,7 +373,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       await im.group.approveApply(groupId, userId, agreed);
       await Promise.all([fetchMyGroups(), fetchUnhandledGroupApplyCount()]);
     } catch (err) {
-      console.error("approveGroupApply failed:", err);
+      log.error("approve group apply failed", { groupId, userId, agreed, error: err });
       throw err;
     }
   }, [fetchMyGroups, fetchUnhandledGroupApplyCount]);
@@ -391,7 +391,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const members = await im.group.members(groupId);
       dispatch({ type: "SET_GROUP_MEMBERS", groupId, members: members as unknown as GroupMember[] });
     } catch (err) {
-      console.error("fetchGroupMembers failed:", err);
+      log.error("fetch group members failed", { groupId, error: err });
       if (options?.silent === false) throw err;
     }
   }, []);
@@ -409,7 +409,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const info = await im.group.info(groupId);
       dispatch({ type: "SET_GROUP_INFO", groupId, info: info as unknown as GroupInfo });
     } catch (err) {
-      console.error("fetchGroupInfo failed:", err);
+      log.error("fetch group info failed", { groupId, error: err });
       if (options?.silent === false) throw err;
     }
   }, []);

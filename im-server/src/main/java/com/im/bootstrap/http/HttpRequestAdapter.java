@@ -12,7 +12,11 @@ import com.im.bootstrap.RequestAdmission;
 import com.im.bootstrap.health.HealthProbeHandler;
 import com.im.common.enums.ImErrorCode;
 import com.im.common.trace.RequestIds;
+import com.im.common.trace.TraceIds;
 import com.im.core.dispatcher.ApiDispatcher;
+import com.im.core.observability.LogEvents;
+import com.im.core.observability.LogFields;
+import com.im.core.observability.StructuredLog;
 import com.im.core.serialization.jackson.ObjectMapperProvider;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandler;
@@ -52,6 +56,7 @@ public class HttpRequestAdapter extends SimpleChannelInboundHandler<FullHttpRequ
     private final ExecutorService virtualExecutor;
     private final RequestAdmission requestAdmission;
     private final HealthProbeHandler healthProbeHandler;
+    private final String nodeId;
     private final boolean trustedProxyEnabled;
     private final String clientIpHeader;
 
@@ -81,6 +86,7 @@ public class HttpRequestAdapter extends SimpleChannelInboundHandler<FullHttpRequ
         this.dispatcher = dispatcher;
         this.virtualExecutor = virtualExecutor;
         this.requestAdmission = requestAdmission;
+        this.nodeId = nodeId == null || nodeId.isBlank() ? "unknown" : nodeId;
         this.healthProbeHandler = new HealthProbeHandler(nodeId, requestAdmission);
         this.trustedProxyEnabled = trustedProxyEnabled;
         this.clientIpHeader = clientIpHeader;
@@ -105,12 +111,34 @@ public class HttpRequestAdapter extends SimpleChannelInboundHandler<FullHttpRequ
             path = path.substring(0, path.length() - 1);
         }
         String method = req.method().name();
+        String requestId = RequestIds.firstNonBlank(req.headers().get(ImHeaders.REQUEST_ID));
+        if (requestId == null) {
+            requestId = RequestIds.next();
+        }
+        String traceId = TraceIds.firstValid(req.headers().get(ImHeaders.TRACE_ID));
+        if (traceId == null) {
+            traceId = TraceIds.fromTraceparent(req.headers().get(ImHeaders.TRACEPARENT));
+        }
+        if (traceId == null) {
+            traceId = TraceIds.next();
+        }
+        String clientIp = ClientIpResolver.fromHttpRequest(
+                req, ctx.channel().remoteAddress(), trustedProxyEnabled, clientIpHeader);
 
         // 查找 Operation（替换 OperationMapping）
         Operation operation = Operation.fromHttp(method, path);
         if (operation == null) {
-            log.warn("No route: {} {}", method, path);
-            JsonResponse.error(ctx, HttpResponseStatus.NOT_FOUND, "no route: " + method + " " + path, null, requestOrigin);
+            log.warn(StructuredLog.event(LogEvents.REQUEST_REJECTED,
+                    LogFields.NODE_ID, nodeId,
+                    LogFields.REQUEST_ID, requestId,
+                    LogFields.TRACE_ID, traceId,
+                    LogFields.PROTOCOL, "http",
+                    LogFields.CLIENT_IP, clientIp,
+                    LogFields.HTTP_METHOD, method,
+                    LogFields.HTTP_PATH, path,
+                    LogFields.ERROR_CODE, ImErrorCode.NOT_FOUND.getCode(),
+                    LogFields.REASON, "no_route"));
+            JsonResponse.error(ctx, HttpResponseStatus.NOT_FOUND, "no route: " + method + " " + path, requestId, requestOrigin);
             return;
         }
 
@@ -150,8 +178,18 @@ public class HttpRequestAdapter extends SimpleChannelInboundHandler<FullHttpRequ
                         Map<String, Object> bodyMap = MAPPER.readValue(bytes, MAP_TYPE);
                         params.putAll(bodyMap);
                     } catch (Exception e) {
-                        log.warn("Invalid JSON body for {} {}: {}", method, path, e.getMessage());
-                        JsonResponse.imError(ctx, ImErrorCode.BAD_REQUEST, "invalid json body", null, requestOrigin);
+                        log.warn(StructuredLog.event(LogEvents.REQUEST_REJECTED,
+                                LogFields.NODE_ID, nodeId,
+                                LogFields.REQUEST_ID, requestId,
+                                LogFields.TRACE_ID, traceId,
+                                LogFields.OPERATION, operation.opName(),
+                                LogFields.PROTOCOL, "http",
+                                LogFields.CLIENT_IP, clientIp,
+                                LogFields.HTTP_METHOD, method,
+                                LogFields.HTTP_PATH, path,
+                                LogFields.ERROR_CODE, ImErrorCode.BAD_REQUEST.getCode(),
+                                LogFields.REASON, "invalid_json"));
+                        JsonResponse.imError(ctx, ImErrorCode.BAD_REQUEST, "invalid json body", requestId, requestOrigin);
                         return;
                     }
                 }
@@ -168,21 +206,19 @@ public class HttpRequestAdapter extends SimpleChannelInboundHandler<FullHttpRequ
         if (requestOrigin != null) {
             headers.put("Origin", requestOrigin);
         }
-        String requestId = RequestIds.firstNonBlank(
-                req.headers().get(ImHeaders.REQUEST_ID),
-                req.headers().get(ImHeaders.TRACE_ID),
-                req.headers().get(ImHeaders.TRACEPARENT));
-        if (requestId == null) {
-            requestId = RequestIds.next();
-        }
         headers.put(ImHeaders.REQUEST_ID, requestId);
+        headers.put(ImHeaders.TRACE_ID, traceId);
 
         // 创建 ResponseWriter + ApiRequest 并提交到虚拟线程
         ResponseWriter responseWriter = new HttpResponseWriter(ctx, requestId);
         ApiRequest request = new ApiRequest(operation, params, headers, responseWriter, bodyRaw);
         request.setAttribute(ApiRequest.ATTR_REQUEST_ID, requestId);
-        request.setAttribute(ApiRequest.ATTR_CLIENT_IP, ClientIpResolver.fromHttpRequest(
-                req, ctx.channel().remoteAddress(), trustedProxyEnabled, clientIpHeader));
+        request.setAttribute(ApiRequest.ATTR_TRACE_ID, traceId);
+        request.setAttribute(ApiRequest.ATTR_CLIENT_IP, clientIp);
+        request.setAttribute(ApiRequest.ATTR_PROTOCOL, "http");
+        request.setAttribute(ApiRequest.ATTR_NODE_ID, nodeId);
+        request.setAttribute(ApiRequest.ATTR_HTTP_METHOD, method);
+        request.setAttribute(ApiRequest.ATTR_HTTP_PATH, path);
         if (requestAdmission == null) {
             DispatchSubmitter.submit(dispatcher, virtualExecutor, request, log);
         } else {

@@ -25,6 +25,10 @@ public class ApiRequest {
     public static final String ATTR_REQUEST_ID = "_requestId";
     public static final String ATTR_TRACE_ID = "_traceId";
     public static final String ATTR_WS_SEQ = "_wsSeq";
+    public static final String ATTR_PROTOCOL = "_protocol";
+    public static final String ATTR_NODE_ID = "_nodeId";
+    public static final String ATTR_HTTP_METHOD = "_httpMethod";
+    public static final String ATTR_HTTP_PATH = "_httpPath";
 
     private final String operation;
     private final Operation op;

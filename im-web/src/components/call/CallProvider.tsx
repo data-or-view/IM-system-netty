@@ -23,6 +23,7 @@ import { toast } from "sonner";
 import { im } from "@/sdk/im-sdk";
 import { useStore } from "@/store/store";
 import { DEV_LIVEKIT_URL } from "@/config/runtime";
+import { createLogger } from "@/lib/logger";
 import { toOptimisticMessage } from "@/lib/messages";
 import { startIncomingAttention, stopIncomingAttention } from "@/components/call/call-attention";
 import { ensureMediaPermission } from "@/components/call/call-config";
@@ -34,6 +35,7 @@ export type { CallState, RemoteMedia } from "@/components/call/call-types";
 
 const CallContext = createContext<CallContextValue | null>(null);
 const SEEN_CALL_SIGNAL_CACHE_LIMIT = 200;
+const log = createLogger("ui.call");
 
 export function CallProvider({ children }: { children: ReactNode }) {
   const { state, dispatch } = useStore();
@@ -103,7 +105,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       outgoingTokenRef.current = ack.token;
       setCall((prev) => ({ ...prev, phase: "ringing", roomId: ack.roomId }));
     } catch (err) {
-      console.error("start call failed:", err);
+      log.error("start call failed", { peerUserId: peer.userId, callType, error: err });
       toast(callErrorText(err, "发起通话失败", liveKitUrlRef.current));
       await resetCall();
     }
@@ -153,7 +155,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
         cameraOff: callType !== "video",
       }));
     } catch (err) {
-      console.error("join group call failed:", err);
+      log.error("join group call failed", { groupId: group.groupId, error: err });
       await im.group.leaveCall(group.groupId).catch(() => undefined);
       if (!suppressFailureToast) {
         toast(callErrorText(err, "加入群视频失败", liveKitUrlRef.current));
@@ -172,7 +174,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       started = true;
       await joinGroupCall({ group, mediaPermissionChecked: true, suppressFailureToast: true });
     } catch (err) {
-      console.error("start group call failed:", err);
+      log.error("start group call failed", { groupId: group.groupId, callType, error: err });
       if (started) {
         await im.group.endCall(group.groupId).catch(() => undefined);
       }
@@ -196,7 +198,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       await connectRoom(liveKitUrlRef.current, incomingTokenRef.current, current.callType);
       setCall((prev) => ({ ...prev, phase: "connected", startedAt: Date.now() }));
     } catch (err) {
-      console.error("accept call failed:", err);
+      log.error("accept call failed", { peerUserId: current.peer.userId, roomId: current.roomId, error: err });
       if (acceptedSent) {
         await im.message.sendCallSignal(current.peer.userId, SignalingAction.HANGUP, current.roomId, undefined, "media_failed")
           .catch(() => undefined);
@@ -320,7 +322,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       void connectRoom(liveKitUrlRef.current, outgoingTokenRef.current, current.callType)
         .then(() => setCall((prev) => ({ ...prev, phase: "connected", startedAt: Date.now() })))
         .catch(async (err) => {
-          console.error("connect accepted call failed:", err);
+          log.error("connect accepted call failed", { fromUserId: msg.fromUserId, roomId: signal.roomId, error: err });
           toast(callErrorText(err, "接入通话失败"));
           await im.message.sendCallSignal(msg.fromUserId, SignalingAction.HANGUP, signal.roomId!, undefined, "media_failed")
             .catch(() => undefined);

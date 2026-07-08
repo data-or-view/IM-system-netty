@@ -48,7 +48,8 @@ public class LiveKitCallManager implements ICallManager {
         this.apiKey = apiKey;
         this.apiSecret = apiSecret;
         this.sfuEndpoint = sfuEndpoint;
-        log.info("LiveKitCallManager initialized: endpoint={}, apiKey={}", sfuEndpoint, apiKey);
+        log.info("LiveKitCallManager initialized: endpoint={}, apiKeyConfigured={}",
+                sfuEndpoint, hasText(apiKey));
     }
 
     @Override

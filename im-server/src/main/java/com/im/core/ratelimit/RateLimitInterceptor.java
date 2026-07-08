@@ -5,10 +5,16 @@ import com.im.api.ApiRequest;
 import com.im.common.enums.ImErrorCode;
 import com.im.common.exception.ImException;
 import com.im.core.handler.unified.AuthInterceptor;
+import com.im.core.observability.LogEvents;
+import com.im.core.observability.LogFields;
+import com.im.core.observability.RequestObservability;
+import com.im.core.observability.StructuredLog;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -45,7 +51,7 @@ public final class RateLimitInterceptor implements ApiInterceptor {
         for (RateLimitRule rule : policy.rulesFor(request)) {
             RateLimitDecision decision = check(rule, request);
             if (!decision.allowed()) {
-                throw rateLimited(rule, decision);
+                throw rateLimited(rule, decision, request);
             }
         }
         return true;
@@ -57,21 +63,52 @@ public final class RateLimitInterceptor implements ApiInterceptor {
             return limiter.check(key, rule.limit(), rule.window());
         } catch (Exception e) {
             if (failOpen) {
-                log.warn("Rate limiter failed open: op={}, rule={}, key={}, error={}",
-                        request.operation(), rule.name(), key, e.toString());
+                Map<String, Object> fields = commonFields(rule, request, key, null);
+                fields.put(LogFields.FAIL_OPEN, true);
+                fields.put(LogFields.EXCEPTION_CLASS, e.getClass().getSimpleName());
+                log.warn(StructuredLog.event(LogEvents.RATE_LIMIT_BACKEND_FAILED,
+                        fields));
                 return RateLimitDecision.allowed(0, 0, Duration.ZERO);
             }
-            log.warn("Rate limiter failed closed: op={}, rule={}, key={}",
-                    request.operation(), rule.name(), key, e);
+            Map<String, Object> fields = commonFields(rule, request, key, null);
+            fields.put(LogFields.FAIL_OPEN, false);
+            fields.put(LogFields.EXCEPTION_CLASS, e.getClass().getSimpleName());
+            log.warn(StructuredLog.event(LogEvents.RATE_LIMIT_BACKEND_FAILED,
+                    fields), e);
             throw new ImException(ImErrorCode.RATE_LIMITED, "rate limiter unavailable")
                     .withAttribute("rateLimitRule", rule.name());
         }
     }
 
-    private ImException rateLimited(RateLimitRule rule, RateLimitDecision decision) {
+    private ImException rateLimited(RateLimitRule rule, RateLimitDecision decision, ApiRequest request) {
+        Map<String, Object> fields = commonFields(rule, request, rule.key(request), decision);
+        log.warn(StructuredLog.event(LogEvents.RATE_LIMIT_REJECTED, fields));
         return new ImException(ImErrorCode.RATE_LIMITED, "rate limit exceeded: " + rule.name())
                 .withAttribute("rateLimitRule", rule.name())
                 .withAttribute("retryAfterSeconds", retryAfterSeconds(decision.retryAfter()));
+    }
+
+    private Map<String, Object> commonFields(RateLimitRule rule, ApiRequest request, String key,
+                                             RateLimitDecision decision) {
+        Map<String, Object> fields = new LinkedHashMap<>();
+        if (request != null) {
+            fields.put(LogFields.REQUEST_ID, RequestObservability.requestId(request));
+            fields.put(LogFields.TRACE_ID, RequestObservability.traceId(request));
+            fields.put(LogFields.USER_ID, RequestObservability.userId(request));
+            fields.put(LogFields.OPERATION, request.operation());
+            fields.put(LogFields.PROTOCOL, RequestObservability.protocol(request));
+            fields.put(LogFields.CLIENT_IP, RequestObservability.clientIp(request));
+        }
+        fields.put(LogFields.RULE, rule.name());
+        fields.put(LogFields.KEY, key);
+        fields.put(LogFields.LIMIT, rule.limit());
+        fields.put(LogFields.WINDOW_MS, rule.window().toMillis());
+        if (decision != null) {
+            fields.put(LogFields.CURRENT_COUNT, decision.currentCount());
+            fields.put(LogFields.REMAINING, decision.remaining());
+            fields.put(LogFields.RETRY_AFTER_SECONDS, retryAfterSeconds(decision.retryAfter()));
+        }
+        return fields;
     }
 
     private long retryAfterSeconds(Duration retryAfter) {

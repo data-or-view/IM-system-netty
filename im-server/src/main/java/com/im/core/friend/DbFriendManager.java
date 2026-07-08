@@ -62,7 +62,8 @@ public class DbFriendManager implements IFriendManager, FriendApplyPolicy.Gatewa
                 }
                 mapper.upsertPendingApply(fromUserId, toUserId, ApplyHandleResult.PENDING.getCode(), reqMsg, now);
                 session.commit();
-                log.info("Friend apply: {} -> {} (req={})", fromUserId, toUserId, reqMsg);
+                log.info("Friend apply: {} -> {} (requestMessagePresent={})",
+                        fromUserId, toUserId, reqMsg != null && !reqMsg.isBlank());
             }
             return null;
         }));

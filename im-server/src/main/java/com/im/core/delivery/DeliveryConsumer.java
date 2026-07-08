@@ -3,6 +3,7 @@ package com.im.core.delivery;
 import com.im.api.*;
 import com.im.common.lifecycle.Lifecycle;
 import com.im.common.retry.RetryExecutor;
+import com.im.core.observability.MessageObservability;
 import com.im.core.reliability.ReliableMessageHandler;
 import com.im.api.BusinessMessageDlqStore;
 import com.im.api.SendMessageIdempotency;
@@ -79,7 +80,11 @@ public class DeliveryConsumer implements Lifecycle {
 
     @Override
     public void start() {
-        QueueMessageHandler delegate = workflow::deliver;
+        QueueMessageHandler delegate = msg -> {
+            try (MessageObservability.Scope ignored = MessageObservability.bind(MessageQueueTopics.DELIVER, msg)) {
+                workflow.deliver(msg);
+            }
+        };
 
         this.handler = retryExecutor != null
                 ? new ReliableMessageHandler(MessageQueueTopics.DELIVER, delegate,

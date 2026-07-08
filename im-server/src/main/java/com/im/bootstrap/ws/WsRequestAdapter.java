@@ -11,7 +11,11 @@ import com.im.bootstrap.ClientIpResolver;
 import com.im.bootstrap.DispatchSubmitter;
 import com.im.bootstrap.RequestAdmission;
 import com.im.common.trace.RequestIds;
+import com.im.common.trace.TraceIds;
 import com.im.core.dispatcher.ApiDispatcher;
+import com.im.core.observability.LogEvents;
+import com.im.core.observability.LogFields;
+import com.im.core.observability.StructuredLog;
 import com.im.core.serialization.jackson.ObjectMapperProvider;
 import com.im.core.session.NettyConnectionRef;
 import io.netty.channel.ChannelHandler;
@@ -54,6 +58,7 @@ public class WsRequestAdapter extends SimpleChannelInboundHandler<WebSocketFrame
     private final ApiDispatcher dispatcher;
     private final ExecutorService virtualExecutor;
     private final RequestAdmission requestAdmission;
+    private final String nodeId;
 
     public WsRequestAdapter(ApiDispatcher dispatcher, ExecutorService virtualExecutor) {
         this(dispatcher, virtualExecutor, null);
@@ -62,13 +67,23 @@ public class WsRequestAdapter extends SimpleChannelInboundHandler<WebSocketFrame
     public WsRequestAdapter(ApiDispatcher dispatcher,
                             ExecutorService virtualExecutor,
                             RequestAdmission requestAdmission) {
+        this(dispatcher, virtualExecutor, requestAdmission, null);
+    }
+
+    public WsRequestAdapter(ApiDispatcher dispatcher,
+                            ExecutorService virtualExecutor,
+                            RequestAdmission requestAdmission,
+                            String nodeId) {
         this.dispatcher = dispatcher;
         this.virtualExecutor = virtualExecutor;
         this.requestAdmission = requestAdmission;
+        this.nodeId = nodeId == null || nodeId.isBlank() ? "unknown" : nodeId;
     }
 
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, WebSocketFrame frame) {
+        String connectionId = NettyConnectionRef.connectionId(ctx.channel());
+        String clientIp = ClientIpResolver.fromRemoteAddress(ctx.channel().remoteAddress());
         if (!(frame instanceof TextWebSocketFrame textFrame)) {
             ctx.fireChannelRead(frame);
             return;
@@ -76,7 +91,14 @@ public class WsRequestAdapter extends SimpleChannelInboundHandler<WebSocketFrame
 
         String text = textFrame.text();
         if (text == null || text.isBlank()) {
-            log.warn("Empty WS frame from {}", ctx.channel().remoteAddress());
+            log.warn(StructuredLog.event(LogEvents.REQUEST_REJECTED,
+                    LogFields.NODE_ID, nodeId,
+                    LogFields.REQUEST_ID, RequestIds.next(),
+                    LogFields.TRACE_ID, TraceIds.next(),
+                    LogFields.PROTOCOL, "ws",
+                    LogFields.CLIENT_IP, clientIp,
+                    LogFields.CONNECTION_ID, connectionId,
+                    LogFields.REASON, "empty_frame"));
             return;
         }
 
@@ -84,21 +106,48 @@ public class WsRequestAdapter extends SimpleChannelInboundHandler<WebSocketFrame
         try {
             raw = MAPPER.readValue(text, MAP_TYPE);
         } catch (Exception e) {
-            log.warn("Invalid WS JSON from {}: {}", ctx.channel().remoteAddress(), e.getMessage());
+            log.warn(StructuredLog.event(LogEvents.REQUEST_REJECTED,
+                    LogFields.NODE_ID, nodeId,
+                    LogFields.REQUEST_ID, RequestIds.next(),
+                    LogFields.TRACE_ID, TraceIds.next(),
+                    LogFields.PROTOCOL, "ws",
+                    LogFields.CLIENT_IP, clientIp,
+                    LogFields.CONNECTION_ID, connectionId,
+                    LogFields.REASON, "invalid_json",
+                    LogFields.EXCEPTION_CLASS, e.getClass().getSimpleName()));
             WsResponseWriter.writeProtocolError(ctx, "invalid json: " + e.getMessage());
             return;
         }
+        Object requestIdObj = raw.get(ProtocolFields.CLIENT_REQUEST_ID);
+        Object traceIdObj = raw.get(ProtocolFields.CLIENT_TRACE_ID);
+        String requestId = requestId(requestIdObj);
+        String traceId = traceId(traceIdObj);
 
         // 提取操作名 → 解析为 Operation 枚举
         String opStr = raw.containsKey(ProtocolFields.OP) ? raw.get(ProtocolFields.OP).toString() : null;
         if (opStr == null || opStr.isBlank()) {
-            log.warn("Missing 'op' in WS frame from {}", ctx.channel().remoteAddress());
+            log.warn(StructuredLog.event(LogEvents.REQUEST_REJECTED,
+                    LogFields.NODE_ID, nodeId,
+                    LogFields.REQUEST_ID, requestId,
+                    LogFields.TRACE_ID, traceId,
+                    LogFields.PROTOCOL, "ws",
+                    LogFields.CLIENT_IP, clientIp,
+                    LogFields.CONNECTION_ID, connectionId,
+                    LogFields.REASON, "missing_op"));
             WsResponseWriter.writeProtocolError(ctx, "missing 'op' field");
             return;
         }
         Operation operation = Operation.fromOpName(opStr);
         if (operation == null) {
-            log.warn("Unknown operation '{}' from {}", opStr, ctx.channel().remoteAddress());
+            log.warn(StructuredLog.event(LogEvents.REQUEST_REJECTED,
+                    LogFields.NODE_ID, nodeId,
+                    LogFields.REQUEST_ID, requestId,
+                    LogFields.TRACE_ID, traceId,
+                    LogFields.OPERATION, opStr,
+                    LogFields.PROTOCOL, "ws",
+                    LogFields.CLIENT_IP, clientIp,
+                    LogFields.CONNECTION_ID, connectionId,
+                    LogFields.REASON, "unknown_operation"));
             WsResponseWriter.writeProtocolError(ctx, "unknown operation: " + opStr);
             return;
         }
@@ -111,8 +160,17 @@ public class WsRequestAdapter extends SimpleChannelInboundHandler<WebSocketFrame
         }
 
         if (!operation.supportsWebSocket()) {
-            log.warn("Operation '{}' is not allowed on WebSocket from {}", opStr, ctx.channel().remoteAddress());
-            new WsResponseWriter(ctx, seq, operation.opName())
+            log.warn(StructuredLog.event(LogEvents.REQUEST_REJECTED,
+                    LogFields.NODE_ID, nodeId,
+                    LogFields.REQUEST_ID, requestId,
+                    LogFields.TRACE_ID, traceId,
+                    LogFields.OPERATION, operation.opName(),
+                    LogFields.PROTOCOL, "ws",
+                    LogFields.CLIENT_IP, clientIp,
+                    LogFields.CONNECTION_ID, connectionId,
+                    LogFields.WS_SEQ, seq,
+                    LogFields.REASON, "operation_not_ws"));
+            new WsResponseWriter(ctx, seq, operation.opName(), requestId)
                     .writeError(com.im.common.enums.ImErrorCode.BAD_REQUEST,
                             "operation only supports HTTP: " + operation.opName());
             return;
@@ -122,14 +180,8 @@ public class WsRequestAdapter extends SimpleChannelInboundHandler<WebSocketFrame
         Map<String, Object> params = new HashMap<>(raw);
         params.remove(ProtocolFields.OP);
         params.remove(ProtocolFields.SEQ);
-        Object requestIdObj = params.remove(ProtocolFields.CLIENT_REQUEST_ID);
-        Object traceIdObj = params.remove(ProtocolFields.CLIENT_TRACE_ID);
-        String requestId = RequestIds.firstNonBlank(
-                requestIdObj != null ? requestIdObj.toString() : null,
-                traceIdObj != null ? traceIdObj.toString() : null);
-        if (requestId == null) {
-            requestId = RequestIds.next();
-        }
+        params.remove(ProtocolFields.CLIENT_REQUEST_ID);
+        params.remove(ProtocolFields.CLIENT_TRACE_ID);
 
         // 提取协议头部（Authorization 等）
         Map<String, String> headers = new HashMap<>();
@@ -138,18 +190,32 @@ public class WsRequestAdapter extends SimpleChannelInboundHandler<WebSocketFrame
             params.remove(ImHeaders.AUTHORIZATION);
         }
         headers.put(ImHeaders.REQUEST_ID, requestId);
+        headers.put(ImHeaders.TRACE_ID, traceId);
 
         // 创建 ResponseWriter + ApiRequest 并提交到虚拟线程
         ResponseWriter responseWriter = new WsResponseWriter(ctx, seq, operation.opName(), requestId);
         ApiRequest request = new ApiRequest(operation, params, headers, responseWriter, null);
-        request.setAttribute(ApiRequest.ATTR_CONNECTION_ID, NettyConnectionRef.connectionId(ctx.channel()));
-        request.setAttribute(ApiRequest.ATTR_CLIENT_IP, ClientIpResolver.fromRemoteAddress(ctx.channel().remoteAddress()));
+        request.setAttribute(ApiRequest.ATTR_CONNECTION_ID, connectionId);
+        request.setAttribute(ApiRequest.ATTR_CLIENT_IP, clientIp);
         request.setAttribute(ApiRequest.ATTR_REQUEST_ID, requestId);
+        request.setAttribute(ApiRequest.ATTR_TRACE_ID, traceId);
         request.setAttribute(ApiRequest.ATTR_WS_SEQ, seq);
+        request.setAttribute(ApiRequest.ATTR_PROTOCOL, "ws");
+        request.setAttribute(ApiRequest.ATTR_NODE_ID, nodeId);
         if (requestAdmission == null) {
             DispatchSubmitter.submit(dispatcher, virtualExecutor, request, log);
         } else {
             DispatchSubmitter.submit(dispatcher, virtualExecutor, requestAdmission, request, log);
         }
+    }
+
+    private static String requestId(Object value) {
+        String requestId = RequestIds.firstNonBlank(value != null ? value.toString() : null);
+        return requestId != null ? requestId : RequestIds.next();
+    }
+
+    private static String traceId(Object value) {
+        String traceId = TraceIds.firstValid(value != null ? value.toString() : null);
+        return traceId != null ? traceId : TraceIds.next();
     }
 }

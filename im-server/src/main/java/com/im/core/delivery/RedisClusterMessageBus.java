@@ -10,6 +10,10 @@ import com.im.api.ClusterMessageHandler;
 import com.im.api.IClusterMessageBus;
 import com.im.api.Message;
 import com.im.common.util.IMExecutors;
+import com.im.core.observability.LogEvents;
+import com.im.core.observability.LogFields;
+import com.im.core.observability.MessageObservability;
+import com.im.core.observability.StructuredLog;
 import com.im.core.serialization.jackson.ObjectMapperProvider;
 import com.im.core.redis.RedisConfiguration;
 import io.lettuce.core.pubsub.RedisPubSubListener;
@@ -130,15 +134,20 @@ public class RedisClusterMessageBus implements IClusterMessageBus {
             String channel = nodeChannel(targetNodeId);
             Long receivers = pubSubAsync.publish(channel, json).get(PUBLISH_TIMEOUT_SECONDS, TimeUnit.SECONDS);
             if (receivers == null || receivers <= 0) {
-                log.warn("No subscribers while sending to node {}: topic={}, kind={}",
-                        targetNodeId, msg.getTopic(), msg.getKind());
+                Map<String, Object> fields = clusterFields(msg, targetNodeId);
+                fields.put("channel", channel);
+                log.warn(StructuredLog.event(LogEvents.CLUSTER_MESSAGE_NO_SUBSCRIBER, fields));
                 return false;
             }
-            log.debug("Sent to node {}: topic={}, kind={}, receivers={}",
-                    targetNodeId, msg.getTopic(), msg.getKind(), receivers);
+            Map<String, Object> fields = clusterFields(msg, targetNodeId);
+            fields.put("channel", channel);
+            fields.put("receivers", receivers);
+            log.info(StructuredLog.event(LogEvents.CLUSTER_MESSAGE_PUBLISH_SUCCEEDED, fields));
             return true;
         } catch (Exception e) {
-            log.error("Failed to send to node {}: {}", targetNodeId, e.getMessage(), e);
+            Map<String, Object> fields = clusterFields(msg, targetNodeId);
+            fields.put(LogFields.EXCEPTION_CLASS, e.getClass().getSimpleName());
+            log.error(StructuredLog.event(LogEvents.MESSAGE_FORWARD_REMOTE_FAILED, fields), e);
             throw new IllegalStateException("failed to send cluster message to node " + targetNodeId, e);
         }
     }
@@ -149,9 +158,13 @@ public class RedisClusterMessageBus implements IClusterMessageBus {
         try {
             String json = serialize(msg);
             pubSubAsync.publish(BROADCAST_CHANNEL, json);
-            log.debug("Broadcast: topic={}, kind={}", msg.getTopic(), msg.getKind());
+            Map<String, Object> fields = clusterFields(msg, null);
+            fields.put("channel", BROADCAST_CHANNEL);
+            log.debug(StructuredLog.event(LogEvents.CLUSTER_MESSAGE_PUBLISH_SUCCEEDED, fields));
         } catch (Exception e) {
-            log.error("Failed to broadcast: {}", e.getMessage());
+            Map<String, Object> fields = clusterFields(msg, null);
+            fields.put(LogFields.EXCEPTION_CLASS, e.getClass().getSimpleName());
+            log.error(StructuredLog.event(LogEvents.MESSAGE_FORWARD_REMOTE_FAILED, fields), e);
         }
     }
 
@@ -187,13 +200,17 @@ public class RedisClusterMessageBus implements IClusterMessageBus {
 
                 // TTL 递减
                 if (!msg.decrementTtl()) {
-                    log.warn("Dropped message: TTL exhausted, from={}, topic={}",
-                            msg.getFromNodeId(), msg.getTopic());
+                    Map<String, Object> fields = clusterFields(msg, nodeId);
+                    fields.put(LogFields.REASON, "ttl_exhausted");
+                    log.warn(StructuredLog.event(LogEvents.CLUSTER_HANDLER_FAILED, fields));
                     return;
                 }
 
                 // 按 topic 分派
                 String topic = msg.getTopic();
+                try (MessageObservability.Scope ignored = MessageObservability.bind("cluster." + topic, msg.getMessage())) {
+                    log.debug(StructuredLog.event(LogEvents.CLUSTER_MESSAGE_RECEIVED,
+                            clusterFields(msg, nodeId)));
                 List<ClusterMessageHandler> handlers = handlerRegistry.get(topic);
                 if (handlers == null || handlers.isEmpty()) {
                     log.debug("No handlers for topic={}, channel={}", topic, channel);
@@ -203,11 +220,17 @@ public class RedisClusterMessageBus implements IClusterMessageBus {
                     try {
                         handler.handle(msg);
                     } catch (Exception e) {
-                        log.warn("Handler error for topic={}: {}", topic, e.getMessage());
+                        Map<String, Object> fields = clusterFields(msg, nodeId);
+                        fields.put(LogFields.EXCEPTION_CLASS, e.getClass().getSimpleName());
+                        log.warn(StructuredLog.event(LogEvents.CLUSTER_HANDLER_FAILED, fields));
                     }
                 }
+                }
             } catch (Exception e) {
-                log.warn("Failed to process cluster message from channel={}: {}", channel, e.getMessage());
+                log.warn(StructuredLog.event(LogEvents.CLUSTER_HANDLER_FAILED,
+                        "channel", channel,
+                        LogFields.NODE_ID, nodeId,
+                        LogFields.EXCEPTION_CLASS, e.getClass().getSimpleName()));
             }
         });
     }
@@ -295,5 +318,29 @@ public class RedisClusterMessageBus implements IClusterMessageBus {
 
     private static String nodeChannel(String nodeId) {
         return NODE_CHANNEL_PREFIX + nodeId + NODE_CHANNEL_SUFFIX;
+    }
+
+    private Map<String, Object> clusterFields(ClusterMessage msg, String targetNodeId) {
+        Map<String, Object> fields = new LinkedHashMap<>();
+        if (msg == null) {
+            return fields;
+        }
+        if (msg.getMessage() != null) {
+            fields.putAll(MessageObservability.fields(msg.getTopic(), msg.getMessage()));
+        }
+        fields.put(LogFields.TOPIC, msg.getTopic());
+        fields.put("kind", msg.getKind());
+        fields.put(LogFields.NODE_ID, nodeId);
+        fields.put(LogFields.SOURCE_NODE_ID, msg.getFromNodeId());
+        fields.put(LogFields.TARGET_NODE_ID, targetNodeId);
+        fields.put("ttl", msg.getTtl());
+        if (msg.getCommand() != null) {
+            fields.put(LogFields.USER_ID, msg.getCommand().userId());
+            fields.put(LogFields.PLATFORM_ID, msg.getCommand().platformId());
+            fields.put(LogFields.SESSION_ID, msg.getCommand().sessionId());
+            fields.put(LogFields.REASON, msg.getCommand().reason());
+            fields.put("commandType", msg.getCommand().type());
+        }
+        return fields;
     }
 }

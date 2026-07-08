@@ -7,7 +7,10 @@ import com.im.api.IMessageQueue;
 import com.im.api.QueueMessageHandler;
 import com.im.common.exception.RedisPersistenceException;
 import com.im.common.util.IMExecutors;
+import com.im.core.observability.LogEvents;
+import com.im.core.observability.LogFields;
 import com.im.core.observability.MessageObservability;
+import com.im.core.observability.StructuredLog;
 import com.im.core.redis.CloseableRedisCommands;
 import com.im.core.redis.RedisConfiguration;
 import com.im.core.serialization.jackson.ObjectMapperProvider;
@@ -146,22 +149,28 @@ public class RedisMessageQueue implements IMessageQueue {
         // 先尝试异步发送（共享连接）
         try {
             async.xadd(streamKey, "payload", json).toCompletableFuture().join();
-            log.trace("Published to Redis stream: fields={}", MessageObservability.fields(topic, msg));
+            log.info(StructuredLog.event(LogEvents.MQ_PUBLISH_SUCCEEDED,
+                    redisFields(topic, msg, streamKey, null)));
             return;
         } catch (Exception e) {
-            log.warn("Async Redis stream publish failed, falling back to sync: fields={}, causeType={}, causeMessage={}",
-                    MessageObservability.fields(topic, msg), e.getClass().getName(), e.getMessage());
+            Map<String, Object> fields = redisFields(topic, msg, streamKey, null);
+            fields.put(LogFields.REASON, "async_publish_failed_sync_fallback");
+            fields.put(LogFields.EXCEPTION_CLASS, e.getClass().getSimpleName());
+            log.warn(StructuredLog.event(LogEvents.MQ_PUBLISH_FAILED, fields));
         }
 
         // 异步发送失败时，使用专用同步连接重试（不共享 async 连接，避免竞争）
         try (CloseableRedisCommands redis = redisConfig.createSyncCommands()) {
             RedisCommands<String, String> sync = redis.sync();
             sync.xadd(streamKey, "payload", json);
-            log.info("Published to Redis stream via sync fallback: fields={}",
-                    MessageObservability.fields(topic, msg));
+            Map<String, Object> fields = redisFields(topic, msg, streamKey, null);
+            fields.put(LogFields.REASON, "sync_fallback");
+            log.info(StructuredLog.event(LogEvents.MQ_PUBLISH_SUCCEEDED, fields));
         } catch (Exception e2) {
-            log.error("Sync Redis stream publish failed: fields={}, causeType={}, causeMessage={}",
-                    MessageObservability.fields(topic, msg), e2.getClass().getName(), e2.getMessage(), e2);
+            Map<String, Object> fields = redisFields(topic, msg, streamKey, null);
+            fields.put(LogFields.REASON, "sync_publish_failed");
+            fields.put(LogFields.EXCEPTION_CLASS, e2.getClass().getSimpleName());
+            log.error(StructuredLog.event(LogEvents.MQ_PUBLISH_FAILED, fields), e2);
             throw new RedisPersistenceException("publish message to redis stream failed", e2);
         }
     }
@@ -345,8 +354,8 @@ public class RedisMessageQueue implements IMessageQueue {
 
                 Message cmd = deserialize(payload);
                 try (MessageObservability.Scope ignored = MessageObservability.bindStream(topic, msg.getId(), cmd)) {
-                    log.debug("Redis stream message received: stream={}, group={}, fields={}",
-                            streamKey, groupName, MessageObservability.fields(topic, cmd));
+                    log.debug(StructuredLog.event(LogEvents.MQ_CONSUME_STARTED,
+                            redisFields(topic, cmd, streamKey, msg.getId())));
 
                     List<QueueMessageHandler> handlers = subscribers.get(topic);
                     if (handlers != null) {
@@ -356,12 +365,16 @@ public class RedisMessageQueue implements IMessageQueue {
                     }
 
                     sync.xack(streamKey, groupName, msg.getId());
-                    log.debug("Redis stream message acked: stream={}, group={}, fields={}",
-                            streamKey, groupName, MessageObservability.fields(topic, cmd));
+                    log.debug(StructuredLog.event(LogEvents.MQ_MESSAGE_ACKED,
+                            redisFields(topic, cmd, streamKey, msg.getId())));
                 }
             } catch (Exception e) {
-                log.error("Failed to process Redis stream message: topic={}, streamId={}, causeType={}, causeMessage={}",
-                        topic, msg.getId(), e.getClass().getName(), e.getMessage(), e);
+                Map<String, Object> fields = new LinkedHashMap<>();
+                fields.put(LogFields.TOPIC, topic);
+                fields.put(LogFields.STREAM_ID, msg.getId());
+                fields.put(LogFields.CONSUMER_ID, consumerId);
+                fields.put(LogFields.EXCEPTION_CLASS, e.getClass().getSimpleName());
+                log.error(StructuredLog.event(LogEvents.MQ_CONSUME_FAILED, fields), e);
             }
         }
 
@@ -373,6 +386,14 @@ public class RedisMessageQueue implements IMessageQueue {
                 stopped = true;
             }
         }
+    }
+
+    private Map<String, Object> redisFields(String topic, Message msg, String streamKey, String streamId) {
+        Map<String, Object> fields = new LinkedHashMap<>(MessageObservability.fields(topic, msg));
+        fields.put("streamKey", streamKey);
+        fields.put(LogFields.STREAM_ID, streamId);
+        fields.put(LogFields.CONSUMER_ID, consumerId);
+        return fields;
     }
 
     // ── Serialization ──

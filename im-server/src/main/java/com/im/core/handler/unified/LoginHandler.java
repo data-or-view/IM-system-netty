@@ -16,6 +16,9 @@ import com.im.api.RouteBinding;
 import com.im.common.exception.ConflictException;
 import com.im.common.validation.Preconditions;
 import com.im.core.serialization.jackson.ObjectMapperProvider;
+import com.im.core.observability.LogEvents;
+import com.im.core.observability.LogFields;
+import com.im.core.observability.StructuredLog;
 import com.im.core.usecase.LoginResult;
 import com.im.core.usecase.LoginUseCase;
 import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
@@ -107,7 +110,11 @@ public class LoginHandler implements RequestHandler {
             log.info("Delivered {} offline messages to user {}", result.offlineMessages().size(), userId);
         }
 
-        log.info("User logged in: userId={}, platform={}", userId, PlatformID.name(platformId));
+        log.info(StructuredLog.event(LogEvents.LOGIN_SUCCEEDED,
+                LogFields.USER_ID, userId,
+                LogFields.PLATFORM_ID, platformId,
+                LogFields.NODE_ID, localNodeId,
+                LogFields.CONNECTION_ID, connectionId));
 
         return Map.of("status", "OK",
                 "token", result.token() != null ? result.token() : "",
@@ -133,6 +140,13 @@ public class LoginHandler implements RequestHandler {
             ClusterCommand command = ClusterCommand.kickSession(
                     userId, binding.platformId(), binding.sessionId(), loginStrategy.name());
             clusterMessageBus.sendToNode(ClusterMessage.fromCommand(localNodeId, command), binding.nodeId());
+            log.info(StructuredLog.event(LogEvents.REMOTE_KICK_SENT,
+                    LogFields.USER_ID, userId,
+                    LogFields.SOURCE_NODE_ID, localNodeId,
+                    LogFields.TARGET_NODE_ID, binding.nodeId(),
+                    LogFields.PLATFORM_ID, binding.platformId(),
+                    LogFields.SESSION_ID, binding.sessionId(),
+                    LogFields.REASON, loginStrategy.name()));
         }
     }
 
@@ -143,8 +157,12 @@ public class LoginHandler implements RequestHandler {
         long now = System.currentTimeMillis();
         for (RouteBinding binding : routeTable.lookupAllBindings(userId)) {
             if (!binding.isExpired(now)) {
-                log.info("Reject new login for user {} due to existing route: node={}, platform={}, session={}",
-                        userId, binding.nodeId(), binding.platformId(), binding.sessionId());
+                log.info(StructuredLog.event(LogEvents.LOGIN_REJECTED,
+                        LogFields.USER_ID, userId,
+                        LogFields.TARGET_NODE_ID, binding.nodeId(),
+                        LogFields.PLATFORM_ID, binding.platformId(),
+                        LogFields.SESSION_ID, binding.sessionId(),
+                        LogFields.REASON, "existing_route"));
                 throw new ConflictException("user already logged in");
             }
         }

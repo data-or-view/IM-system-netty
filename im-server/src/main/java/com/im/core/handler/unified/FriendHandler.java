@@ -13,6 +13,11 @@ import com.im.common.exception.ForbiddenException;
 import com.im.common.exception.NotFoundException;
 import com.im.common.validation.Preconditions;
 import com.im.api.FriendApplyNotifier;
+import com.im.core.observability.LogEvents;
+import com.im.core.observability.LogFields;
+import com.im.core.observability.StructuredLog;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.List;
 import java.util.Map;
@@ -23,6 +28,8 @@ import java.util.Map;
  * <p>合并 WS {@code FriendHandler} + HTTP {@code FriendRestHandler}。</p>
  */
 public class FriendHandler implements RequestHandler {
+
+    private static final Logger log = LoggerFactory.getLogger(FriendHandler.class);
 
     private final IFriendManager friendManager;
     private final FriendApplyNotifier friendApplyNotifier;
@@ -74,6 +81,9 @@ public class FriendHandler implements RequestHandler {
             // 通知使用持久化后的申请记录，保证多端收到的 applyId、状态和时间与列表接口一致。
             friendApplyNotifier.notifyApplyCreated(toUserId, apply);
         }
+        log.info(StructuredLog.event(LogEvents.FRIEND_APPLY_CREATED,
+                LogFields.USER_ID, fromUserId,
+                LogFields.TARGET_USER_ID, toUserId));
         return Map.of("status", "OK");
     }
 
@@ -89,6 +99,10 @@ public class FriendHandler implements RequestHandler {
             // 审批结果先落库再推送，避免对方收到通知后立刻刷新详情却读到旧状态。
             friendApplyNotifier.notifyApplyHandled(fromUserId, apply);
         }
+        log.info(StructuredLog.event(LogEvents.FRIEND_APPLY_HANDLED,
+                LogFields.USER_ID, userId,
+                LogFields.TARGET_USER_ID, fromUserId,
+                LogFields.STATUS, agreed ? "agreed" : "rejected"));
         return Map.of("status", "OK");
     }
 
@@ -100,6 +114,10 @@ public class FriendHandler implements RequestHandler {
         if (removed && conversationManager != null) {
             conversationManager.deleteConversation(userId, ConversationIds.single(userId, friendUserId));
         }
+        log.info(StructuredLog.event(LogEvents.FRIEND_REMOVED,
+                LogFields.USER_ID, userId,
+                LogFields.TARGET_USER_ID, friendUserId,
+                LogFields.SUCCESS, removed));
         return Map.of("status", "OK");
     }
 

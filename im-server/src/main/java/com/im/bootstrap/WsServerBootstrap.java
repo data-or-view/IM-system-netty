@@ -48,6 +48,7 @@ public class WsServerBootstrap {
      * @param dispatcher             统一请求调度器
      * @param virtualExecutor        虚拟线程执行器
      * @param requestAdmission       请求准入器
+     * @param nodeId                 当前集群节点 ID
      * @return 绑定后的 Channel
      */
     public static Channel start(EventLoopGroup bossGroup, EventLoopGroup workerGroup,
@@ -55,7 +56,8 @@ public class WsServerBootstrap {
                                 ChannelHandler connectionEventHandler,
                                 ApiDispatcher dispatcher,
                                 ExecutorService virtualExecutor,
-                                RequestAdmission requestAdmission) throws InterruptedException {
+                                RequestAdmission requestAdmission,
+                                String nodeId) throws InterruptedException {
         ServerBootstrap wsBootstrap = new ServerBootstrap()
                 .group(bossGroup, workerGroup)
                 .channel(useEpoll ? EpollServerSocketChannel.class : NioServerSocketChannel.class)
@@ -74,12 +76,12 @@ public class WsServerBootstrap {
                         p.addLast(connectionEventHandler);
                         p.addLast(new MessageEncoder());
                         p.addLast(new WsPushEventEncoder());
-                        p.addLast(new WsRequestAdapter(dispatcher, virtualExecutor, requestAdmission));
+                        p.addLast(new WsRequestAdapter(dispatcher, virtualExecutor, requestAdmission, nodeId));
                     }
                 });
 
         Channel channel = wsBootstrap.bind(port).sync().channel();
-        log.info("WebSocket server started: port={}, path=/ws", port);
+        log.info("WebSocket server started: nodeId={}, port={}, path=/ws", nodeId, port);
         return channel;
     }
 }

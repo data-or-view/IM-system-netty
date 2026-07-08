@@ -5,6 +5,9 @@ import com.im.api.ClusterMessage;
 import com.im.api.ClusterMessageKind;
 import com.im.api.ClusterMessageHandler;
 import com.im.api.ISessionManager;
+import com.im.core.observability.LogEvents;
+import com.im.core.observability.LogFields;
+import com.im.core.observability.StructuredLog;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -37,7 +40,12 @@ public class ClusterSessionCommandHandler implements ClusterMessageHandler {
                 return;
             }
         }
-        log.info("Cluster session command applied: type={}, userId={}, platform={}, session={}, reason={}",
-                command.type(), command.userId(), command.platformId(), command.sessionId(), command.reason());
+        log.info(StructuredLog.event(LogEvents.CLUSTER_SESSION_COMMAND_APPLIED,
+                "commandType", command.type(),
+                LogFields.USER_ID, command.userId(),
+                LogFields.PLATFORM_ID, command.platformId(),
+                LogFields.SESSION_ID, command.sessionId(),
+                LogFields.SOURCE_NODE_ID, msg.getFromNodeId(),
+                LogFields.REASON, command.reason()));
     }
 }

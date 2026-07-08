@@ -8,9 +8,15 @@ import com.im.common.enums.ImErrorCode;
 import com.im.common.exception.InfrastructureException;
 import com.im.common.retry.RetryExecutor;
 import com.im.common.retry.RetryStrategies;
+import com.im.core.observability.LogEvents;
+import com.im.core.observability.LogFields;
 import com.im.core.observability.MessageObservability;
+import com.im.core.observability.StructuredLog;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 public final class ReliableMessageHandler implements QueueMessageHandler {
 
@@ -38,8 +44,8 @@ public final class ReliableMessageHandler implements QueueMessageHandler {
     public void onMessage(Message msg) {
         String key = idempotencyKey(msg);
         try (MessageObservability.Scope ignored = MessageObservability.bind(topic, msg)) {
-            log.debug("Consuming message with reliability guard: fields={}, idempotencyKey={}",
-                    MessageObservability.fields(topic, msg), key);
+            log.info(StructuredLog.event(LogEvents.MQ_CONSUME_STARTED,
+                    fieldsWithIdempotency(msg, key)));
             idempotency.execute(key, () -> {
                 retryExecutor.execute(RetryStrategies.MQ_CONSUME, () -> {
                     delegate.onMessage(msg);
@@ -47,6 +53,8 @@ public final class ReliableMessageHandler implements QueueMessageHandler {
                 });
                 return "OK";
             }, String.class);
+            log.info(StructuredLog.event(LogEvents.MQ_CONSUME_SUCCEEDED,
+                    fieldsWithIdempotency(msg, key)));
         } catch (RuntimeException processingFailure) {
             recordBusinessDlq(msg, processingFailure);
         }
@@ -55,15 +63,19 @@ public final class ReliableMessageHandler implements QueueMessageHandler {
     private void recordBusinessDlq(Message msg, RuntimeException processingFailure) {
         try {
             failureStore.recordFailure(topic, msg, processingFailure);
-            log.error("Message consumed to business-DLQ table: fields={}, causeType={}, causeMessage={}",
-                    MessageObservability.fields(topic, msg),
-                    processingFailure.getClass().getName(),
-                    processingFailure.getMessage(),
-                    processingFailure);
+            Map<String, Object> fields = fieldsWithIdempotency(msg, idempotencyKey(msg));
+            fields.put(LogFields.EXCEPTION_CLASS, processingFailure.getClass().getSimpleName());
+            log.error(StructuredLog.event(LogEvents.MQ_CONSUME_FAILED, fields), processingFailure);
         } catch (RuntimeException recordFailure) {
             throw new InfrastructureException(ImErrorCode.INTERNAL_ERROR,
                     "consumer failed and business-DLQ record failed", recordFailure);
         }
+    }
+
+    private Map<String, Object> fieldsWithIdempotency(Message msg, String key) {
+        Map<String, Object> fields = new LinkedHashMap<>(MessageObservability.fields(topic, msg));
+        fields.put("idempotencyKey", key);
+        return fields;
     }
 
     private String idempotencyKey(Message msg) {

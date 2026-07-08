@@ -2,12 +2,11 @@ import { useEffect, type Dispatch, type MutableRefObject } from "react";
 import type { SystemMessageSummary } from "im-sdk";
 import { im } from "@/sdk/im-sdk";
 import { AUTH_TOKEN_KEY } from "@/config/storage-keys";
+import { APP_EVENT_TYPES, emitAppEvent } from "@/lib/app-events";
 import { toViewMessage } from "@/lib/messages";
 import { applyDomainEvent, latestMessage, type PushRefreshTask } from "@/store/domain";
 import { currentStoredUserId, persistTokens } from "@/store/store-helpers";
 import {
-  FRIEND_APPLY_UPDATED_EVENT,
-  GROUP_APPLY_UPDATED_EVENT,
   type Action,
   type FriendApply,
   type GroupApply,
@@ -75,14 +74,14 @@ export function useStoreSdkEvents({
       const result = applyDomainEvent(stateRef.current, { type: "FRIEND_APPLY_UPDATED", apply });
       dispatch({ type: "REPLACE_DOMAIN_STATE", state: result.state });
       runRefreshTasks(result.refreshTasks);
-      window.dispatchEvent(new CustomEvent(FRIEND_APPLY_UPDATED_EVENT, { detail: apply }));
+      emitAppEvent(APP_EVENT_TYPES.friendApplyUpdated, apply);
     });
 
     const unsubGroupApply = im.on("groupApply", (apply: GroupApply) => {
       const result = applyDomainEvent(stateRef.current, { type: "GROUP_APPLY_UPDATED", apply });
       dispatch({ type: "REPLACE_DOMAIN_STATE", state: result.state });
       runRefreshTasks(result.refreshTasks);
-      window.dispatchEvent(new CustomEvent(GROUP_APPLY_UPDATED_EVENT, { detail: apply }));
+      emitAppEvent(APP_EVENT_TYPES.groupApplyUpdated, apply);
     });
 
     const unsubSystemMessage = im.on("systemMessage", (message: SystemMessageSummary) => {

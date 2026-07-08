@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { GROUP_APPLY_UPDATED_EVENT, useStore, type GroupApply } from "@/store/store";
+import { useStore, type GroupApply } from "@/store/store";
+import { APP_EVENT_TYPES, listenAppEvent } from "@/lib/app-events";
+import { createLogger } from "@/lib/logger";
 import { im } from "@/sdk/im-sdk";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -8,6 +10,8 @@ import { Check, Inbox, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 import { DialogBody, EmptyState, ResultRow } from "./DialogParts";
 import { getErrorText } from "im-sdk";
+
+const log = createLogger("ui.group-requests");
 
 interface Props {
   open: boolean;
@@ -27,7 +31,7 @@ export default function GroupRequestDialog({ open, onOpenChange }: Props) {
       setApplies(list as unknown as GroupApply[]);
       await fetchUnhandledGroupApplyCount();
     } catch (err) {
-      console.error("load group applies failed:", err);
+      log.error("load group applies failed", { error: err });
       toast(`加载群申请失败：${getErrorText(err)}`);
     } finally {
       setLoading(false);
@@ -41,8 +45,7 @@ export default function GroupRequestDialog({ open, onOpenChange }: Props) {
   useEffect(() => {
     if (!open) return;
     const reload = () => void loadApplies();
-    window.addEventListener(GROUP_APPLY_UPDATED_EVENT, reload);
-    return () => window.removeEventListener(GROUP_APPLY_UPDATED_EVENT, reload);
+    return listenAppEvent(APP_EVENT_TYPES.groupApplyUpdated, reload);
   }, [open, loadApplies]);
 
   const handleApprove = async (apply: GroupApply, agreed: boolean) => {

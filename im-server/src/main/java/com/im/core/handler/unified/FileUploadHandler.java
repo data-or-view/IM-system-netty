@@ -6,8 +6,6 @@ import com.im.common.exception.ValidationException;
 import com.im.common.validation.Preconditions;
 import com.im.core.file.DirectFileTransferUseCase;
 import com.im.core.file.FileUploadCompleteResult;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.Map;
 
@@ -18,8 +16,6 @@ import java.util.Map;
  * <p>HTTP 场景：由 {@code HttpRequestAdapter} 解析 multipart 并设置 params + bodyRaw。</p>
  */
 public class FileUploadHandler implements RequestHandler {
-
-    private static final Logger log = LoggerFactory.getLogger(FileUploadHandler.class);
 
     private final DirectFileTransferUseCase fileUploadUseCase;
 
@@ -43,9 +39,6 @@ public class FileUploadHandler implements RequestHandler {
         FileUploadCompleteResult result = fileUploadUseCase.uploadSingleFile(
                 req.currentUserId(), fileName, mimeType, body,
                 req.getString("hash", ""), req.getString("fileGroup", "file"));
-
-        log.info("File uploaded: fileId={}, fileName={}, size={}, url={}",
-                result.fileId(), result.fileName(), result.fileSize(), result.fileUrl());
 
         return Map.of("status", "OK",
                 "fileUrl", result.fileUrl(),

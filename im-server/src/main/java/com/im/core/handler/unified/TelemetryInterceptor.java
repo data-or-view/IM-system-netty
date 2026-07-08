@@ -2,8 +2,8 @@ package com.im.core.handler.unified;
 
 import com.im.api.ApiInterceptor;
 import com.im.api.ApiRequest;
-import com.im.api.ImHeaders;
 import com.im.api.ProtocolFields;
+import com.im.core.observability.RequestObservability;
 import io.opentelemetry.api.trace.Span;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -51,7 +51,10 @@ public class TelemetryInterceptor implements ApiInterceptor {
     static Map<String, Object> requestAttributes(ApiRequest request) {
         Map<String, Object> attributes = new LinkedHashMap<>();
         attributes.put("app.operation", request.operation());
-        attributes.put("app.protocol", request.headers().getOrDefault(ImHeaders.CONTENT_TYPE, "ws"));
+        attributes.put("app.protocol", RequestObservability.protocol(request));
+        attributes.put("app.request.id", RequestObservability.requestId(request));
+        attributes.put("app.trace.id", RequestObservability.traceId(request));
+        attributes.put("app.client.ip", RequestObservability.clientIp(request));
 
         // 从 params 中提取关键业务参数（不记敏感数据）
         if (request.params().containsKey(ProtocolFields.CONVERSATION_ID)) {

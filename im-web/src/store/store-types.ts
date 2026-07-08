@@ -23,8 +23,6 @@ export type FriendApply = SDKFriendApply;
 export type Message = ViewMessage;
 
 export const SYSTEM_CONVERSATION_ID = "__system_notifications__";
-export const FRIEND_APPLY_UPDATED_EVENT = "im:friend-apply-updated";
-export const GROUP_APPLY_UPDATED_EVENT = "im:group-apply-updated";
 
 export interface State {
   token: string | null;

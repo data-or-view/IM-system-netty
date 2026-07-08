@@ -8,6 +8,9 @@ import { toast } from "sonner";
 import { DialogBody, EmptyState, ResultRow, SearchBar } from "./DialogParts";
 import { getErrorText } from "im-sdk";
 import { shortId } from "@/lib/display-formatters";
+import { createLogger } from "@/lib/logger";
+
+const log = createLogger("ui.user-search");
 
 interface Props {
   open: boolean;
@@ -26,7 +29,7 @@ export default function UserSearchDialog({ open, onOpenChange }: Props) {
     setSearching(true);
     void searchUser(keyword.trim())
       .catch((err) => {
-        console.error("search user failed:", err);
+        log.error("search user failed", { keyword, error: err });
         toast(`搜索失败：${getErrorText(err)}`);
       })
       .finally(() => setSearching(false));

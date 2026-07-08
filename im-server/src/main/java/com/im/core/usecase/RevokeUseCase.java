@@ -6,6 +6,9 @@ import com.im.api.IMessageStore;
 import com.im.common.exception.ForbiddenException;
 import com.im.common.exception.NotFoundException;
 import com.im.common.validation.Preconditions;
+import com.im.core.observability.LogEvents;
+import com.im.core.observability.LogFields;
+import com.im.core.observability.StructuredLog;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -74,7 +77,11 @@ public class RevokeUseCase {
         if (!updated) {
             throw new NotFoundException("message not found or already revoked");
         }
-        log.info("Message revoked: conv={}, seq={}, revoker={}", conversationId, seq, userId);
+        log.info(StructuredLog.event(LogEvents.MESSAGE_REVOKED,
+                LogFields.USER_ID, userId,
+                LogFields.CONVERSATION_ID, conversationId,
+                LogFields.GROUP_ID, groupId,
+                LogFields.MESSAGE_SEQ, seq));
 
         // ③ 计算通知接收方
         Set<String> targetUserIds;

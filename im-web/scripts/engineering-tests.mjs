@@ -17,8 +17,21 @@ function lineCount(relativePath) {
   return readSource(relativePath).split(/\r?\n/).length;
 }
 
+function plain(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
 function loadTsModule(relativePath, options = {}) {
   const filename = path.join(root, relativePath);
+  const cache = options.cache ?? new Map();
+  return loadTsModuleByFilename(filename, { ...options, cache });
+}
+
+function loadTsModuleByFilename(filename, options = {}) {
+  const cache = options.cache ?? new Map();
+  if (cache.has(filename)) {
+    return cache.get(filename).exports;
+  }
   const source = fs.readFileSync(filename, "utf8");
   const compiled = ts.transpileModule(source, {
     compilerOptions: {
@@ -29,15 +42,45 @@ function loadTsModule(relativePath, options = {}) {
   }).outputText;
 
   const module = { exports: {} };
+  cache.set(filename, module);
   const context = {
     module,
     exports: module.exports,
-    require: (specifier) => options.stubs?.[specifier] ?? require(specifier),
+    require: (specifier) => options.stubs?.[specifier] ?? requireFromModule(specifier, filename, { ...options, cache }),
+    console,
+    Object,
     URL,
     URLSearchParams,
   };
   vm.runInNewContext(compiled, context, { filename });
   return module.exports;
+}
+
+function requireFromModule(specifier, fromFilename, options) {
+  if (specifier.startsWith("@/")) {
+    return loadTsModuleByFilename(resolveAliasSpecifier(specifier), options);
+  }
+  if (specifier.startsWith(".")) {
+    return loadTsModuleByFilename(resolveRelativeSpecifier(specifier, fromFilename), options);
+  }
+  return require(specifier);
+}
+
+function resolveAliasSpecifier(specifier) {
+  return resolveTsSpecifier(path.join(root, "src", specifier.slice(2)));
+}
+
+function resolveRelativeSpecifier(specifier, fromFilename) {
+  return resolveTsSpecifier(path.resolve(path.dirname(fromFilename), specifier));
+}
+
+function resolveTsSpecifier(basePath) {
+  if (fs.existsSync(basePath)) return basePath;
+  for (const ext of [".ts", ".tsx", ".js", ".jsx"]) {
+    const candidate = `${basePath}${ext}`;
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  throw new Error(`Cannot resolve test module import: ${basePath}`);
 }
 
 test("route helpers centralize app paths and encode route params", () => {
@@ -83,11 +126,105 @@ test("behavior constants collect non-visual magic values", () => {
   assert.equal(APP_BEHAVIOR.systemMessages.listLimit, 30);
 });
 
+test("logger filters by level and records a normalized namespace", () => {
+  const { configureLogger, createLogger } = loadTsModule("src/lib/logger.ts");
+  const entries = [];
+
+  const restoreLogger = configureLogger({ level: "warn", sink: (entry) => entries.push(entry) });
+  const logger = createLogger(" ui.auth ");
+  logger.debug("hidden");
+  logger.info("hidden too");
+  logger.warn("visible", { userId: "u1" });
+  restoreLogger();
+
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].level, "warn");
+  assert.equal(entries[0].namespace, "ui.auth");
+  assert.equal(entries[0].message, "visible");
+  assert.deepEqual(entries[0].context, { userId: "u1" });
+});
+
+test("typed app events centralize DOM custom event names", () => {
+  const source = readSource("src/lib/app-events.ts");
+  const globalErrorHandler = readSource("src/components/GlobalErrorHandler.tsx");
+  const storeSdkEvents = readSource("src/store/useStoreSdkEvents.ts");
+  const friendDialog = readSource("src/components/sidebar/FriendRequestDialog.tsx");
+  const groupDialog = readSource("src/components/sidebar/GroupRequestDialog.tsx");
+
+  assert.match(source, /APP_EVENT_TYPES/);
+  assert.match(source, /emitAppEvent/);
+  assert.match(source, /listenAppEvent/);
+  assert.match(source, /window\.dispatchEvent\(new CustomEvent/);
+  assert.match(globalErrorHandler, /listenAppEvent\(APP_EVENT_TYPES\.appError/);
+  assert.match(storeSdkEvents, /emitAppEvent\(APP_EVENT_TYPES\.friendApplyUpdated/);
+  assert.match(storeSdkEvents, /emitAppEvent\(APP_EVENT_TYPES\.groupApplyUpdated/);
+  assert.match(friendDialog, /listenAppEvent\(APP_EVENT_TYPES\.friendApplyUpdated/);
+  assert.match(groupDialog, /listenAppEvent\(APP_EVENT_TYPES\.groupApplyUpdated/);
+});
+
+test("route guard decisions are pure and reusable", () => {
+  const { resolveAuthRoute } = loadTsModule("src/config/route-guards.ts", {
+    stubs: {
+      "@/config/routes": {
+        APP_ROUTES: {
+          login: "/login",
+          chat: "/chat",
+          loginWithRedirect: (target) => `/login?redirect=${encodeURIComponent(target)}`,
+        },
+        getRedirectTarget: (search) => new URLSearchParams(search).get("redirect") || "/chat",
+      },
+    },
+  });
+
+  assert.deepEqual(
+    plain(resolveAuthRoute({ authenticated: false, pathname: "/chat", search: "?tab=1", hash: "#m1" })),
+    { kind: "redirect", to: "/login?redirect=%2Fchat%3Ftab%3D1%23m1" },
+  );
+  assert.deepEqual(
+    plain(resolveAuthRoute({ authenticated: false, pathname: "/login", search: "?redirect=/chat", hash: "" })),
+    { kind: "show-login", redirectTarget: "/chat" },
+  );
+  assert.deepEqual(
+    plain(resolveAuthRoute({ authenticated: true, pathname: "/login", search: "?redirect=/chat/user/u1", hash: "" })),
+    { kind: "redirect", to: "/chat/user/u1" },
+  );
+  assert.deepEqual(
+    plain(resolveAuthRoute({ authenticated: true, pathname: "/chat/group/g1", search: "", hash: "" })),
+    { kind: "show-app", redirectTarget: "/chat" },
+  );
+});
+
+test("global errors and render boundaries use logger plus typed app events", () => {
+  const appErrors = readSource("src/lib/app-errors.ts");
+  const globalErrorHandler = readSource("src/components/GlobalErrorHandler.tsx");
+  const boundary = readSource("src/components/RouteErrorBoundary.tsx");
+
+  assert.match(appErrors, /emitAppEvent\(APP_EVENT_TYPES\.appError/);
+  assert.match(appErrors, /createLogger\("app\.errors"\)/);
+  assert.match(globalErrorHandler, /createLogger\("ui\.global-errors"\)/);
+  assert.match(boundary, /createLogger\("ui\.route-boundary"\)/);
+  assert.match(boundary, /emitAppEvent\(APP_EVENT_TYPES\.appError/);
+  assert.doesNotMatch(boundary, /console\.error/);
+});
+
+test("application source logs through the namespaced logger abstraction", () => {
+  const sourceFiles = fs.readdirSync(path.join(root, "src"), { recursive: true })
+    .filter((file) => typeof file === "string" && /\.(ts|tsx)$/.test(file))
+    .map((file) => `src/${file}`);
+  const directConsole = sourceFiles
+    .filter((file) => file !== "src/lib/logger.ts")
+    .filter((file) => /console\.(debug|info|warn|error)\(/.test(readSource(file)));
+
+  assert.deepEqual(directConsole, []);
+});
+
 test("app auth guard uses shared routes and only logs out for expired credentials", () => {
   const source = readSource("src/App.tsx");
+  const routeGuard = readSource("src/config/route-guards.ts");
 
   assert.match(source, /APP_ROUTES/);
-  assert.match(source, /getRedirectTarget/);
+  assert.match(source, /resolveAuthRoute/);
+  assert.match(routeGuard, /getRedirectTarget/);
   assert.match(source, /isAuthExpiredError/);
   assert.match(source, /authCheckFailureMessage/);
   assert.doesNotMatch(source, /function getRedirectTarget/);

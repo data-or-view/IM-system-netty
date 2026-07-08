@@ -8,6 +8,9 @@ import { toast } from "sonner";
 import { DialogBody, EmptyState, ResultRow, SearchBar } from "./DialogParts";
 import { GroupJoinVerification, getErrorText, type GroupJoinResultValue } from "im-sdk";
 import { shortId } from "@/lib/display-formatters";
+import { createLogger } from "@/lib/logger";
+
+const log = createLogger("ui.group-search");
 
 interface Props {
   open: boolean;
@@ -26,7 +29,7 @@ export default function GroupSearchDialog({ open, onOpenChange }: Props) {
     setSearching(true);
     void searchGroup(keyword.trim())
       .catch((err) => {
-        console.error("search group failed:", err);
+        log.error("search group failed", { keyword, error: err });
         toast(`搜索失败：${getErrorText(err)}`);
       })
       .finally(() => setSearching(false));

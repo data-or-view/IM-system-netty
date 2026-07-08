@@ -5,11 +5,18 @@ import com.im.api.PartInfo;
 import com.im.common.enums.ImErrorCode;
 import com.im.common.exception.ImException;
 import com.im.common.id.IdGenerator;
+import com.im.core.observability.LogEvents;
+import com.im.core.observability.LogFields;
+import com.im.core.observability.StructuredLog;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.List;
 import java.util.Map;
 
 public class DirectFileTransferUseCase {
+
+    private static final Logger log = LoggerFactory.getLogger(DirectFileTransferUseCase.class);
 
     private static final String DEFAULT_ENGINE = "minio";
     private static final long DEFAULT_MAX_PROXY_UPLOAD_BYTES = 100L * 1024 * 1024;
@@ -55,6 +62,11 @@ public class DirectFileTransferUseCase {
                 fileSize, mimeType, hash, normalizeFileGroup(fileGroup), false);
         uploadSessionStore.save(session);
         String uploadUrl = fileStorage.presignPutObject(bucket, objectKey, mimeType, presignExpiresSeconds);
+        log.info(StructuredLog.event(LogEvents.FILE_UPLOAD_SIGNED,
+                LogFields.USER_ID, userId,
+                LogFields.FILE_ID, fileId,
+                LogFields.FILE_SIZE, fileSize,
+                LogFields.FILE_GROUP, session.fileGroup()));
         return new PresignedUploadResult(fileId, objectKey, uploadUrl, "PUT",
                 Map.of("Content-Type", mimeType), presignExpiresSeconds);
     }
@@ -88,6 +100,11 @@ public class DirectFileTransferUseCase {
                 data.length, mimeType, hash != null ? hash : "", DEFAULT_ENGINE,
                 normalizeFileGroup(fileGroup), System.currentTimeMillis());
         metadataStore.save(metadata);
+        log.info(StructuredLog.event(LogEvents.FILE_UPLOAD_COMPLETED,
+                LogFields.USER_ID, userId,
+                LogFields.FILE_ID, fileId,
+                LogFields.FILE_SIZE, data.length,
+                LogFields.FILE_GROUP, metadata.fileGroup()));
         return new FileUploadCompleteResult(fileUrl, fileId, objectKey, fileName, mimeType, data.length);
     }
 
@@ -101,6 +118,12 @@ public class DirectFileTransferUseCase {
         UploadSession session = new UploadSession(fileId, uploadId, bucket, objectKey, userId, fileName,
                 fileSize, normalizeContentType(contentType), hash, normalizeFileGroup(fileGroup), true);
         uploadSessionStore.save(session);
+        log.info(StructuredLog.event(LogEvents.FILE_UPLOAD_SIGNED,
+                LogFields.USER_ID, userId,
+                LogFields.FILE_ID, fileId,
+                LogFields.UPLOAD_ID, uploadId,
+                LogFields.FILE_SIZE, fileSize,
+                LogFields.FILE_GROUP, session.fileGroup()));
         return new MultipartSignResult(fileId, objectKey, uploadId, presignExpiresSeconds);
     }
 
@@ -116,6 +139,12 @@ public class DirectFileTransferUseCase {
         ensureOwner(session, userId);
         String uploadUrl = fileStorage.presignUploadPart(session.bucket(), session.objectKey(), uploadId,
                 partNumber, presignExpiresSeconds);
+        log.info(StructuredLog.event(LogEvents.FILE_UPLOAD_SIGNED,
+                LogFields.USER_ID, userId,
+                LogFields.FILE_ID, session.fileId(),
+                LogFields.UPLOAD_ID, uploadId,
+                LogFields.PART_NUMBER, partNumber,
+                LogFields.FILE_GROUP, session.fileGroup()));
         return new PresignedPartResult(uploadId, partNumber, uploadUrl, "PUT", Map.of(), presignExpiresSeconds);
     }
 
@@ -135,7 +164,15 @@ public class DirectFileTransferUseCase {
                     "multipart part too large: " + data.length + " (fileSize " + session.fileSize() +
                             ", max " + maxProxyUploadBytes + ")");
         }
-        return fileStorage.uploadPart(session.bucket(), session.objectKey(), uploadId, partNumber, data);
+        String etag = fileStorage.uploadPart(session.bucket(), session.objectKey(), uploadId, partNumber, data);
+        log.info(StructuredLog.event(LogEvents.FILE_MULTIPART_PART_UPLOADED,
+                LogFields.USER_ID, userId,
+                LogFields.FILE_ID, session.fileId(),
+                LogFields.UPLOAD_ID, uploadId,
+                LogFields.PART_NUMBER, partNumber,
+                LogFields.PART_SIZE, data.length,
+                LogFields.FILE_GROUP, session.fileGroup()));
+        return etag;
     }
 
     public FileUploadCompleteResult completeMultipartUpload(String userId, String uploadId, List<PartInfo> parts) {
@@ -164,6 +201,11 @@ public class DirectFileTransferUseCase {
         ensureOwner(session, userId);
         fileStorage.abortMultipartUpload(session.bucket(), session.objectKey(), uploadId);
         uploadSessionStore.delete(session);
+        log.info(StructuredLog.event(LogEvents.FILE_MULTIPART_ABORTED,
+                LogFields.USER_ID, userId,
+                LogFields.FILE_ID, session.fileId(),
+                LogFields.UPLOAD_ID, uploadId,
+                LogFields.FILE_GROUP, session.fileGroup()));
     }
 
     public FileDownloadSignResult signDownload(String userId, String fileId) {
@@ -191,6 +233,12 @@ public class DirectFileTransferUseCase {
                 System.currentTimeMillis());
         metadataStore.save(metadata);
         uploadSessionStore.delete(session);
+        log.info(StructuredLog.event(LogEvents.FILE_UPLOAD_COMPLETED,
+                LogFields.USER_ID, userId,
+                LogFields.FILE_ID, session.fileId(),
+                LogFields.UPLOAD_ID, session.uploadId(),
+                LogFields.FILE_SIZE, session.fileSize(),
+                LogFields.FILE_GROUP, session.fileGroup()));
         return new FileUploadCompleteResult(fileStorage.presignGetObject(
                 session.bucket(), session.objectKey(), presignExpiresSeconds),
                 session.fileId(), session.objectKey(), session.fileName(), session.contentType(), session.fileSize());

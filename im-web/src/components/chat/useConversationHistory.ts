@@ -3,8 +3,11 @@ import { toast } from "sonner";
 import { getErrorText } from "im-sdk";
 import { im } from "@/sdk/im-sdk";
 import { APP_BEHAVIOR } from "@/config/app-behavior";
+import { createLogger } from "@/lib/logger";
 import { normalizeMessageStatus } from "@/lib/messages";
 import type { Conversation, Message } from "@/store/store";
+
+const log = createLogger("ui.conversation-history");
 
 type AddMessagesAction = {
   type: "ADD_MESSAGES";
@@ -56,7 +59,7 @@ export function useConversationHistory({
           })),
         });
       } catch (err) {
-        console.warn("load history failed:", err);
+        log.warn("load history failed", { conversationId: conversation.conversationId, error: err });
         if (historyErrorNotifiedRef.current !== conversation.conversationId) {
           historyErrorNotifiedRef.current = conversation.conversationId;
           toast(`历史消息加载失败：${getErrorText(err)}`);

@@ -54,19 +54,31 @@ class ApiDispatcherTest {
     void dispatcherBindsAndClearsMdcForRequest() {
         ApiRequest request = request(Operation.HEARTBEAT);
         request.setAttribute("_requestId", "req-mdc-1");
+        request.setAttribute("_traceId", "trace-mdc-1");
         request.setAttribute("_uid", "user-mdc-1");
+        request.setAttribute("_protocol", "ws");
+        request.setAttribute("_nodeId", "node-mdc-1");
+        request.setAttribute("_clientIp", "203.0.113.10");
         dispatcher.registerHandler(Operation.HEARTBEAT, req -> {
             assertEquals("req-mdc-1", MDC.get("request_id"));
+            assertEquals("trace-mdc-1", MDC.get("trace_id"));
             assertEquals("user-mdc-1", MDC.get("app.user.id"));
             assertEquals("heartbeat", MDC.get("app.operation"));
+            assertEquals("ws", MDC.get("app.protocol"));
+            assertEquals("node-mdc-1", MDC.get("node_id"));
+            assertEquals("203.0.113.10", MDC.get("client_ip"));
             return "ok";
         });
 
         dispatcher.dispatch(request);
 
         assertNull(MDC.get("request_id"));
+        assertNull(MDC.get("trace_id"));
         assertNull(MDC.get("app.user.id"));
         assertNull(MDC.get("app.operation"));
+        assertNull(MDC.get("app.protocol"));
+        assertNull(MDC.get("node_id"));
+        assertNull(MDC.get("client_ip"));
     }
 
     @Test

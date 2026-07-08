@@ -6,9 +6,16 @@ import com.im.api.IGroupManager;
 import com.im.api.IGroupMessageStore;
 import com.im.api.ISingleMessageStore;
 import com.im.api.Message;
+import com.im.api.MessageQueueTopics;
+import com.im.core.observability.LogEvents;
+import com.im.core.observability.LogFields;
+import com.im.core.observability.MessageObservability;
+import com.im.core.observability.StructuredLog;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -40,7 +47,8 @@ final class MessagePersistenceWorkflow {
         tryPersist(msg, messageId);
         updateConversations(msg, fromUserId);
 
-        log.debug("Persisted msg {} (conv updated)", messageId);
+        log.info(StructuredLog.event(LogEvents.MESSAGE_PERSIST_SUCCEEDED,
+                MessageObservability.fields(MessageQueueTopics.PERSIST, msg)));
     }
 
     private void tryPersist(Message msg, String messageId) {
@@ -55,9 +63,12 @@ final class MessagePersistenceWorkflow {
             }
         } catch (Exception e) {
             if (isDuplicateEntry(e)) {
-                log.debug("Msg already saved (dup), seqId={}, mid={}", msg.getMessageSeq(), messageId);
+                log.debug(StructuredLog.event(LogEvents.MESSAGE_PERSIST_DUPLICATE,
+                        MessageObservability.fields(MessageQueueTopics.PERSIST, msg)));
             } else {
-                log.warn("Persistence save failed: seqId={}, err={}", msg.getMessageSeq(), e.getMessage());
+                Map<String, Object> fields = new LinkedHashMap<>(MessageObservability.fields(MessageQueueTopics.PERSIST, msg));
+                fields.put(LogFields.EXCEPTION_CLASS, e.getClass().getSimpleName());
+                log.warn(StructuredLog.event(LogEvents.MESSAGE_PERSIST_FAILED, fields), e);
                 throw e;
             }
         }
@@ -93,7 +104,7 @@ final class MessagePersistenceWorkflow {
             }
         }
 
-        log.debug("Group conv updated for {} members: groupId={}", memberIds.size(), groupId);
+        log.debug("Group conversation updated: groupId={}, memberCount={}", groupId, memberIds.size());
     }
 
     private void updateSingleConversations(Message msg, String fromUserId, String toUserId) {

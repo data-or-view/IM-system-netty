@@ -5,8 +5,6 @@ import com.im.api.Operation;
 import com.im.api.RequestHandler;
 import com.im.common.exception.NotFoundException;
 import com.im.core.file.DirectFileTransferUseCase;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.Map;
 
@@ -18,8 +16,6 @@ import java.util.Map;
  * after init in a cluster.</p>
  */
 public class FileMultipartHandler implements RequestHandler {
-
-    private static final Logger log = LoggerFactory.getLogger(FileMultipartHandler.class);
 
     private final DirectFileTransferUseCase useCase;
 
@@ -41,7 +37,6 @@ public class FileMultipartHandler implements RequestHandler {
         String uploadId = req.getString("uploadId");
         int partNumber = req.getInt("partNumber", -1);
         String etag = useCase.uploadMultipartPart(req.currentUserId(), uploadId, partNumber, req.bodyRaw());
-        log.info("Multipart part uploaded: uploadId={}, partNumber={}", uploadId, partNumber);
         return Map.of("etag", etag);
     }
 }

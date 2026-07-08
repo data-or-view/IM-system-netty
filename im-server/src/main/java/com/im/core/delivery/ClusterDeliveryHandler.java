@@ -6,10 +6,16 @@ import com.im.api.IConnectionSession;
 import com.im.api.IRouteTable;
 import com.im.api.ISessionManager;
 import com.im.api.Message;
+import com.im.core.observability.LogEvents;
+import com.im.core.observability.LogFields;
+import com.im.core.observability.MessageObservability;
+import com.im.core.observability.StructuredLog;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 集群消息投递处理器 — 接收端。
@@ -50,21 +56,29 @@ public class ClusterDeliveryHandler implements ClusterMessageHandler {
             log.warn("ClusterMessage missing message body, from={}", clusterMsg.getFromNodeId());
             return;
         }
+        try (MessageObservability.Scope ignored = MessageObservability.bind("cluster.delivery", message)) {
+            handleMessage(clusterMsg, message);
+        }
+    }
 
+    private void handleMessage(ClusterMessage clusterMsg, Message message) {
         // 群聊消息：DeliveryConsumer 在发送前已通过 copyForUser() 设置了 toUserId
         // 单聊消息：toUserId 就是接收者
         String toUserId = message.getToUserId();
         if (toUserId == null) {
-            log.warn("ClusterMessage missing toUserId, from={}, seq={}",
-                    clusterMsg.getFromNodeId(), message.getSequenceId());
+            Map<String, Object> fields = fields(clusterMsg, message);
+            fields.put(LogFields.REASON, "missing_to_user");
+            log.warn(StructuredLog.event(LogEvents.CLUSTER_HANDLER_FAILED, fields));
             return;
         }
+        log.info(StructuredLog.event(LogEvents.CLUSTER_DELIVERY_RECEIVED, fields(clusterMsg, message)));
 
         // 查找本节点上该用户的所有活跃 session（多端在线）
         List<IConnectionSession> sessions = sessionManager.getSessionsByUserId(toUserId);
         if (sessions.isEmpty()) {
-            log.info("User {} not connected to this node, skip cluster delivery, msg seq={}",
-                    toUserId, message.getSequenceId());
+            Map<String, Object> fields = fields(clusterMsg, message);
+            fields.put(LogFields.TO_USER_ID, toUserId);
+            log.info(StructuredLog.event(LogEvents.CLUSTER_DELIVERY_NO_LOCAL_SESSION, fields));
             return;
         }
 
@@ -73,8 +87,10 @@ public class ClusterDeliveryHandler implements ClusterMessageHandler {
             if (matchesTarget(clusterMsg, session) && session.getConnection().isActive()) {
                 session.getConnection().write(message);
                 delivered++;
-                log.debug("Cluster-delivered msg {} to user {} session {}",
-                        message.getSequenceId(), toUserId, session.getSessionId());
+                Map<String, Object> fields = fields(clusterMsg, message);
+                fields.put(LogFields.SESSION_ID, session.getSessionId());
+                fields.put(LogFields.PLATFORM_ID, session.getPlatformId());
+                log.info(StructuredLog.event(LogEvents.CLUSTER_DELIVERY_LOCAL_SUCCEEDED, fields));
             }
         }
 
@@ -82,8 +98,10 @@ public class ClusterDeliveryHandler implements ClusterMessageHandler {
             removeStaleTargetRoute(toUserId, clusterMsg);
         }
 
-        log.info("Cluster-delivered msg {} to user {} ({} matched of {} sessions on this node)",
-                message.getSequenceId(), toUserId, delivered, sessions.size());
+        Map<String, Object> fields = fields(clusterMsg, message);
+        fields.put(LogFields.DELIVERED_COUNT, delivered);
+        fields.put("sessionCount", sessions.size());
+        log.debug(StructuredLog.event(LogEvents.CLUSTER_DELIVERY_LOCAL_SUCCEEDED, fields));
     }
 
     private boolean matchesTarget(ClusterMessage clusterMsg, IConnectionSession session) {
@@ -99,7 +117,21 @@ public class ClusterDeliveryHandler implements ClusterMessageHandler {
             return;
         }
         routeTable.offline(userId, localNodeId, clusterMsg.getTargetPlatformId(), clusterMsg.getTargetSessionId());
-        log.warn("Removed stale cluster target route: userId={}, node={}, platform={}, session={}",
-                userId, localNodeId, clusterMsg.getTargetPlatformId(), clusterMsg.getTargetSessionId());
+        Map<String, Object> fields = fields(clusterMsg, clusterMsg.getMessage());
+        fields.put(LogFields.TO_USER_ID, userId);
+        fields.put(LogFields.PLATFORM_ID, clusterMsg.getTargetPlatformId());
+        fields.put(LogFields.SESSION_ID, clusterMsg.getTargetSessionId());
+        log.warn(StructuredLog.event(LogEvents.CLUSTER_STALE_ROUTE_REMOVED, fields));
+    }
+
+    private Map<String, Object> fields(ClusterMessage clusterMsg, Message message) {
+        Map<String, Object> fields = new LinkedHashMap<>(MessageObservability.fields("cluster.delivery", message));
+        fields.put(LogFields.SOURCE_NODE_ID, clusterMsg.getFromNodeId());
+        fields.put(LogFields.NODE_ID, localNodeId);
+        if (clusterMsg.hasTargetBinding()) {
+            fields.put(LogFields.PLATFORM_ID, clusterMsg.getTargetPlatformId());
+            fields.put(LogFields.SESSION_ID, clusterMsg.getTargetSessionId());
+        }
+        return fields;
     }
 }

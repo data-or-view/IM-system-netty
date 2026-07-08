@@ -7,13 +7,16 @@ import com.im.api.RequestHandler;
 import com.im.common.enums.ImErrorCode;
 import com.im.common.exception.ImException;
 import com.im.common.exception.PersistenceException;
+import com.im.core.observability.LogEvents;
+import com.im.core.observability.LogFields;
+import com.im.core.observability.RequestObservability;
+import com.im.core.observability.StructuredLog;
 import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.Tracer;
 import io.opentelemetry.context.Scope;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.slf4j.MDC;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -111,80 +114,74 @@ public class ApiDispatcher {
      */
     public void dispatch(ApiRequest request) {
         String operation = request.operation();
+        long startNanos = System.nanoTime();
+        DispatchOutcome outcome = null;
 
         Span span = TRACER.spanBuilder(operation).startSpan();
-        try (Scope scope = span.makeCurrent()) {
-            bindMdc(request);
+        Scope spanScope = span.makeCurrent();
+        RequestObservability.Scope mdcScope = RequestObservability.bindMdc(request);
+        try {
             RequestHandler handler = handlerMap.get(operation);
             if (handler == null) {
-                log.warn("No handler for operation: {}", operation);
+                log.warn(StructuredLog.event(LogEvents.HANDLER_MISSING,
+                        LogFields.OPERATION, operation,
+                        LogFields.ERROR_CODE, ImErrorCode.NOT_FOUND.getCode()));
                 request.responseWriter().writeError(ImErrorCode.NOT_FOUND, "no handler for: " + operation);
+                outcome = DispatchOutcome.failure(ImErrorCode.NOT_FOUND, null, "handler_missing");
                 return;
             }
-            process(request, handler);
+            outcome = process(request, handler);
         } catch (Exception e) {
             span.recordException(e);
+            if (outcome == null) {
+                outcome = DispatchOutcome.failure(ImErrorCode.INTERNAL_ERROR, e, "dispatch_exception");
+            }
             throw e;
         } finally {
-            clearMdc();
+            logCompletion(request, outcome, startNanos);
+            mdcScope.close();
+            spanScope.close();
             span.end();
         }
     }
 
-    private void bindMdc(ApiRequest request) {
-        Object requestId = request.attribute(ApiRequest.ATTR_REQUEST_ID);
-        if (requestId != null) {
-            MDC.put("request_id", requestId.toString());
-        }
-        MDC.put("app.operation", request.operation());
-        Object userId = request.attribute(ApiRequest.ATTR_USER_ID);
-        if (userId != null) {
-            MDC.put("app.user.id", userId.toString());
-        }
-        Object connectionId = request.attribute(ApiRequest.ATTR_CONNECTION_ID);
-        if (connectionId != null) {
-            MDC.put("connection_id", connectionId.toString());
-        }
-        Object wsSeq = request.attribute(ApiRequest.ATTR_WS_SEQ);
-        if (wsSeq != null) {
-            MDC.put("ws.seq", wsSeq.toString());
-        }
-    }
-
-    private void clearMdc() {
-        MDC.remove("request_id");
-        MDC.remove("app.operation");
-        MDC.remove("app.user.id");
-        MDC.remove("connection_id");
-        MDC.remove("ws.seq");
-    }
-
-    private void process(ApiRequest request, RequestHandler handler) {
+    private DispatchOutcome process(ApiRequest request, RequestHandler handler) {
         int idx = 0;
         // ── preHandle 链 ──
         for (; idx < interceptors.size(); idx++) {
             ApiInterceptor interceptor = interceptors.get(idx);
             try {
                 if (!interceptor.preHandle(request)) {
-                    log.debug("Interceptor '{}' blocked request op={}", interceptor.name(), request.operation());
+                    log.warn(StructuredLog.event(LogEvents.INTERCEPTOR_REJECTED,
+                            LogFields.INTERCEPTOR, interceptor.name(),
+                            LogFields.OPERATION, request.operation(),
+                            LogFields.ERROR_CODE, ImErrorCode.FORBIDDEN.getCode(),
+                            LogFields.REASON, "returned_false"));
                     afterCompleteReverse(request, idx, null, null);
                     // 这里是不是应该先写会结果在执行拦截器的after
                     request.responseWriter().writeError(ImErrorCode.FORBIDDEN,
                             "blocked by interceptor: " + interceptor.name());
-                    return;
+                    return DispatchOutcome.failure(ImErrorCode.FORBIDDEN, null, "blocked_by_" + interceptor.name());
                 }
             } catch (ImException e) {
-                log.warn("Interceptor '{}' preHandle rejected: {} {}", interceptor.name(),
-                        e.getErrorCode().getCode(), e.getDetail());
+                log.warn(StructuredLog.event(LogEvents.INTERCEPTOR_REJECTED,
+                        LogFields.INTERCEPTOR, interceptor.name(),
+                        LogFields.OPERATION, request.operation(),
+                        LogFields.ERROR_CODE, e.getErrorCode().getCode(),
+                        LogFields.DETAIL, e.getSafeMessage()));
                 afterCompleteReverse(request, idx, null, e);
                 writeImError(request, e);
-                return;
+                return DispatchOutcome.failure(e.getErrorCode(), e, "interceptor_rejected");
             } catch (Exception e) {
-                log.warn("Interceptor '{}' preHandle threw", interceptor.name(), e);
+                log.error(StructuredLog.event(LogEvents.INTERCEPTOR_FAILED,
+                        LogFields.INTERCEPTOR, interceptor.name(),
+                        LogFields.OPERATION, request.operation(),
+                        LogFields.ERROR_CODE, ImErrorCode.INTERNAL_ERROR.getCode(),
+                        LogFields.EXCEPTION_CLASS, e.getClass().getSimpleName()), e);
                 afterCompleteReverse(request, idx, null, e);
                 request.responseWriter().writeError(ImErrorCode.INTERNAL_ERROR,
                         null);
-                return;
+                return DispatchOutcome.failure(ImErrorCode.INTERNAL_ERROR, e, "interceptor_failed");
             }
         }
 
@@ -195,29 +192,36 @@ public class ApiDispatcher {
             result = handler.handle(request);
         } catch (ImException e) {
             handlerEx = e;
-            if (e instanceof PersistenceException) {
-                log.error("Handler persistence failure: {} {} op={}", e.getCode(), e.getMessage(), request.operation(), e);
-            } else {
-                log.warn("Handler rejected: {} {} op={}", e.getCode(), e.getMessage(), request.operation());
-            }
+            logHandlerException(request, e);
             writeImError(request, e);
+            return DispatchOutcome.failure(e.getErrorCode(), e, "handler_rejected");
         } catch (Exception e) {
             handlerEx = e;
             ApiExceptionHandler customHandler = findExceptionHandler(e.getClass());
             if (customHandler != null) {
-                log.warn("Handler error handled by custom handler: op={}, ex={}",
-                        request.operation(), e.getClass().getSimpleName());
+                log.warn(StructuredLog.event(LogEvents.HANDLER_FAILED,
+                        LogFields.OPERATION, request.operation(),
+                        LogFields.EXCEPTION_CLASS, e.getClass().getSimpleName(),
+                        LogFields.REASON, "custom_exception_handler_selected"));
                 try {
                     customHandler.handle(e, request);
                 } catch (Exception customEx) {
-                    log.error("Custom exception handler failed: op={}, ex={}",
-                            request.operation(), customEx.getClass().getSimpleName(), customEx);
+                    log.error(StructuredLog.event(LogEvents.EXCEPTION_HANDLER_FAILED,
+                            LogFields.OPERATION, request.operation(),
+                            LogFields.HANDLER, customHandler.getClass().getSimpleName(),
+                            LogFields.EXCEPTION_CLASS, customEx.getClass().getSimpleName()), customEx);
                     request.responseWriter().writeError(ImErrorCode.INTERNAL_ERROR, null);
+                    return DispatchOutcome.failure(ImErrorCode.INTERNAL_ERROR, customEx, "custom_exception_handler_failed");
                 }
             } else {
-                log.error("Handler error: op={}", request.operation(), e);
+                log.error(StructuredLog.event(LogEvents.HANDLER_FAILED,
+                        LogFields.OPERATION, request.operation(),
+                        LogFields.EXCEPTION_CLASS, e.getClass().getSimpleName(),
+                        LogFields.REASON, "unhandled_exception"), e);
                 request.responseWriter().writeError(ImErrorCode.INTERNAL_ERROR, null);
             }
+            return DispatchOutcome.failure(ImErrorCode.INTERNAL_ERROR, e, customHandler != null
+                    ? "handler_exception_custom_handled" : "handler_exception");
         } finally {
             afterCompleteReverse(request, idx, result, handlerEx);
         }
@@ -227,6 +231,7 @@ public class ApiDispatcher {
             Object response = result;
             request.responseWriter().write(response);
         }
+        return DispatchOutcome.ok();
     }
 
     /** 反序回调已通过的拦截器的 afterCompletion */
@@ -235,7 +240,10 @@ public class ApiDispatcher {
             try {
                 interceptors.get(i).afterCompletion(request, result, error);
             } catch (Exception e) {
-                log.warn("Interceptor '{}' afterCompletion threw: {}", interceptors.get(i).name(), e.getMessage());
+                log.warn(StructuredLog.event(LogEvents.AFTER_COMPLETION_FAILED,
+                        LogFields.INTERCEPTOR, interceptors.get(i).name(),
+                        LogFields.OPERATION, request.operation(),
+                        LogFields.EXCEPTION_CLASS, e.getClass().getSimpleName()));
             }
         }
     }
@@ -245,6 +253,51 @@ public class ApiDispatcher {
         request.responseWriter().writeError(e.getErrorCode(), detail);
     }
 
+    private void logHandlerException(ApiRequest request, ImException e) {
+        String event = e instanceof PersistenceException ? LogEvents.HANDLER_FAILED : LogEvents.HANDLER_REJECTED;
+        String line = StructuredLog.event(event,
+                LogFields.OPERATION, request.operation(),
+                LogFields.ERROR_CODE, e.getErrorCode().getCode(),
+                LogFields.EXCEPTION_CLASS, e.getClass().getSimpleName(),
+                LogFields.DETAIL, e.isClientVisible() ? e.getSafeMessage() : null);
+        if (e instanceof PersistenceException) {
+            log.error(line, e);
+        } else {
+            log.warn(line);
+        }
+    }
+
+    private void logCompletion(ApiRequest request, DispatchOutcome outcome, long startNanos) {
+        DispatchOutcome finalOutcome = outcome != null ? outcome : DispatchOutcome.failure(
+                ImErrorCode.INTERNAL_ERROR, null, "unknown_dispatch_outcome");
+        long latencyMs = Math.max(0, (System.nanoTime() - startNanos) / 1_000_000);
+        String event = finalOutcome.success ? LogEvents.REQUEST_COMPLETED : LogEvents.REQUEST_FAILED;
+        String line = StructuredLog.event(event,
+                LogFields.NODE_ID, RequestObservability.nodeId(request),
+                LogFields.REQUEST_ID, RequestObservability.requestId(request),
+                LogFields.TRACE_ID, RequestObservability.traceId(request),
+                LogFields.USER_ID, RequestObservability.userId(request),
+                LogFields.OPERATION, RequestObservability.operation(request),
+                LogFields.PROTOCOL, RequestObservability.protocol(request),
+                LogFields.CLIENT_IP, RequestObservability.clientIp(request),
+                LogFields.CONNECTION_ID, RequestObservability.attr(request, ApiRequest.ATTR_CONNECTION_ID),
+                LogFields.WS_SEQ, RequestObservability.attr(request, ApiRequest.ATTR_WS_SEQ),
+                LogFields.HTTP_METHOD, RequestObservability.attr(request, ApiRequest.ATTR_HTTP_METHOD),
+                LogFields.HTTP_PATH, RequestObservability.attr(request, ApiRequest.ATTR_HTTP_PATH),
+                LogFields.LATENCY_MS, latencyMs,
+                LogFields.SUCCESS, finalOutcome.success,
+                LogFields.ERROR_CODE, finalOutcome.errorCode != null ? finalOutcome.errorCode.getCode() : null,
+                LogFields.EXCEPTION_CLASS, finalOutcome.exceptionClass,
+                LogFields.REASON, finalOutcome.reason);
+        if (finalOutcome.errorCode != null && finalOutcome.errorCode.getCode() >= 500) {
+            log.error(line);
+        } else if (finalOutcome.errorCode == ImErrorCode.UNAUTHORIZED || finalOutcome.errorCode == ImErrorCode.RATE_LIMITED) {
+            log.warn(line);
+        } else {
+            log.info(line);
+        }
+    }
+
     /** 按异常类型的继承链查找匹配的 ApiExceptionHandler。 */
     private ApiExceptionHandler findExceptionHandler(Class<? extends Throwable> exceptionClass) {
         for (Class<?> cls = exceptionClass; cls != null && cls != Throwable.class; cls = cls.getSuperclass()) {
@@ -252,5 +305,17 @@ public class ApiDispatcher {
             if (handler != null) return handler;
         }
         return null;
+    }
+
+    private record DispatchOutcome(boolean success, ImErrorCode errorCode, String exceptionClass, String reason) {
+        private static DispatchOutcome ok() {
+            return new DispatchOutcome(true, null, null, null);
+        }
+
+        private static DispatchOutcome failure(ImErrorCode errorCode, Throwable error, String reason) {
+            return new DispatchOutcome(false, errorCode,
+                    error != null ? error.getClass().getSimpleName() : null,
+                    reason);
+        }
     }
 }

@@ -19,13 +19,22 @@ import com.im.core.handler.ContentSerializer;
 import com.im.core.handler.WebhookService;
 import com.im.api.BusinessMessageDlqStore;
 import com.im.api.SendMessageIdempotency;
+import com.im.core.observability.LogEvents;
+import com.im.core.observability.LogFields;
+import com.im.core.observability.MessageObservability;
+import com.im.core.observability.StructuredLog;
 import com.im.core.retry.FailsafeRetryExecutor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.regex.Pattern;
 
 public class SendMessageUseCase {
+
+    private static final Logger log = LoggerFactory.getLogger(SendMessageUseCase.class);
 
     private static final Pattern CLIENT_MSG_ID_PATTERN = Pattern.compile("[A-Za-z0-9._:-]{8,64}");
     private static final String STATUS_RECEIVED = "RECEIVED";
@@ -154,11 +163,15 @@ public class SendMessageUseCase {
 
         Message msg = buildMessage(params, fromUserId, toUserId, groupId, content,
                 conversationId, seq, clientMsgId);
+        MessageObservability.captureRequestContext(msg, params);
         publishRequired(MessageQueueTopics.PERSIST, msg);
 
         String status = publishRecoverable(MessageQueueTopics.DELIVER, msg)
                 ? STATUS_RECEIVED
                 : STATUS_RECEIVED_PENDING_DELIVERY;
+        Map<String, Object> fields = new LinkedHashMap<>(MessageObservability.fields("send", msg));
+        fields.put(LogFields.STATUS, status);
+        log.info(StructuredLog.event(LogEvents.MESSAGE_SEND_ACCEPTED, fields));
 
         return new SendMessageResult(msg.getMessageId(), conversationId, seq, status);
     }
@@ -196,6 +209,8 @@ public class SendMessageUseCase {
             publishWithRetry(topic, msg);
         } catch (RuntimeException e) {
             failureStore.recordFailure(topic, msg, e);
+            log.error(StructuredLog.event(LogEvents.MESSAGE_SEND_PUBLISH_FAILED,
+                    failureFields(topic, msg, "required_publish_failed", e)), e);
             throw new InfrastructureException(ImErrorCode.MQ_UNAVAILABLE,
                     "message persist publish failed after retry", e);
         }
@@ -208,8 +223,12 @@ public class SendMessageUseCase {
         } catch (RuntimeException e) {
             try {
                 failureStore.recordFailure(topic, msg, e);
+                log.warn(StructuredLog.event(LogEvents.MESSAGE_SEND_PUBLISH_FAILED,
+                        failureFields(topic, msg, "recoverable_publish_failed", e)));
                 return false;
             } catch (RuntimeException failureRecordError) {
+                log.error(StructuredLog.event(LogEvents.MESSAGE_SEND_PUBLISH_FAILED,
+                        failureFields(topic, msg, "recoverable_publish_and_dlq_failed", failureRecordError)), failureRecordError);
                 throw new InfrastructureException(ImErrorCode.MQ_UNAVAILABLE,
                         "message deliver publish failed and business-DLQ record failed", failureRecordError);
             }
@@ -224,6 +243,13 @@ public class SendMessageUseCase {
             messageQueue.publish(topic, msg);
             return null;
         });
+    }
+
+    private static Map<String, Object> failureFields(String topic, Message msg, String reason, RuntimeException error) {
+        Map<String, Object> fields = new LinkedHashMap<>(MessageObservability.fields(topic, msg));
+        fields.put(LogFields.REASON, reason);
+        fields.put(LogFields.EXCEPTION_CLASS, error.getClass().getSimpleName());
+        return fields;
     }
 
     private static String requireClientMsgId(Map<String, Object> params) {

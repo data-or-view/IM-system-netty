@@ -8,11 +8,18 @@ import com.im.api.SystemMessageSummary;
 import com.im.common.exception.ValidationException;
 import com.im.common.id.IdGenerator;
 import com.im.common.validation.Preconditions;
+import com.im.core.observability.LogEvents;
+import com.im.core.observability.LogFields;
+import com.im.core.observability.StructuredLog;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.LinkedHashSet;
 import java.util.List;
 
 public class SystemMessagePublishUseCase {
+
+    private static final Logger log = LoggerFactory.getLogger(SystemMessagePublishUseCase.class);
 
     private final ISystemMessageStore store;
     private final SystemMessageNotifier notifier;
@@ -50,6 +57,11 @@ public class SystemMessagePublishUseCase {
 
         SystemMessageSummary summary = toSummary(message, message.getChannelId());
         notifier.notify(List.copyOf(targets), summary);
+        log.info(StructuredLog.event(LogEvents.SYSTEM_MESSAGE_PUBLISHED,
+                LogFields.MESSAGE_ID, message.getMessageId(),
+                "channelId", message.getChannelId(),
+                "senderId", message.getSenderId(),
+                LogFields.TARGET_COUNT, targets.size()));
         return summary;
     }
 
