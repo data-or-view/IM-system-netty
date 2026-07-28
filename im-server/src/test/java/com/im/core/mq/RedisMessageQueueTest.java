@@ -23,6 +23,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -32,6 +33,157 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class RedisMessageQueueTest {
 
     private static final ObjectMapper MAPPER = ObjectMapperProvider.get();
+
+    @Test
+    void handlerInitiatedStopRejectsNormalCompletionAndConsumerExits() throws Exception {
+        RedisConfiguration redis = redisOrSkip();
+        String topic = "test-handler-stop-" + UUID.randomUUID();
+        String streamKey = RedisMessageQueue.STREAM_PREFIX + topic;
+        String groupName = RedisMessageQueue.GROUP_PREFIX + topic;
+        RedisMessageQueue queue = new RedisMessageQueue(redis, "handler-stop-node");
+        CountDownLatch handlerEntered = new CountDownLatch(1);
+        CountDownLatch selfStopRejected = new CountDownLatch(1);
+        CountDownLatch handlerExited = new CountDownLatch(1);
+        AtomicBoolean stopReturnedNormally = new AtomicBoolean();
+        ExecutorService stopper = Executors.newSingleThreadExecutor();
+        try {
+            queue.subscribe(topic, ignored -> {
+                handlerEntered.countDown();
+                try {
+                    queue.stop();
+                    stopReturnedNormally.set(true);
+                } catch (IllegalStateException expected) {
+                    selfStopRejected.countDown();
+                } finally {
+                    handlerExited.countDown();
+                }
+            });
+            queue.start();
+            queue.publish(topic, message("msg-handler-stop-" + UUID.randomUUID()));
+
+            assertTrue(handlerEntered.await(5, TimeUnit.SECONDS), "handler did not start");
+            assertTrue(selfStopRejected.await(5, TimeUnit.SECONDS), "handler stop did not reject self-completion");
+            assertTrue(handlerExited.await(5, TimeUnit.SECONDS), "handler remained blocked by self-stop");
+            assertFalse(stopReturnedNormally.get(), "handler-initiated stop must not return normally");
+            stopper.submit(queue::stop).get(5, TimeUnit.SECONDS);
+
+            try (CloseableRedisCommands commands = redis.createSyncCommands()) {
+                assertEquals(1, commands.<RedisCommands<String, String>>sync().xpending(streamKey, groupName).getCount(),
+                        "message handled during self-stop must remain pending");
+            }
+        } finally {
+            queue.stop();
+            stopper.shutdownNow();
+            try (CloseableRedisCommands commands = redis.createSyncCommands()) {
+                commands.<RedisCommands<String, String>>sync().del(streamKey);
+            } finally {
+                redis.close();
+            }
+        }
+    }
+
+    @Test
+    void handlerStopDuringExternalDrainDoesNotDeadlockExternalStopper() throws Exception {
+        RedisConfiguration redis = redisOrSkip();
+        String topic = "test-handler-stop-external-drain-" + UUID.randomUUID();
+        String streamKey = RedisMessageQueue.STREAM_PREFIX + topic;
+        RedisMessageQueue queue = new RedisMessageQueue(redis, "handler-stop-external-node");
+        CountDownLatch handlerEntered = new CountDownLatch(1);
+        CountDownLatch allowHandlerStop = new CountDownLatch(1);
+        CountDownLatch selfStopRejected = new CountDownLatch(1);
+        CountDownLatch allowHandlerExit = new CountDownLatch(1);
+        CountDownLatch handlerExited = new CountDownLatch(1);
+        ExecutorService stopper = Executors.newSingleThreadExecutor(runnable -> {
+            Thread thread = new Thread(runnable, "redis-mq-external-stopper");
+            thread.setDaemon(true);
+            return thread;
+        });
+        Future<?> stopFuture = null;
+        try {
+            queue.subscribe(topic, ignored -> {
+                handlerEntered.countDown();
+                awaitUninterruptibly(allowHandlerStop);
+                try {
+                    queue.stop();
+                } catch (IllegalStateException expected) {
+                    selfStopRejected.countDown();
+                }
+                awaitUninterruptibly(allowHandlerExit);
+                handlerExited.countDown();
+            });
+            queue.start();
+            queue.publish(topic, message("msg-handler-stop-external-drain-" + UUID.randomUUID()));
+
+            assertTrue(handlerEntered.await(5, TimeUnit.SECONDS), "handler did not start");
+            stopFuture = stopper.submit(queue::stop);
+            assertFalse(stopFuture.isDone(), "external stop should wait for the in-flight handler");
+
+            allowHandlerStop.countDown();
+            assertTrue(selfStopRejected.await(5, TimeUnit.SECONDS),
+                    "handler stop waited for the shutdown that needs this handler to exit");
+            assertFalse(stopFuture.isDone(), "external stop must still wait for the handler exit");
+
+            allowHandlerExit.countDown();
+            assertTrue(handlerExited.await(5, TimeUnit.SECONDS), "handler did not exit");
+            stopFuture.get(5, TimeUnit.SECONDS);
+        } finally {
+            allowHandlerStop.countDown();
+            allowHandlerExit.countDown();
+            if (stopFuture != null && stopFuture.isDone()) {
+                queue.stop();
+            }
+            stopper.shutdownNow();
+            try (CloseableRedisCommands commands = redis.createSyncCommands()) {
+                commands.<RedisCommands<String, String>>sync().del(streamKey);
+            } finally {
+                redis.close();
+            }
+        }
+    }
+
+    @Test
+    void partialUnsubscribeInvalidatesAcknowledgementForInFlightDelivery() throws Exception {
+        RedisConfiguration redis = redisOrSkip();
+        String topic = "test-partial-unsubscribe-" + UUID.randomUUID();
+        String streamKey = RedisMessageQueue.STREAM_PREFIX + topic;
+        String groupName = RedisMessageQueue.GROUP_PREFIX + topic;
+        RedisMessageQueue queue = new RedisMessageQueue(redis, "partial-unsubscribe-node");
+        CountDownLatch blockedHandlerEntered = new CountDownLatch(1);
+        CountDownLatch allowBlockedHandlerExit = new CountDownLatch(1);
+        CountDownLatch blockedHandlerExited = new CountDownLatch(1);
+        CountDownLatch remainingHandlerReceived = new CountDownLatch(1);
+        QueueMessageHandler blockedHandler = ignored -> {
+            blockedHandlerEntered.countDown();
+            awaitUninterruptibly(allowBlockedHandlerExit);
+            blockedHandlerExited.countDown();
+        };
+        QueueMessageHandler remainingHandler = ignored -> remainingHandlerReceived.countDown();
+        try {
+            queue.subscribe(topic, blockedHandler);
+            queue.subscribe(topic, remainingHandler);
+            queue.start();
+            queue.publish(topic, message("msg-partial-unsubscribe-" + UUID.randomUUID()));
+
+            assertTrue(blockedHandlerEntered.await(5, TimeUnit.SECONDS), "blocked handler did not start");
+            queue.unsubscribe(topic, blockedHandler);
+            allowBlockedHandlerExit.countDown();
+            assertTrue(blockedHandlerExited.await(5, TimeUnit.SECONDS), "blocked handler did not exit");
+            assertTrue(remainingHandlerReceived.await(5, TimeUnit.SECONDS), "remaining handler did not receive delivery");
+
+            try (CloseableRedisCommands commands = redis.createSyncCommands()) {
+                assertEquals(1, commands.<RedisCommands<String, String>>sync().xpending(streamKey, groupName).getCount(),
+                        "an in-flight delivery invalidated by partial unsubscribe must remain pending");
+            }
+        } finally {
+            allowBlockedHandlerExit.countDown();
+            queue.stop();
+            try (CloseableRedisCommands commands = redis.createSyncCommands()) {
+                commands.<RedisCommands<String, String>>sync().del(streamKey);
+            } finally {
+                redis.close();
+            }
+        }
+    }
 
     @Test
     void unsubscribeThenStopWaitsForInFlightHandlerToExitBeforeReturning() throws Exception {

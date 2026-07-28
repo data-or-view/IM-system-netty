@@ -92,8 +92,11 @@ public class RedisMessageQueue implements IMessageQueue {
     /** Serializes lifecycle transitions with the final Redis Streams acknowledgement. */
     private final Object lifecycleLock = new Object();
 
+    private final ThreadLocal<ConsumerTask> currentConsumerTask = new ThreadLocal<>();
+
     private final AtomicBoolean running = new AtomicBoolean(false);
     private boolean stopping;
+    private boolean consumerInitiatedShutdown;
 
     private RedisClusterAsyncCommands<String, String> async;
 
@@ -130,6 +133,19 @@ public class RedisMessageQueue implements IMessageQueue {
     public void stop() {
         List<ConsumerTask> tasks;
         synchronized (lifecycleLock) {
+            if (currentConsumerTaskLocked() != null) {
+                if (!stopping) {
+                    stopping = true;
+                    consumerInitiatedShutdown = true;
+                    running.set(false);
+                    tasks = new ArrayList<>(liveConsumerTasks);
+                    consumerTasks.clear();
+                    for (ConsumerTask task : tasks) {
+                        task.requestStopLocked();
+                    }
+                }
+                throw new IllegalStateException("Redis message queue consumers cannot synchronously stop themselves");
+            }
             if (stopping) {
                 awaitCurrentShutdownLocked();
                 return;
@@ -151,6 +167,7 @@ public class RedisMessageQueue implements IMessageQueue {
         } finally {
             synchronized (lifecycleLock) {
                 stopping = false;
+                consumerInitiatedShutdown = false;
                 lifecycleLock.notifyAll();
             }
         }
@@ -219,10 +236,14 @@ public class RedisMessageQueue implements IMessageQueue {
         synchronized (lifecycleLock) {
             List<QueueMessageHandler> handlers = subscribers.get(topic);
             if (handlers != null) {
-                handlers.remove(handler);
+                boolean removed = handlers.remove(handler);
+                ConsumerTask task = consumerTasks.get(topic);
+                if (removed && task != null) {
+                    task.invalidateAcknowledgementsLocked();
+                }
                 if (handlers.isEmpty()) {
                     subscribers.remove(topic, handlers);
-                    ConsumerTask task = consumerTasks.remove(topic);
+                    task = consumerTasks.remove(topic);
                     if (task != null) {
                         task.requestStopLocked();
                     }
@@ -275,6 +296,10 @@ public class RedisMessageQueue implements IMessageQueue {
         return true;
     }
 
+    private ConsumerTask currentConsumerTaskLocked() {
+        return currentConsumerTask.get();
+    }
+
     /**
      * 消费者任务 — 在独立连接中执行 XREADGROUP BLOCK 循环。
      */
@@ -283,6 +308,7 @@ public class RedisMessageQueue implements IMessageQueue {
         volatile Thread thread;
         volatile boolean stopped = false;
         private String pendingClaimCursor = "0-0";
+        private long acknowledgementGeneration;
 
         ConsumerTask(String topic) {
             this.topic = topic;
@@ -293,6 +319,10 @@ public class RedisMessageQueue implements IMessageQueue {
             if (thread != null) {
                 thread.interrupt();
             }
+        }
+
+        void invalidateAcknowledgementsLocked() {
+            acknowledgementGeneration++;
         }
 
         void awaitStopped() {
@@ -315,10 +345,10 @@ public class RedisMessageQueue implements IMessageQueue {
 
         @Override
         public void run() {
-            String streamKey = streamKey(topic);
-            String groupName = groupName(topic);
-
+            currentConsumerTask.set(this);
             try {
+                String streamKey = streamKey(topic);
+                String groupName = groupName(topic);
                 while (!stopped && running.get() && !Thread.currentThread().isInterrupted()) {
                     try (CloseableRedisCommands redis = redisConfig.createSyncCommands()) {
                         RedisCommands<String, String> sync = redis.sync();
@@ -358,9 +388,14 @@ public class RedisMessageQueue implements IMessageQueue {
                     }
                 }
             } finally {
+                currentConsumerTask.remove();
                 synchronized (lifecycleLock) {
                     consumerTasks.remove(topic, this);
                     liveConsumerTasks.remove(this);
+                    if (stopping && consumerInitiatedShutdown && liveConsumerTasks.isEmpty()) {
+                        stopping = false;
+                        consumerInitiatedShutdown = false;
+                    }
                     lifecycleLock.notifyAll();
                 }
                 log.info("Consumer stopped for topic '{}'", topic);
@@ -423,11 +458,12 @@ public class RedisMessageQueue implements IMessageQueue {
 
         private void processMessage(RedisCommands<String, String> sync, String streamKey,
                                     String groupName, io.lettuce.core.StreamMessage<String, String> msg) {
+            long dispatchGeneration = acknowledgementGeneration();
             try {
                 String payload = msg.getBody().get("payload");
                 if (payload == null || payload.isEmpty()) {
                     log.warn("Message missing payload field, stream={}, id={}", streamKey, msg.getId());
-                    acknowledgeIfActive(sync, streamKey, groupName, msg.getId());
+                    acknowledgeIfActive(sync, streamKey, groupName, msg.getId(), dispatchGeneration);
                     return;
                 }
 
@@ -443,7 +479,7 @@ public class RedisMessageQueue implements IMessageQueue {
                         }
                     }
 
-                    if (acknowledgeIfActive(sync, streamKey, groupName, msg.getId())) {
+                    if (acknowledgeIfActive(sync, streamKey, groupName, msg.getId(), dispatchGeneration)) {
                         log.debug(StructuredLog.event(LogEvents.MQ_MESSAGE_ACKED,
                                 redisFields(topic, cmd, streamKey, msg.getId())));
                     }
@@ -459,13 +495,20 @@ public class RedisMessageQueue implements IMessageQueue {
         }
 
         private boolean acknowledgeIfActive(RedisCommands<String, String> sync, String streamKey,
-                                            String groupName, String messageId) {
+                                            String groupName, String messageId, long dispatchGeneration) {
             synchronized (lifecycleLock) {
-                if (stopped || !running.get() || Thread.currentThread().isInterrupted()) {
+                if (stopped || !running.get() || Thread.currentThread().isInterrupted()
+                        || acknowledgementGeneration != dispatchGeneration) {
                     return false;
                 }
                 sync.xack(streamKey, groupName, messageId);
                 return true;
+            }
+        }
+
+        private long acknowledgementGeneration() {
+            synchronized (lifecycleLock) {
+                return acknowledgementGeneration;
             }
         }
 
