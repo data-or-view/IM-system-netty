@@ -182,11 +182,11 @@ deliver topic
 
 | Key | 用途 |
 |-----|------|
-| `im:route:v3:{u-encodedUserId}` | Hash，字段为 `platformId:sessionId`，值为 `nodeId\|expireAt\|generation`。它是路由权威源。 |
-| `im:online:v3:{u-encodedUserId}` | ZSet，平台在线状态，score 是过期时间；与同一用户的 route key 同 slot。 |
-| `im:route-node:v3:<nodeId>` | Set，member 为 `userId\|platformId:sessionId\|generation`。它是可从 route hash 重建的节点反向索引。布局迁移见 [docs/route-redis-key-layout-migration.md](docs/route-redis-key-layout-migration.md)。 |
-| `im:node:{nodeId}` | 节点信息，TTL 30s。 |
-| `im:nodes:alive` | 当前活跃节点集合。 |
+| `im:route:v4:{u-encodedUserId}` | Hash，字段为 `platformId:sessionId`，值为 `nodeId\|expireAt\|nodeIncarnation\|generation`。它是路由权威源。 |
+| `im:online:v4:{u-encodedUserId}` | ZSet，平台在线状态，score 是过期时间；与同一用户的 route key 同 slot。 |
+| `im:route-node:v4:<nodeId>` | Set，member 为 `userId\|platformId:sessionId\|nodeIncarnation\|generation`。它是可从 route hash 重建的节点反向索引。布局迁移见 [docs/route-redis-key-layout-migration.md](docs/route-redis-key-layout-migration.md)。 |
+| `im:node:{nodeId}` | 节点租约，值以 `nodeIncarnation\|nodeId\|host\|port` 开头，TTL 30s；续期和删除必须匹配 incarnation。 |
+| `im:nodes:alive` | 当前活跃节点租约集合，member 为 `nodeId\|nodeIncarnation`。 |
 | `im:node:{nodeId}:msgs` | Redis Pub/Sub 节点专属频道。 |
 | `im:bus:broadcast` | Redis Pub/Sub 广播频道。 |
 | `im:seq:{conversationId}` | 会话消息序号。 |

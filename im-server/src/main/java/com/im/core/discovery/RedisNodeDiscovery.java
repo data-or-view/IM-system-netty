@@ -1,128 +1,138 @@
 package com.im.core.discovery;
 
-import com.im.api.NodeInformation;
 import com.im.api.INodeDiscovery;
 import com.im.api.IRouteTable;
 import com.im.api.NodeEvent;
 import com.im.api.NodeEventListener;
 import com.im.api.NodeEventType;
+import com.im.api.NodeInformation;
 import com.im.common.util.IMExecutors;
 import com.im.core.redis.RedisConfiguration;
+import io.lettuce.core.ScriptOutputType;
 import io.lettuce.core.cluster.api.async.RedisClusterAsyncCommands;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.stream.Collectors;
 
-/**
- * Redis 集群节点发现（生产环境用）。
- *
- * <p>每个 IM 节点在 Redis 中注册为：</p>
- * <ul>
- *   <li><b>节点数据 key</b>: {@code im:node:{nodeId}}，值 = 序列化 NodeInformation，TTL= 30s</li>
- *   <li><b>活跃节点集合</b>: {@code im:nodes:alive}（Redis Set），存储所有活跃 nodeId</li>
- * </ul>
- *
- * <p>节点通过定时心跳（10s）刷新 TTL，Redis 自动清理过期 key。</p>
- */
+/** Redis-backed node discovery fenced by a unique token for each process. */
 public class RedisNodeDiscovery implements INodeDiscovery {
 
     private static final Logger log = LoggerFactory.getLogger(RedisNodeDiscovery.class);
-
     private static final String KEY_NODE = "im:node:";
     private static final String KEY_ALIVE = "im:nodes:alive";
-
-    /** 节点注册 TTL（秒），超过此时间未心跳视为宕机 */
     private static final long NODE_TTL_SEC = 30;
-
-    /** 心跳间隔（秒） */
     private static final long HEARTBEAT_INTERVAL_SEC = 10;
+
+    private static final String RENEW_LEASE_SCRIPT = """
+            local current = redis.call('get', KEYS[1])
+            local incarnation = ARGV[1]
+            if not current or string.sub(current, 1, string.len(incarnation) + 1) ~= incarnation .. '|' then
+              return 0
+            end
+            redis.call('setex', KEYS[1], tonumber(ARGV[2]), ARGV[3])
+            return 1
+            """;
+
+    private static final String DELETE_LEASE_SCRIPT = """
+            local current = redis.call('get', KEYS[1])
+            local incarnation = ARGV[1]
+            if not current or string.sub(current, 1, string.len(incarnation) + 1) ~= incarnation .. '|' then
+              return 0
+            end
+            return redis.call('del', KEYS[1])
+            """;
 
     private final RedisClusterAsyncCommands<String, String> async;
     private final IRouteTable routeTable;
+    private final String nodeIncarnation;
     private final List<NodeEventListener> listeners = new CopyOnWriteArrayList<>();
+    private final AtomicBoolean running = new AtomicBoolean(false);
 
     private volatile NodeInformation self;
-    private final AtomicBoolean running = new AtomicBoolean(false);
     private ScheduledExecutorService heartbeatExecutor;
     private ScheduledExecutorService scanExecutor;
 
     public RedisNodeDiscovery(RedisConfiguration redisConfig) {
-        this(redisConfig, null);
+        this(redisConfig, null, UUID.randomUUID().toString());
     }
 
     public RedisNodeDiscovery(RedisConfiguration redisConfig, IRouteTable routeTable) {
+        this(redisConfig, routeTable, UUID.randomUUID().toString());
+    }
+
+    public RedisNodeDiscovery(RedisConfiguration redisConfig, IRouteTable routeTable, String nodeIncarnation) {
         this.async = redisConfig.async();
         this.routeTable = routeTable;
-        log.info("RedisNodeDiscovery initialized");
+        this.nodeIncarnation = requireIdentity(nodeIncarnation, "nodeIncarnation");
+        log.info("RedisNodeDiscovery initialized: incarnation={}", nodeIncarnation);
     }
 
     @Override
     public void start() {
         if (!running.compareAndSet(false, true)) return;
-
-        this.heartbeatExecutor = IMExecutors.newScheduledExecutor("redis-node-heartbeat", 1);
-        this.scanExecutor = IMExecutors.newScheduledExecutor("redis-node-scan", 1);
-
-        // 启动后立即执行一次心跳，然后按间隔执行
-        if (self != null) {
-            doHeartbeat();
-        }
+        heartbeatExecutor = IMExecutors.newScheduledExecutor("redis-node-heartbeat", 1);
+        scanExecutor = IMExecutors.newScheduledExecutor("redis-node-scan", 1);
+        if (self != null) doHeartbeat();
         heartbeatExecutor.scheduleAtFixedRate(this::doHeartbeat,
                 HEARTBEAT_INTERVAL_SEC, HEARTBEAT_INTERVAL_SEC, TimeUnit.SECONDS);
-
         scanExecutor.scheduleAtFixedRate(this::scanExpiredNodes,
                 NODE_TTL_SEC, HEARTBEAT_INTERVAL_SEC, TimeUnit.SECONDS);
-
-        log.info("RedisNodeDiscovery started (node={}, heartbeat={}s, ttl={}s)",
-                self != null ? self.getNodeId() : "null", HEARTBEAT_INTERVAL_SEC, NODE_TTL_SEC);
+        log.info("RedisNodeDiscovery started (node={}, incarnation={}, heartbeat={}s, ttl={}s)",
+                self != null ? self.getNodeId() : "null", nodeIncarnation,
+                HEARTBEAT_INTERVAL_SEC, NODE_TTL_SEC);
     }
 
     @Override
     public void stop() {
         if (!running.compareAndSet(true, false)) return;
-
-        if (heartbeatExecutor != null) {
-            heartbeatExecutor.shutdown();
-        }
-        if (scanExecutor != null) {
-            scanExecutor.shutdown();
-        }
+        if (heartbeatExecutor != null) heartbeatExecutor.shutdown();
+        if (scanExecutor != null) scanExecutor.shutdown();
         unregister();
         log.info("RedisNodeDiscovery stopped");
     }
 
     @Override
     public void register(NodeInformation node) {
-        this.self = node;
-        doHeartbeat();
-        addToAliveSet(node.getNodeId());
-        log.info("Node registered (redis): {}", node);
+        requireNodeId(node.getNodeId());
+        self = node;
+        try {
+            async.setex(nodeKey(node.getNodeId()), NODE_TTL_SEC, serializeNodeLease(node, nodeIncarnation))
+                    .get(3, TimeUnit.SECONDS);
+            addToAliveSet(new NodeLease(node.getNodeId(), nodeIncarnation));
+        } catch (Exception e) {
+            throw new IllegalStateException("Redis node registration failed", e);
+        }
+        log.info("Node registered (redis): {}, incarnation={}", node, nodeIncarnation);
         notifyListeners(NodeEventType.NODE_ADDED, node);
     }
 
     @Override
     public void unregister() {
-        if (self == null) return;
         NodeInformation leaving = self;
+        if (leaving == null) return;
+        NodeLease lease = new NodeLease(leaving.getNodeId(), nodeIncarnation);
         try {
-            async.del(KEY_NODE + leaving.getNodeId()).get(3, TimeUnit.SECONDS);
-            removeFromAliveSet(leaving.getNodeId());
-            cleanupNodeRoutes(leaving.getNodeId());
-            log.info("Node unregistered (redis): {}", leaving);
+            deleteLeaseIfCurrent(lease);
+            removeFromAliveSet(lease);
+            cleanupNodeRoutes(lease);
+            log.info("Node unregistered (redis): {}, incarnation={}", leaving, nodeIncarnation);
         } catch (Exception e) {
             log.warn("Redis unregister failed: {}", e.getMessage());
+        } finally {
+            self = null;
         }
-        NodeInformation old = this.self;
-        this.self = null;
-        if (old != null) {
-            notifyListeners(NodeEventType.NODE_REMOVED, old);
-        }
+        notifyListeners(NodeEventType.NODE_REMOVED, leaving);
     }
 
     @Override
@@ -133,51 +143,36 @@ public class RedisNodeDiscovery implements INodeDiscovery {
     @Override
     public List<NodeInformation> aliveNodes() {
         try {
-            // 获取活跃节点集合
-            Set<String> nodeIds = async.smembers(KEY_ALIVE).get(3, TimeUnit.SECONDS);
-            if (nodeIds == null || nodeIds.isEmpty()) {
-                return self != null ? List.of(self) : List.of();
-            }
-
-            List<NodeInformation> result = new ArrayList<>();
-            List<String> staleIds = new ArrayList<>();
-
-            for (String nodeId : nodeIds) {
-                String val = async.get(KEY_NODE + nodeId).get(3, TimeUnit.SECONDS);
-                if (val != null && !val.isEmpty()) {
-                    NodeInformation node = deserializeNode(val, nodeId);
-                    if (node != null) {
-                        result.add(node);
-                    } else {
-                        // 反序列化失败，也标记为过期
-                        staleIds.add(nodeId);
-                    }
+            Set<String> members = async.smembers(KEY_ALIVE).get(3, TimeUnit.SECONDS);
+            if (members == null || members.isEmpty()) return List.of();
+            Map<String, NodeInformation> result = new LinkedHashMap<>();
+            List<NodeLease> stale = new ArrayList<>();
+            for (String member : members) {
+                NodeLease candidate = parseAliveMember(member);
+                if (candidate == null) {
+                    async.srem(KEY_ALIVE, member);
+                    continue;
+                }
+                NodeLeaseValue current = readLease(candidate.nodeId());
+                if (current != null && candidate.incarnation().equals(current.incarnation())) {
+                    result.put(candidate.nodeId(), current.node());
                 } else {
-                    // key 已过期但 Set 未清理
-                    staleIds.add(nodeId);
+                    stale.add(candidate);
                 }
             }
-
-            // 异步清理过期 nodeId
-            if (!staleIds.isEmpty()) {
-                cleanupStaleNodes(staleIds);
-            }
-
-            return result;
+            stale.forEach(this::cleanupStaleNode);
+            return List.copyOf(result.values());
         } catch (Exception e) {
-            log.warn("Redis aliveNodes failed: {} (fallback to self)", e.getMessage());
-            return self != null ? List.of(self) : List.of();
+            log.warn("Redis aliveNodes failed: {}", e.getMessage());
+            return List.of();
         }
     }
 
     @Override
     public NodeInformation getNode(String nodeId) {
-        if (self != null && self.getNodeId().equals(nodeId)) {
-            return self;
-        }
         try {
-            String val = async.get(KEY_NODE + nodeId).get(3, TimeUnit.SECONDS);
-            return val != null ? deserializeNode(val, nodeId) : null;
+            NodeLeaseValue value = readLease(nodeId);
+            return value != null ? value.node() : null;
         } catch (Exception e) {
             log.warn("Redis getNode failed for {}: {}", nodeId, e.getMessage());
             return null;
@@ -189,16 +184,20 @@ public class RedisNodeDiscovery implements INodeDiscovery {
         listeners.add(listener);
     }
 
-    // ========== Heartbeat & Scan ==========
-
     private void doHeartbeat() {
-        if (self == null) return;
+        NodeInformation currentSelf = self;
+        if (currentSelf == null) return;
         try {
-            String key = KEY_NODE + self.getNodeId();
-            String value = serializeNode(self);
-            async.setex(key, NODE_TTL_SEC, value).get(3, TimeUnit.SECONDS);
-            // 同时确保 Set 中存在
-            addToAliveSet(self.getNodeId());
+            Number renewed = (Number) async.eval(RENEW_LEASE_SCRIPT, ScriptOutputType.INTEGER,
+                            new String[]{nodeKey(currentSelf.getNodeId())}, nodeIncarnation,
+                            String.valueOf(NODE_TTL_SEC), serializeNodeLease(currentSelf, nodeIncarnation))
+                    .toCompletableFuture().join();
+            if (renewed != null && renewed.longValue() == 1L) {
+                addToAliveSet(new NodeLease(currentSelf.getNodeId(), nodeIncarnation));
+            } else {
+                log.warn("Node heartbeat rejected because lease was replaced: nodeId={}, incarnation={}",
+                        currentSelf.getNodeId(), nodeIncarnation);
+            }
         } catch (Exception e) {
             log.warn("Redis heartbeat failed: {}", e.getMessage());
         }
@@ -206,73 +205,74 @@ public class RedisNodeDiscovery implements INodeDiscovery {
 
     private void scanExpiredNodes() {
         try {
-            Set<String> nodeIds = async.smembers(KEY_ALIVE).get(3, TimeUnit.SECONDS);
-            if (nodeIds == null || nodeIds.isEmpty()) return;
-
-            List<String> staleIds = new ArrayList<>();
-            for (String nodeId : nodeIds) {
-                // 使用 TTL 判断是否存活
-                long ttl = async.ttl(KEY_NODE + nodeId).get(3, TimeUnit.SECONDS);
-                if (ttl <= 0) {
-                    staleIds.add(nodeId);
-                    log.warn("Node expired (redis): nodeId={}", nodeId);
+            Set<String> members = async.smembers(KEY_ALIVE).get(3, TimeUnit.SECONDS);
+            if (members == null || members.isEmpty()) return;
+            for (String member : members) {
+                NodeLease candidate = parseAliveMember(member);
+                if (candidate == null) {
+                    async.srem(KEY_ALIVE, member);
+                    continue;
                 }
-            }
-
-            if (!staleIds.isEmpty()) {
-                cleanupStaleNodes(staleIds);
+                NodeLeaseValue current = readLease(candidate.nodeId());
+                long ttl = async.ttl(nodeKey(candidate.nodeId())).get(3, TimeUnit.SECONDS);
+                if (current == null || !candidate.incarnation().equals(current.incarnation()) || ttl <= 0) {
+                    log.warn("Node lease expired (redis): nodeId={}, incarnation={}",
+                            candidate.nodeId(), candidate.incarnation());
+                    cleanupStaleNode(candidate);
+                }
             }
         } catch (Exception e) {
             log.warn("Redis scan failed: {}", e.getMessage());
         }
     }
 
-    private void addToAliveSet(String nodeId) {
+    void cleanupStaleNode(String nodeId, String incarnation) {
+        cleanupStaleNode(new NodeLease(nodeId, requireIdentity(incarnation, "incarnation")));
+    }
+
+    private void cleanupStaleNode(NodeLease lease) {
         try {
-            async.sadd(KEY_ALIVE, nodeId).get(3, TimeUnit.SECONDS);
+            deleteLeaseIfCurrent(lease);
+            removeFromAliveSet(lease);
+            cleanupNodeRoutes(lease);
+            NodeLeaseValue replacement = readLease(lease.nodeId());
+            if (replacement == null) {
+                notifyListeners(NodeEventType.NODE_REMOVED,
+                        new NodeInformation(lease.nodeId(), "unknown", 0));
+            }
         } catch (Exception e) {
-            log.warn("Redis SADD failed: {}", e.getMessage());
+            log.warn("Redis cleanup failed for nodeId={}, incarnation={}: {}",
+                    lease.nodeId(), lease.incarnation(), e.getMessage());
         }
     }
 
-    private void removeFromAliveSet(String nodeId) {
-        try {
-            async.srem(KEY_ALIVE, nodeId).get(3, TimeUnit.SECONDS);
-        } catch (Exception e) {
-            log.warn("Redis SREM failed: {}", e.getMessage());
+    private long deleteLeaseIfCurrent(NodeLease lease) {
+        Number deleted = (Number) async.eval(DELETE_LEASE_SCRIPT, ScriptOutputType.INTEGER,
+                        new String[]{nodeKey(lease.nodeId())}, lease.incarnation())
+                .toCompletableFuture().join();
+        return deleted != null ? deleted.longValue() : 0L;
+    }
+
+    private void addToAliveSet(NodeLease lease) throws Exception {
+        async.sadd(KEY_ALIVE, aliveMember(lease)).get(3, TimeUnit.SECONDS);
+    }
+
+    private void removeFromAliveSet(NodeLease lease) {
+        async.srem(KEY_ALIVE, aliveMember(lease)).toCompletableFuture().join();
+    }
+
+    private void cleanupNodeRoutes(NodeLease lease) {
+        if (routeTable == null) return;
+        int removed = routeTable.cleanupNodeRoutes(lease.nodeId(), lease.incarnation());
+        if (removed > 0) {
+            log.info("Cleaned routes for removed node lease: nodeId={}, incarnation={}, removed={}",
+                    lease.nodeId(), lease.incarnation(), removed);
         }
     }
 
-    private void cleanupStaleNodes(List<String> nodeIds) {
-        try {
-            for (String nodeId : nodeIds) {
-                async.del(KEY_NODE + nodeId);
-                async.srem(KEY_ALIVE, nodeId);
-                cleanupNodeRoutes(nodeId);
-            }
-            // 通知监听器
-            for (String nodeId : nodeIds) {
-                // 构造一个最小 NodeInformation 用于通知
-                NodeInformation staleNode = new NodeInformation(nodeId, "unknown", 0);
-                notifyListeners(NodeEventType.NODE_REMOVED, staleNode);
-            }
-        } catch (Exception e) {
-            log.warn("Redis cleanup failed: {}", e.getMessage());
-        }
-    }
-
-    private void cleanupNodeRoutes(String nodeId) {
-        if (routeTable == null) {
-            return;
-        }
-        try {
-            int removed = routeTable.cleanupNodeRoutes(nodeId);
-            if (removed > 0) {
-                log.info("Cleaned routes for removed node: nodeId={}, removed={}", nodeId, removed);
-            }
-        } catch (Exception e) {
-            log.warn("Route cleanup failed for removed node {}: {}", nodeId, e.getMessage());
-        }
+    private NodeLeaseValue readLease(String nodeId) throws Exception {
+        String raw = async.get(nodeKey(nodeId)).get(3, TimeUnit.SECONDS);
+        return deserializeNodeLease(raw, nodeId);
     }
 
     private void notifyListeners(NodeEventType type, NodeInformation node) {
@@ -286,67 +286,69 @@ public class RedisNodeDiscovery implements INodeDiscovery {
         }
     }
 
-    // ========== Serialization ==========
-
-    /**
-     * 序列化 NodeInformation 为管道分隔字符串。
-     * 格式: nodeId|host|port|key1=val1|key2=val2|...
-     */
-    private static String serializeNode(NodeInformation node) {
-        StringBuilder sb = new StringBuilder();
-        sb.append(node.getNodeId()).append('|');
-        sb.append(node.getHost()).append('|');
-        sb.append(node.getPort());
-
-        Map<String, String> attrs = node.getAttrs();
-        if (attrs != null && !attrs.isEmpty()) {
-            for (Map.Entry<String, String> entry : attrs.entrySet()) {
-                sb.append('|');
-                sb.append(entry.getKey()).append('=').append(entry.getValue());
-            }
-        }
-        return sb.toString();
+    private static String nodeKey(String nodeId) {
+        return KEY_NODE + "{" + nodeId + "}";
     }
 
-    /**
-     * 反序列化。格式: nodeId|host|port|k=v|...
-     */
-    private static NodeInformation deserializeNode(String val, String expectedNodeId) {
-        if (val == null || val.isEmpty()) return null;
-        String[] parts = val.split("\\|", 4);
-        if (parts.length < 3) {
-            log.warn("Invalid node data: {}", val);
+    private static String aliveMember(NodeLease lease) {
+        return lease.nodeId() + "|" + lease.incarnation();
+    }
+
+    private static NodeLease parseAliveMember(String member) {
+        int separator = member != null ? member.lastIndexOf('|') : -1;
+        if (separator <= 0 || separator == member.length() - 1) return null;
+        return new NodeLease(member.substring(0, separator), member.substring(separator + 1));
+    }
+
+    private static String serializeNodeLease(NodeInformation node, String incarnation) {
+        StringBuilder value = new StringBuilder(incarnation)
+                .append('|').append(node.getNodeId())
+                .append('|').append(node.getHost())
+                .append('|').append(node.getPort());
+        for (Map.Entry<String, String> entry : node.getAttrs().entrySet()) {
+            value.append('|').append(entry.getKey()).append('=').append(entry.getValue());
+        }
+        return value.toString();
+    }
+
+    private static NodeLeaseValue deserializeNodeLease(String value, String expectedNodeId) {
+        if (value == null || value.isBlank()) return null;
+        String[] parts = value.split("\\|", 5);
+        if (parts.length < 4 || parts[0].isBlank() || !expectedNodeId.equals(parts[1])) {
+            log.warn("Invalid node lease data for {}", expectedNodeId);
             return null;
         }
-
-        String nodeId = parts[0];
-        // 验证 nodeId 匹配
-        if (!nodeId.equals(expectedNodeId)) {
-            log.warn("Node ID mismatch: expected={}, got={}", expectedNodeId, nodeId);
-        }
-
-        String host = parts[1];
         int port;
         try {
-            port = Integer.parseInt(parts[2]);
+            port = Integer.parseInt(parts[3]);
         } catch (NumberFormatException e) {
-            log.warn("Invalid port in node data: {}", val);
+            log.warn("Invalid port in node lease data for {}", expectedNodeId);
             return null;
         }
-
-        // 解析 attrs
         Map<String, String> attrs = Collections.emptyMap();
-        if (parts.length > 3 && !parts[3].isEmpty()) {
-            String[] attrParts = parts[3].split("\\|");
-            attrs = new HashMap<>();
-            for (String attr : attrParts) {
-                int eq = attr.indexOf('=');
-                if (eq > 0) {
-                    attrs.put(attr.substring(0, eq), attr.substring(eq + 1));
-                }
+        if (parts.length == 5 && !parts[4].isBlank()) {
+            attrs = new LinkedHashMap<>();
+            for (String attribute : parts[4].split("\\|")) {
+                int equals = attribute.indexOf('=');
+                if (equals > 0) attrs.put(attribute.substring(0, equals), attribute.substring(equals + 1));
             }
         }
-
-        return new NodeInformation(nodeId, host, port, attrs);
+        return new NodeLeaseValue(parts[0], new NodeInformation(parts[1], parts[2], port, attrs));
     }
+
+    private static void requireNodeId(String nodeId) {
+        requireIdentity(nodeId, "nodeId");
+    }
+
+    private static String requireIdentity(String value, String name) {
+        if (value == null || value.isBlank() || value.indexOf('|') >= 0
+                || value.indexOf('{') >= 0 || value.indexOf('}') >= 0) {
+            throw new IllegalArgumentException(name + " must be non-blank and contain no Redis delimiters");
+        }
+        return value;
+    }
+
+    private record NodeLease(String nodeId, String incarnation) { }
+
+    private record NodeLeaseValue(String incarnation, NodeInformation node) { }
 }

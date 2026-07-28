@@ -145,7 +145,7 @@ final class MessageDeliveryWorkflow {
                 fields.put(LogFields.TARGET_NODE_ID, binding.nodeId());
                 fields.put(LogFields.REASON, "expired_route");
                 log.debug(StructuredLog.event(LogEvents.CLUSTER_STALE_ROUTE_REMOVED, fields));
-                routeTable.offline(toUserId, binding.nodeId(), binding.platformId(), binding.sessionId());
+                routeTable.offline(binding);
                 continue;
             }
             RouteNode route = binding.toRouteNode(localNodeId);
@@ -204,7 +204,7 @@ final class MessageDeliveryWorkflow {
         fields.put(LogFields.NODE_ID, localNodeId);
         fields.put(LogFields.REASON, "local_session_missing");
         log.warn(StructuredLog.event(LogEvents.CLUSTER_STALE_ROUTE_REMOVED, fields));
-        routeTable.offline(toUserId, binding.nodeId(), binding.platformId(), binding.sessionId());
+        routeTable.offline(binding);
     }
 
     private boolean matches(RouteBinding binding, IConnectionSession session) {

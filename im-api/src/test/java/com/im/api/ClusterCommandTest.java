@@ -10,7 +10,10 @@ class ClusterCommandTest {
 
     @Test
     void createsKickSessionCommandMessage() {
-        ClusterCommand command = ClusterCommand.kickSession("u1", PlatformID.IOS, "s1", "SAME_TERM_KICK");
+        ClusterCommand command = ClusterCommand.kickSession(
+                new RouteBinding("u1", "node-b", PlatformID.IOS, "s1", 0,
+                        "lease-b", "generation-b"),
+                "SAME_TERM_KICK");
         ClusterMessage message = ClusterMessage.fromCommand("node-a", command);
 
         assertEquals(ClusterMessageKind.CLUSTER_COMMAND, message.getKind());
@@ -18,6 +21,8 @@ class ClusterCommandTest {
         assertEquals("u1", message.getCommand().userId());
         assertEquals(PlatformID.IOS, message.getCommand().platformId());
         assertEquals("s1", message.getCommand().sessionId());
+        assertEquals("lease-b", message.getCommand().nodeIncarnation());
+        assertEquals("generation-b", message.getCommand().generation());
         assertNull(message.getMessage());
     }
 

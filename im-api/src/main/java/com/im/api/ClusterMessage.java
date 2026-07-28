@@ -16,31 +16,41 @@ public class ClusterMessage {
     private final ClusterCommand command;
     private final Integer targetPlatformId;
     private final String targetSessionId;
+    private final String targetNodeIncarnation;
+    private final String targetGeneration;
     private int ttl;
 
     public ClusterMessage(ClusterMessageKind kind, String fromNodeId, Message message) {
-        this(kind, fromNodeId, message, null, null, null, DEFAULT_TTL);
+        this(kind, fromNodeId, message, null, null, null, null, null, DEFAULT_TTL);
     }
 
     public ClusterMessage(ClusterMessageKind kind, String fromNodeId, Message message, int ttl) {
-        this(kind, fromNodeId, message, null, null, null, ttl);
+        this(kind, fromNodeId, message, null, null, null, null, null, ttl);
     }
 
     public ClusterMessage(ClusterMessageKind kind, String fromNodeId, Message message,
                           Integer targetPlatformId, String targetSessionId, int ttl) {
-        this(kind, fromNodeId, message, null, targetPlatformId, targetSessionId, ttl);
+        this(kind, fromNodeId, message, null, targetPlatformId, targetSessionId, null, null, ttl);
+    }
+
+    public ClusterMessage(ClusterMessageKind kind, String fromNodeId, Message message,
+                          Integer targetPlatformId, String targetSessionId, String targetNodeIncarnation,
+                          String targetGeneration, int ttl) {
+        this(kind, fromNodeId, message, null, targetPlatformId, targetSessionId,
+                targetNodeIncarnation, targetGeneration, ttl);
     }
 
     public ClusterMessage(ClusterMessageKind kind, String fromNodeId, ClusterCommand command) {
-        this(kind, fromNodeId, null, command, null, null, DEFAULT_TTL);
+        this(kind, fromNodeId, null, command, null, null, null, null, DEFAULT_TTL);
     }
 
     public ClusterMessage(ClusterMessageKind kind, String fromNodeId, ClusterCommand command, int ttl) {
-        this(kind, fromNodeId, null, command, null, null, ttl);
+        this(kind, fromNodeId, null, command, null, null, null, null, ttl);
     }
 
     private ClusterMessage(ClusterMessageKind kind, String fromNodeId, Message message, ClusterCommand command,
-                           Integer targetPlatformId, String targetSessionId, int ttl) {
+                           Integer targetPlatformId, String targetSessionId, String targetNodeIncarnation,
+                           String targetGeneration, int ttl) {
         this.kind = Objects.requireNonNull(kind, "kind");
         this.fromNodeId = Objects.requireNonNull(fromNodeId, "fromNodeId");
         if (kind == ClusterMessageKind.USER_MESSAGE) {
@@ -48,11 +58,15 @@ public class ClusterMessage {
             this.command = null;
             this.targetPlatformId = targetPlatformId;
             this.targetSessionId = normalizeSessionId(targetSessionId);
+            this.targetNodeIncarnation = normalizeIdentity(targetNodeIncarnation);
+            this.targetGeneration = normalizeIdentity(targetGeneration);
         } else {
             this.message = message;
             this.command = Objects.requireNonNull(command, "command");
             this.targetPlatformId = null;
             this.targetSessionId = null;
+            this.targetNodeIncarnation = null;
+            this.targetGeneration = null;
         }
         this.ttl = ttl;
     }
@@ -67,7 +81,8 @@ public class ClusterMessage {
     public static ClusterMessage fromMessage(String fromNodeId, Message message, RouteBinding targetBinding) {
         Objects.requireNonNull(targetBinding, "targetBinding");
         return new ClusterMessage(ClusterMessageKind.USER_MESSAGE, fromNodeId, message,
-                targetBinding.platformId(), targetBinding.sessionId(), DEFAULT_TTL);
+                targetBinding.platformId(), targetBinding.sessionId(), targetBinding.nodeIncarnation(),
+                targetBinding.generation(), DEFAULT_TTL);
     }
 
     public static ClusterMessage fromCommand(String fromNodeId, ClusterCommand command) {
@@ -98,8 +113,20 @@ public class ClusterMessage {
         return targetSessionId;
     }
 
+    public String getTargetNodeIncarnation() {
+        return targetNodeIncarnation;
+    }
+
+    public String getTargetGeneration() {
+        return targetGeneration;
+    }
+
     public boolean hasTargetBinding() {
         return targetPlatformId != null && targetSessionId != null;
+    }
+
+    public boolean hasExactTargetBinding() {
+        return hasTargetBinding() && targetNodeIncarnation != null && targetGeneration != null;
     }
 
     public int getTtl() {
@@ -128,5 +155,9 @@ public class ClusterMessage {
 
     private static String normalizeSessionId(String sessionId) {
         return sessionId == null || sessionId.isBlank() ? null : sessionId;
+    }
+
+    private static String normalizeIdentity(String identity) {
+        return identity == null || identity.isBlank() ? null : identity;
     }
 }

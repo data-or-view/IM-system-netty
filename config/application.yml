@@ -64,7 +64,7 @@ im:
 
   route:
     # Full-stop migration only; see docs/route-redis-key-layout-migration.md.
-    redis-key-layout: "tagged-v3"
+    redis-key-layout: "tagged-v4"
 
   # ── Webhook ──
   webhook:

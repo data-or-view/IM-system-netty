@@ -102,7 +102,8 @@ class DispatcherFactoryTest {
                 new ClusterDependencies(
                         fake(IRouteTable.class),
                         fake(IClusterMessageBus.class),
-                        fake(com.im.api.INodeDiscovery.class)),
+                        fake(com.im.api.INodeDiscovery.class),
+                        "test-incarnation"),
                 new BusinessDependencies(
                         authenticator,
                         fake(RetryExecutor.class),

@@ -53,6 +53,25 @@ public interface IRouteTable {
     void offline(String userId, String nodeId, int platformId, String sessionId);
 
     /**
+     * Removes the concrete route binding observed by a caller.
+     *
+     * <p>Cluster implementations must treat this as a conditional removal:
+     * a binding replaced after it was observed must remain online.</p>
+     */
+    default void offline(RouteBinding binding) {
+        offlineIfCurrent(binding);
+    }
+
+    /**
+     * Atomically removes an observed binding only while its complete identity is current.
+     *
+     * @return {@code true} only when that exact binding was removed
+     */
+    default boolean offlineIfCurrent(RouteBinding binding) {
+        return false;
+    }
+
+    /**
      * 查找用户所在节点（第一条匹配记录）。
      * 如果用户在本节点登录，返回 local RouteNode。
      */
@@ -132,6 +151,11 @@ public interface IRouteTable {
      * @return 删除的路由绑定数量
      */
     default int cleanupNodeRoutes(String nodeId) {
+        return 0;
+    }
+
+    /** Cleans routes owned by one exact process incarnation of a node. */
+    default int cleanupNodeRoutes(String nodeId, String nodeIncarnation) {
         return 0;
     }
 }

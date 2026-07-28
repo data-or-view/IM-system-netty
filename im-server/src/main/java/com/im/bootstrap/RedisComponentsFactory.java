@@ -31,12 +31,15 @@ final class RedisComponentsFactory {
     static ClusterDependencies createCluster(RedisConfiguration redisConfig,
                                              SessionManager sessionManager,
                                              String nodeId,
+                                             String nodeIncarnation,
                                              String routeRedisKeyLayout) {
-        IRouteTable routeTable = new RedisRouteTable(redisConfig, sessionManager, nodeId, routeRedisKeyLayout);
+        IRouteTable routeTable = new RedisRouteTable(
+                redisConfig, sessionManager, nodeId, nodeIncarnation, routeRedisKeyLayout);
         return new ClusterDependencies(
                 routeTable,
                 new RedisClusterMessageBus(redisConfig, nodeId),
-                nodeDiscovery(redisConfig, routeTable));
+                nodeDiscovery(redisConfig, routeTable, nodeIncarnation),
+                nodeIncarnation);
     }
 
     static NodeInformation buildNodeInformation(Config config, String nodeId) {
@@ -55,8 +58,9 @@ final class RedisComponentsFactory {
         return new NodeInformation(nodeId, host, servicePort, attrs);
     }
 
-    private static INodeDiscovery nodeDiscovery(RedisConfiguration redisConfig, IRouteTable routeTable) {
-        return new RedisNodeDiscovery(redisConfig, routeTable);
+    private static INodeDiscovery nodeDiscovery(RedisConfiguration redisConfig, IRouteTable routeTable,
+                                                String nodeIncarnation) {
+        return new RedisNodeDiscovery(redisConfig, routeTable, nodeIncarnation);
     }
 
     private static RedisConfiguration buildRedisConfig(Config config) {

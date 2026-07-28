@@ -37,12 +37,13 @@ final class ConsumerComponentsFactory {
                 config.getLong("im.mq.failure-compensation.claim-lease-ms", 30000));
 
         ClusterDeliveryHandler clusterDeliveryHandler = new ClusterDeliveryHandler(
-                runtime.sessionManager(), cluster.routeTable(), nodeId);
+                runtime.sessionManager(), cluster.routeTable(), nodeId, cluster.nodeIncarnation());
         cluster.clusterMessageBus().subscribe(ClusterMessageTopics.SINGLE_CHAT, clusterDeliveryHandler);
         cluster.clusterMessageBus().subscribe(ClusterMessageTopics.GROUP_CHAT, clusterDeliveryHandler);
         cluster.clusterMessageBus().subscribe(
                 ClusterMessageTopics.CLUSTER_COMMAND,
-                new ClusterSessionCommandHandler(runtime.sessionManager()));
+                new ClusterSessionCommandHandler(runtime.sessionManager(), cluster.routeTable(),
+                        nodeId, cluster.nodeIncarnation()));
         cluster.clusterMessageBus().subscribe(ClusterMessageTopics.CLUSTER_COMMAND, runtime.friendApplyNotifier()::handleClusterPush);
         cluster.clusterMessageBus().subscribe(ClusterMessageTopics.CLUSTER_COMMAND, runtime.groupApplyNotifier()::handleClusterPush);
         cluster.clusterMessageBus().subscribe(ClusterMessageTopics.CLUSTER_COMMAND, runtime.systemMessageNotifier()::handleClusterPush);

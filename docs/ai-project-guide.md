@@ -324,11 +324,11 @@ DeliveryConsumer
 
 | Key | 说明 |
 |-----|------|
-| `im:route:v3:{u-encodedUserId}` | 用户到节点/session 的权威路由 Hash；value 含 generation，编码后的 userId hash tag 与 online key 共用 Redis Cluster slot。 |
-| `im:online:v3:{u-encodedUserId}` | 用户平台在线状态 ZSet。 |
-| `im:route-node:v3:<nodeId>` | 含 generation 的节点反向路由索引，可从权威 route hash 重建。迁移要求见 [route-redis-key-layout-migration.md](route-redis-key-layout-migration.md)。 |
-| `im:node:{nodeId}` | 节点信息，30s TTL。 |
-| `im:nodes:alive` | 活跃节点集合。 |
+| `im:route:v4:{u-encodedUserId}` | 用户到节点/session 的权威路由 Hash；value 含 node incarnation 和 binding generation，编码后的 userId hash tag 与 online key 共用 Redis Cluster slot。 |
+| `im:online:v4:{u-encodedUserId}` | 用户平台在线状态 ZSet。 |
+| `im:route-node:v4:<nodeId>` | 含 node incarnation 和 binding generation 的节点反向路由索引，可从权威 route hash 重建。迁移要求见 [route-redis-key-layout-migration.md](route-redis-key-layout-migration.md)。 |
+| `im:node:{nodeId}` | 节点租约，值以 `nodeIncarnation\|nodeId\|host\|port` 开头，30s TTL。 |
+| `im:nodes:alive` | 活跃节点租约集合，member 为 `nodeId\|nodeIncarnation`。 |
 | `im:node:{nodeId}:msgs` | 节点专属 Pub/Sub 频道。 |
 | `im:bus:broadcast` | 广播频道。 |
 | `im:seq:{conversationId}` | 会话序号。 |

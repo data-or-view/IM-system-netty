@@ -5,6 +5,8 @@ import com.im.api.ClusterMessage;
 import com.im.api.ClusterMessageKind;
 import com.im.api.ClusterMessageHandler;
 import com.im.api.ISessionManager;
+import com.im.api.IRouteTable;
+import com.im.api.RouteBinding;
 import com.im.core.observability.LogEvents;
 import com.im.core.observability.LogFields;
 import com.im.core.observability.StructuredLog;
@@ -19,9 +21,20 @@ public class ClusterSessionCommandHandler implements ClusterMessageHandler {
     private static final Logger log = LoggerFactory.getLogger(ClusterSessionCommandHandler.class);
 
     private final ISessionManager sessionManager;
+    private final IRouteTable routeTable;
+    private final String localNodeId;
+    private final String localNodeIncarnation;
 
     public ClusterSessionCommandHandler(ISessionManager sessionManager) {
+        this(sessionManager, null, null, null);
+    }
+
+    public ClusterSessionCommandHandler(ISessionManager sessionManager, IRouteTable routeTable,
+                                        String localNodeId, String localNodeIncarnation) {
         this.sessionManager = sessionManager;
+        this.routeTable = routeTable;
+        this.localNodeId = localNodeId;
+        this.localNodeIncarnation = localNodeIncarnation;
     }
 
     @Override
@@ -34,8 +47,10 @@ public class ClusterSessionCommandHandler implements ClusterMessageHandler {
         switch (command.type()) {
             case KICK_USER -> sessionManager.forceLogout(command.userId());
             case KICK_PLATFORM -> sessionManager.forceLogout(command.userId(), command.platformId());
-            case KICK_SESSION -> sessionManager.forceLogoutSession(
-                    command.userId(), command.platformId(), command.sessionId());
+            case KICK_SESSION -> {
+                if (!claimCurrentBinding(command)) return;
+                sessionManager.forceLogoutSession(command.userId(), command.platformId(), command.sessionId());
+            }
             case PUSH_EVENT -> {
                 return;
             }
@@ -47,5 +62,16 @@ public class ClusterSessionCommandHandler implements ClusterMessageHandler {
                 LogFields.SESSION_ID, command.sessionId(),
                 LogFields.SOURCE_NODE_ID, msg.getFromNodeId(),
                 LogFields.REASON, command.reason()));
+    }
+
+    private boolean claimCurrentBinding(ClusterCommand command) {
+        if (routeTable == null || localNodeId == null || localNodeIncarnation == null
+                || !command.hasExactBindingIdentity()
+                || !localNodeIncarnation.equals(command.nodeIncarnation())) {
+            return false;
+        }
+        RouteBinding expected = new RouteBinding(command.userId(), localNodeId, command.platformId(),
+                command.sessionId(), 0, command.nodeIncarnation(), command.generation());
+        return routeTable.offlineIfCurrent(expected);
     }
 }

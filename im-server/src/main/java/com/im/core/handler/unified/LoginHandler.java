@@ -137,8 +137,7 @@ public class LoginHandler implements RequestHandler {
             if (loginStrategy == MultiLoginStrategy.REJECT_NEW) {
                 continue;
             }
-            ClusterCommand command = ClusterCommand.kickSession(
-                    userId, binding.platformId(), binding.sessionId(), loginStrategy.name());
+            ClusterCommand command = ClusterCommand.kickSession(binding, loginStrategy.name());
             clusterMessageBus.sendToNode(ClusterMessage.fromCommand(localNodeId, command), binding.nodeId());
             log.info(StructuredLog.event(LogEvents.REMOTE_KICK_SENT,
                     LogFields.USER_ID, userId,

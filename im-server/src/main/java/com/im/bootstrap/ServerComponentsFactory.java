@@ -58,6 +58,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
+import java.util.UUID;
 import java.util.function.Function;
 
 /**
@@ -84,12 +85,13 @@ final class ServerComponentsFactory {
         DatabaseComponentsFactory.initDatabase(config);
 
         String nodeId = config.getString("im.node.id", BootstrapDefaults.NODE_ID);
+        String nodeIncarnation = UUID.randomUUID().toString();
         // Keep construction order explicit here: these objects are tightly coupled by
         // lifecycle and cluster guarantees, so hiding them behind broader abstractions
         // makes a single production dependency change harder to audit.
         RuntimeDependencies runtime = createRuntime(config, redisConfig, nodeId);
         ClusterDependencies cluster = RedisComponentsFactory.createCluster(
-                redisConfig, runtime.sessionManager(), nodeId, routeRedisKeyLayout(config));
+                redisConfig, runtime.sessionManager(), nodeId, nodeIncarnation, routeRedisKeyLayout(config));
         runtime.friendApplyNotifier().bindCluster(cluster.routeTable(), cluster.clusterMessageBus());
         runtime.groupApplyNotifier().bindCluster(cluster.routeTable(), cluster.clusterMessageBus());
         runtime.systemMessageNotifier().bindCluster(cluster.routeTable(), cluster.clusterMessageBus());
@@ -242,7 +244,7 @@ final class ServerComponentsFactory {
 
     static String routeRedisKeyLayout(Config config) {
         return config.getString("im.route.redis-key-layout",
-                config.getString("im.route.redis.key.layout", "tagged-v3"));
+                config.getString("im.route.redis.key.layout", "tagged-v4"));
     }
 
     static void requireCallCredentials(Config config) {

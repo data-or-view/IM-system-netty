@@ -73,7 +73,7 @@ public class ClusterAwareMessageRevokeNotifier {
         long now = System.currentTimeMillis();
         for (RouteBinding binding : bindings) {
             if (binding.isExpired(now)) {
-                routeTable.offline(userId, binding.nodeId(), binding.platformId(), binding.sessionId());
+                routeTable.offline(binding);
                 continue;
             }
             if (localNodeId.equals(binding.nodeId())) {

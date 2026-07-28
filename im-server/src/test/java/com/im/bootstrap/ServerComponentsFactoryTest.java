@@ -32,13 +32,13 @@ class ServerComponentsFactoryTest {
 
     @Test
     void resolvesVersionedClusterSafeRouteLayoutFromConfiguration() {
-        assertEquals("tagged-v3", ServerComponentsFactory.routeRedisKeyLayout(new TestConfig(Map.of())));
+        assertEquals("tagged-v4", ServerComponentsFactory.routeRedisKeyLayout(new TestConfig(Map.of())));
         assertEquals("legacy", ServerComponentsFactory.routeRedisKeyLayout(
                 new TestConfig(Map.of("im.route.redis.key.layout", "legacy"))));
-        assertEquals("tagged-v3", ServerComponentsFactory.routeRedisKeyLayout(
+        assertEquals("tagged-v4", ServerComponentsFactory.routeRedisKeyLayout(
                 new TestConfig(Map.of(
                         "im.route.redis.key.layout", "legacy",
-                        "im.route.redis-key-layout", "tagged-v3"))));
+                        "im.route.redis-key-layout", "tagged-v4"))));
     }
 
     private record TestConfig(Map<String, String> values) implements Config {

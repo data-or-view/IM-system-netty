@@ -27,15 +27,32 @@ class ClusterDeliveryHandlerTest {
         IConnectionSession session = sessionManager.createSession(new NettyConnectionRef(activeOtherSession));
         sessionManager.bindUser(session.getConnection().connectionId(), "u2", PlatformID.IOS);
         TestRouteTable routeTable = new TestRouteTable();
-        ClusterDeliveryHandler handler = new ClusterDeliveryHandler(sessionManager, routeTable, "node-b");
+        ClusterDeliveryHandler handler = new ClusterDeliveryHandler(
+                sessionManager, routeTable, "node-b", "lease-b");
 
         handler.handle(com.im.api.ClusterMessage.fromMessage(
                 "node-a",
                 Message.createSingle("u1", "u2", "c1", 101, "{\"text\":\"hi\"}", 1),
-                new RouteBinding("u2", "node-b", PlatformID.IOS, "missing-session", 0)));
+                new RouteBinding("u2", "node-b", PlatformID.IOS, "missing-session", 0,
+                        "lease-b", "generation-b")));
 
         assertNull(activeOtherSession.readOutbound(), "non-target sessions must not receive stale targeted messages");
-        assertEquals(List.of("u2|node-b|1|missing-session"), routeTable.offlineCalls);
+        assertEquals(List.of("u2|node-b|1|missing-session|lease-b|generation-b"), routeTable.offlineCalls);
+    }
+
+    @Test
+    void removesExactTargetRouteWhenUserHasNoLocalSessions() {
+        TestRouteTable routeTable = new TestRouteTable();
+        ClusterDeliveryHandler handler = new ClusterDeliveryHandler(
+                new SessionManager(), routeTable, "node-b", "lease-b");
+
+        handler.handle(com.im.api.ClusterMessage.fromMessage(
+                "node-a",
+                Message.createSingle("u1", "u2", "c1", 101, "{\"text\":\"hi\"}", 1),
+                new RouteBinding("u2", "node-b", PlatformID.IOS, "missing-session", 0,
+                        "lease-b", "generation-b")));
+
+        assertEquals(List.of("u2|node-b|1|missing-session|lease-b|generation-b"), routeTable.offlineCalls);
     }
 
     private static final class TestRouteTable implements IRouteTable {
@@ -46,6 +63,12 @@ class ClusterDeliveryHandlerTest {
         @Override
         public void offline(String userId, String nodeId, int platformId, String sessionId) {
             offlineCalls.add(userId + "|" + nodeId + "|" + platformId + "|" + sessionId);
+        }
+
+        @Override
+        public void offline(RouteBinding binding) {
+            offlineCalls.add(binding.userId() + "|" + binding.nodeId() + "|" + binding.platformId()
+                    + "|" + binding.sessionId() + "|" + binding.nodeIncarnation() + "|" + binding.generation());
         }
 
         @Override public RouteNode lookup(String userId) { return null; }

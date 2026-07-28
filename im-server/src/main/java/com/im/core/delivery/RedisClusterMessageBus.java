@@ -58,10 +58,14 @@ public class RedisClusterMessageBus implements IClusterMessageBus {
     private static final String FIELD_MESSAGE = "message";
     private static final String FIELD_TARGET_PLATFORM_ID = "targetPlatformId";
     private static final String FIELD_TARGET_SESSION_ID = "targetSessionId";
+    private static final String FIELD_TARGET_NODE_INCARNATION = "targetNodeIncarnation";
+    private static final String FIELD_TARGET_GENERATION = "targetGeneration";
     private static final String FIELD_COMMAND_TYPE = "type";
     private static final String FIELD_COMMAND_USER_ID = "userId";
     private static final String FIELD_COMMAND_PLATFORM_ID = "platformId";
     private static final String FIELD_COMMAND_SESSION_ID = "sessionId";
+    private static final String FIELD_COMMAND_NODE_INCARNATION = "nodeIncarnation";
+    private static final String FIELD_COMMAND_GENERATION = "generation";
     private static final String FIELD_COMMAND_REASON = "reason";
     private static final String FIELD_COMMAND_PAYLOAD = "payload";
 
@@ -257,6 +261,8 @@ public class RedisClusterMessageBus implements IClusterMessageBus {
             if (msg.hasTargetBinding()) {
                 root.put(FIELD_TARGET_PLATFORM_ID, msg.getTargetPlatformId());
                 root.put(FIELD_TARGET_SESSION_ID, msg.getTargetSessionId());
+                root.put(FIELD_TARGET_NODE_INCARNATION, msg.getTargetNodeIncarnation());
+                root.put(FIELD_TARGET_GENERATION, msg.getTargetGeneration());
             }
         }
 
@@ -286,8 +292,10 @@ public class RedisClusterMessageBus implements IClusterMessageBus {
                 ? ((Number) root.get(FIELD_TARGET_PLATFORM_ID)).intValue()
                 : null;
         String targetSessionId = (String) root.get(FIELD_TARGET_SESSION_ID);
+        String targetNodeIncarnation = (String) root.get(FIELD_TARGET_NODE_INCARNATION);
+        String targetGeneration = (String) root.get(FIELD_TARGET_GENERATION);
         return new ClusterMessage(kind, fromNodeId, Message.fromJsonMap(msgMap),
-                targetPlatformId, targetSessionId, ttl);
+                targetPlatformId, targetSessionId, targetNodeIncarnation, targetGeneration, ttl);
     }
 
     private static Map<String, Object> commandToMap(ClusterCommand command) {
@@ -296,6 +304,8 @@ public class RedisClusterMessageBus implements IClusterMessageBus {
         map.put(FIELD_COMMAND_USER_ID, command.userId());
         map.put(FIELD_COMMAND_PLATFORM_ID, command.platformId());
         map.put(FIELD_COMMAND_SESSION_ID, command.sessionId());
+        map.put(FIELD_COMMAND_NODE_INCARNATION, command.nodeIncarnation());
+        map.put(FIELD_COMMAND_GENERATION, command.generation());
         map.put(FIELD_COMMAND_REASON, command.reason());
         map.put(FIELD_COMMAND_PAYLOAD, command.payload());
         return map;
@@ -308,10 +318,13 @@ public class RedisClusterMessageBus implements IClusterMessageBus {
                 ClusterCommand.ANY_PLATFORM_ID)).intValue();
         String sessionId = (String) map.getOrDefault(FIELD_COMMAND_SESSION_ID,
                 ClusterCommand.DEFAULT_SESSION_ID);
+        String nodeIncarnation = (String) map.get(FIELD_COMMAND_NODE_INCARNATION);
+        String generation = (String) map.get(FIELD_COMMAND_GENERATION);
         String reason = (String) map.get(FIELD_COMMAND_REASON);
         @SuppressWarnings("unchecked")
         Map<String, Object> payload = (Map<String, Object>) map.getOrDefault(FIELD_COMMAND_PAYLOAD, Map.of());
-        return new ClusterCommand(type, userId, platformId, sessionId, reason, payload);
+        return new ClusterCommand(type, userId, platformId, sessionId,
+                nodeIncarnation, generation, reason, payload);
     }
 
     // ── 工具 ──

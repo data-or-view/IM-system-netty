@@ -6,5 +6,6 @@ import com.im.api.IRouteTable;
 
 record ClusterDependencies(IRouteTable routeTable,
                            IClusterMessageBus clusterMessageBus,
-                           INodeDiscovery nodeDiscovery) {
+                           INodeDiscovery nodeDiscovery,
+                           String nodeIncarnation) {
 }

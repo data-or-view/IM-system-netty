@@ -278,8 +278,8 @@ public abstract class BaseE2ETest {
             try (StatefulRedisConnection<String, String> conn = client.connect()) {
                 for (String uid : userIds) {
                     String hashTag = routeUserHashTag(uid);
-                    conn.sync().del("im:route:v3:" + hashTag, "im:online:v3:" + hashTag);
-                    log.info("Redis cleanup: removed tagged-v3 route and online keys for userId={}", uid);
+                    conn.sync().del("im:route:v4:" + hashTag, "im:online:v4:" + hashTag);
+                    log.info("Redis cleanup: removed tagged-v4 route and online keys for userId={}", uid);
                 }
             }
             client.shutdown();

@@ -6,6 +6,7 @@ import com.im.api.IConnectionSession;
 import com.im.api.IRouteTable;
 import com.im.api.ISessionManager;
 import com.im.api.Message;
+import com.im.api.RouteBinding;
 import com.im.core.observability.LogEvents;
 import com.im.core.observability.LogFields;
 import com.im.core.observability.MessageObservability;
@@ -38,15 +39,22 @@ public class ClusterDeliveryHandler implements ClusterMessageHandler {
     private final ISessionManager sessionManager;
     private final IRouteTable routeTable;
     private final String localNodeId;
+    private final String localNodeIncarnation;
 
     public ClusterDeliveryHandler(ISessionManager sessionManager) {
-        this(sessionManager, null, null);
+        this(sessionManager, null, null, null);
     }
 
     public ClusterDeliveryHandler(ISessionManager sessionManager, IRouteTable routeTable, String localNodeId) {
+        this(sessionManager, routeTable, localNodeId, null);
+    }
+
+    public ClusterDeliveryHandler(ISessionManager sessionManager, IRouteTable routeTable,
+                                  String localNodeId, String localNodeIncarnation) {
         this.sessionManager = sessionManager;
         this.routeTable = routeTable;
         this.localNodeId = localNodeId;
+        this.localNodeIncarnation = localNodeIncarnation;
     }
 
     @Override
@@ -71,11 +79,22 @@ public class ClusterDeliveryHandler implements ClusterMessageHandler {
             log.warn(StructuredLog.event(LogEvents.CLUSTER_HANDLER_FAILED, fields));
             return;
         }
+        if (clusterMsg.hasTargetBinding()
+                && (!clusterMsg.hasExactTargetBinding()
+                || !clusterMsg.getTargetNodeIncarnation().equals(localNodeIncarnation))) {
+            Map<String, Object> fields = fields(clusterMsg, message);
+            fields.put(LogFields.REASON, "stale_or_incomplete_target_binding");
+            log.warn(StructuredLog.event(LogEvents.CLUSTER_HANDLER_FAILED, fields));
+            return;
+        }
         log.info(StructuredLog.event(LogEvents.CLUSTER_DELIVERY_RECEIVED, fields(clusterMsg, message)));
 
         // 查找本节点上该用户的所有活跃 session（多端在线）
         List<IConnectionSession> sessions = sessionManager.getSessionsByUserId(toUserId);
         if (sessions.isEmpty()) {
+            if (clusterMsg.hasTargetBinding()) {
+                removeStaleTargetRoute(toUserId, clusterMsg);
+            }
             Map<String, Object> fields = fields(clusterMsg, message);
             fields.put(LogFields.TO_USER_ID, toUserId);
             log.info(StructuredLog.event(LogEvents.CLUSTER_DELIVERY_NO_LOCAL_SESSION, fields));
@@ -113,10 +132,12 @@ public class ClusterDeliveryHandler implements ClusterMessageHandler {
     }
 
     private void removeStaleTargetRoute(String userId, ClusterMessage clusterMsg) {
-        if (routeTable == null || localNodeId == null || clusterMsg.getTargetPlatformId() == null) {
+        if (routeTable == null || localNodeId == null || !clusterMsg.hasExactTargetBinding()) {
             return;
         }
-        routeTable.offline(userId, localNodeId, clusterMsg.getTargetPlatformId(), clusterMsg.getTargetSessionId());
+        routeTable.offline(new RouteBinding(userId, localNodeId, clusterMsg.getTargetPlatformId(),
+                clusterMsg.getTargetSessionId(), 0, clusterMsg.getTargetNodeIncarnation(),
+                clusterMsg.getTargetGeneration()));
         Map<String, Object> fields = fields(clusterMsg, clusterMsg.getMessage());
         fields.put(LogFields.TO_USER_ID, userId);
         fields.put(LogFields.PLATFORM_ID, clusterMsg.getTargetPlatformId());
