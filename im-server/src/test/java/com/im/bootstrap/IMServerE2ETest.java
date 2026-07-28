@@ -141,7 +141,7 @@ class IMServerE2ETest {
             try (StatefulRedisConnection<String, String> conn = client.connect()) {
                 for (String uid : userIds) {
                     String hashTag = routeUserHashTag(uid);
-                    conn.sync().del("im:route:v2:" + hashTag, "im:online:v2:" + hashTag);
+                    conn.sync().del("im:route:v3:" + hashTag, "im:online:v3:" + hashTag);
                 }
             }
             client.shutdown();

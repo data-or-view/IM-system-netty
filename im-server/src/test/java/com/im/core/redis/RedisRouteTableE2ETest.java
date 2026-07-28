@@ -2,13 +2,20 @@ package com.im.core.redis;
 
 import com.im.api.PlatformID;
 import com.im.core.session.SessionManager;
+import io.lettuce.core.cluster.SlotHash;
+import io.lettuce.core.cluster.api.sync.RedisAdvancedClusterCommands;
+import io.lettuce.core.cluster.models.partitions.RedisClusterNode;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -27,7 +34,7 @@ class RedisRouteTableE2ETest {
     void removingOneSamePlatformBindingKeepsPlatformOnlineUntilLastBindingLeaves() {
         RedisConfiguration redis = redisOrSkip();
         String userId = "route-user-" + UUID.randomUUID();
-        RedisRouteTable routes = new RedisRouteTable(redis, new SessionManager(), "node-a", "tagged-v2");
+        RedisRouteTable routes = new RedisRouteTable(redis, new SessionManager(), "node-a", "tagged-v3");
         try {
             routes.online(userId, "node-a", PlatformID.WEB, "session-a");
             routes.online(userId, "node-b", PlatformID.WEB, "session-b");
@@ -49,7 +56,7 @@ class RedisRouteTableE2ETest {
     void concurrentRemovalKeepsSamePlatformOnlineWhenOneBindingSurvives() throws Exception {
         RedisConfiguration redis = redisOrSkip();
         String userId = "route-race-user-" + UUID.randomUUID();
-        RedisRouteTable routes = new RedisRouteTable(redis, new SessionManager(), "node-a", "tagged-v2");
+        RedisRouteTable routes = new RedisRouteTable(redis, new SessionManager(), "node-a", "tagged-v3");
         try {
             routes.online(userId, "node-a", PlatformID.WEB, "session-a");
             routes.online(userId, "node-b", PlatformID.WEB, "session-b");
@@ -75,9 +82,9 @@ class RedisRouteTableE2ETest {
         RedisConfiguration bindingRedis = redisOrSkip();
         String nodeId = "route-cleanup-node-" + UUID.randomUUID();
         RedisRouteTable cleanupRoutes = new RedisRouteTable(
-                cleanupRedis, new SessionManager(), "cleanup-client", "tagged-v2");
+                cleanupRedis, new SessionManager(), "cleanup-client", "tagged-v3");
         RedisRouteTable bindingRoutes = new RedisRouteTable(
-                bindingRedis, new SessionManager(), "binding-client", "tagged-v2");
+                bindingRedis, new SessionManager(), "binding-client", "tagged-v3");
         int seededBindings = 80;
         String newUserId = "route-new-user-" + UUID.randomUUID();
         try {
@@ -108,25 +115,22 @@ class RedisRouteTableE2ETest {
     }
 
     @Test
-    void cleanupSnapshotCannotRemoveSameBindingReregisteredWithNewGeneration() {
+    void realCleanupSnapshotCannotRemoveBindingReregisteredBeforeStaleRenew() {
         RedisConfiguration redis = redisOrSkip();
         String nodeId = "route-generation-node-" + UUID.randomUUID();
         String userId = "route-generation-user-" + UUID.randomUUID();
         String field = PlatformID.WEB + ":same-session";
-        RedisRouteTable routes = new RedisRouteTable(redis, new SessionManager(), "client", "tagged-v2");
+        RedisRouteTable routes = new RedisRouteTable(redis, new SessionManager(), nodeId, "tagged-v3");
         try {
             routes.online(userId, nodeId, PlatformID.WEB, "same-session");
-            String indexKey = "im:route-node:v2:" + nodeId;
-            String staleMember = nodeIndexMembers(redis, indexKey).stream().findFirst().orElseThrow();
+            String indexKey = "im:route-node:v3:" + nodeId;
+            java.util.Set<String> cleanupSnapshot = nodeIndexMembers(redis, indexKey);
+            String staleRouteValue = routeValue(redis, userId, field);
 
             routes.online(userId, nodeId, PlatformID.WEB, "same-session");
-            try (CloseableRedisCommands commands = redis.createSyncCommands()) {
-                var sync = commands.<io.lettuce.core.cluster.api.sync.RedisClusterCommands<String, String>>sync();
-                for (String current : nodeIndexMembers(redis, indexKey)) sync.srem(indexKey, current);
-                sync.sadd(indexKey, staleMember);
-            }
+            assertFalse(routes.renewRouteBinding(userId, PlatformID.WEB, "same-session", staleRouteValue));
 
-            assertEquals(0, routes.cleanupNodeRoutes(nodeId));
+            assertEquals(0, routes.cleanupNodeRoutes(nodeId, cleanupSnapshot));
             assertTrue(routes.lookupAllBindings(userId).stream()
                     .anyMatch(binding -> "same-session".equals(binding.sessionId())));
         } finally {
@@ -136,26 +140,175 @@ class RedisRouteTableE2ETest {
     }
 
     @Test
-    void taggedLayoutRejectsLegacyKeysAndConflictingRuntimeMarker() {
+    void restartRebuildsCurrentReverseIndexAfterCrossSlotRegistrationFailure() {
+        RedisConfiguration redis = redisOrSkip();
+        String nodeId = "route-recovery-node-" + UUID.randomUUID();
+        String userId = "route-recovery-user-" + UUID.randomUUID();
+        String memberPrefix = userId + "|" + PlatformID.WEB + ":recovery-session|";
+        RedisRouteTable routes = new RedisRouteTable(redis, new SessionManager(), nodeId, "tagged-v3");
+        try {
+            routes.online(userId, nodeId, PlatformID.WEB, "recovery-session");
+            removeNodeIndexMembersWithPrefix(redis, nodeId, memberPrefix);
+            assertFalse(nodeIndexContainsPrefix(redis, nodeId, memberPrefix));
+
+            new RedisRouteTable(redis, new SessionManager(), nodeId, "tagged-v3");
+
+            assertTrue(nodeIndexContainsPrefix(redis, nodeId, memberPrefix));
+            assertTrue(routes.lookupAllBindings(userId).stream()
+                    .anyMatch(binding -> "recovery-session".equals(binding.sessionId())));
+        } finally {
+            routes.offline(userId, nodeId, PlatformID.WEB, "recovery-session");
+            redis.close();
+        }
+    }
+
+    @Test
+    void cleanupFindsCurrentRouteWhenCrossSlotReverseIndexWriteWasLost() {
+        RedisConfiguration redis = redisOrSkip();
+        String nodeId = "route-cleanup-recovery-node-" + UUID.randomUUID();
+        String userId = "route-cleanup-recovery-user-" + UUID.randomUUID();
+        String memberPrefix = userId + "|" + PlatformID.WEB + ":recovery-session|";
+        RedisRouteTable routes = new RedisRouteTable(redis, new SessionManager(), "cleanup-client", "tagged-v3");
+        try {
+            routes.online(userId, nodeId, PlatformID.WEB, "recovery-session");
+            removeNodeIndexMembersWithPrefix(redis, nodeId, memberPrefix);
+
+            assertEquals(1, routes.cleanupNodeRoutes(nodeId));
+            assertTrue(routes.lookupAllBindings(userId).isEmpty());
+        } finally {
+            routes.offline(userId, nodeId, PlatformID.WEB, "recovery-session");
+            redis.close();
+        }
+    }
+
+    @Test
+    void clusterScanReconcilesAndCleansRoutesFromEveryMaster() {
+        RedisConfiguration redis = redisOrSkip();
+        try {
+            Assumptions.assumeTrue(redis.isClusterMode(),
+                    "multi-master route scan test requires IM_E2E_REDIS_CLUSTER_NODES");
+            String nodeId = "route-all-masters-node-" + UUID.randomUUID();
+            List<String> userIds = userIdsOnEveryClusterMaster(redis);
+            RedisRouteTable routes = new RedisRouteTable(redis, new SessionManager(), nodeId, "tagged-v3");
+            try {
+                for (String userId : userIds) {
+                    routes.online(userId, nodeId, PlatformID.WEB, "all-masters-session");
+                }
+                removeNodeIndexMembersWithPrefix(redis, nodeId, "");
+
+                new RedisRouteTable(redis, new SessionManager(), nodeId, "tagged-v3");
+
+                for (String userId : userIds) {
+                    assertTrue(nodeIndexContainsPrefix(redis, nodeId,
+                            userId + "|" + PlatformID.WEB + ":all-masters-session|"));
+                }
+
+                removeNodeIndexMembersWithPrefix(redis, nodeId, "");
+                assertEquals(userIds.size(), routes.cleanupNodeRoutes(nodeId));
+                for (String userId : userIds) {
+                    assertTrue(routes.lookupAllBindings(userId).isEmpty());
+                }
+            } finally {
+                for (String userId : userIds) {
+                    routes.offline(userId, nodeId, PlatformID.WEB, "all-masters-session");
+                }
+            }
+        } finally {
+            redis.close();
+        }
+    }
+
+    @Test
+    void renewAfterOfflineCannotRecreatePlatformOnlineState() {
+        RedisConfiguration redis = redisOrSkip();
+        String nodeId = "route-offline-node-" + UUID.randomUUID();
+        String userId = "route-offline-user-" + UUID.randomUUID();
+        RedisRouteTable routes = new RedisRouteTable(redis, new SessionManager(), nodeId, "tagged-v3");
+        try {
+            routes.online(userId, nodeId, PlatformID.WEB, "offline-session");
+            routes.setOnline(userId, PlatformID.WEB);
+            routes.offline(userId, nodeId, PlatformID.WEB, "offline-session");
+
+            routes.renewOnline(userId, PlatformID.WEB, "offline-session");
+
+            assertTrue(routes.lookupAllBindings(userId).isEmpty());
+            assertFalse(routes.getOnlinePlatforms(userId).contains(PlatformID.WEB));
+        } finally {
+            routes.offline(userId, nodeId, PlatformID.WEB, "offline-session");
+            redis.close();
+        }
+    }
+
+    @Test
+    void concurrentRenewAndOfflineConvergeToRouteAndPlatformOffline() throws Exception {
+        RedisConfiguration redis = redisOrSkip();
+        String nodeId = "route-renew-race-node-" + UUID.randomUUID();
+        RedisRouteTable routes = new RedisRouteTable(redis, new SessionManager(), nodeId, "tagged-v3");
+        try {
+            for (int attempt = 0; attempt < 20; attempt++) {
+                String userId = "route-renew-race-user-" + UUID.randomUUID();
+                routes.online(userId, nodeId, PlatformID.WEB, "race-session");
+                routes.setOnline(userId, PlatformID.WEB);
+
+                concurrently(List.of(
+                        () -> routes.renewOnline(userId, PlatformID.WEB, "race-session"),
+                        () -> routes.offline(userId, nodeId, PlatformID.WEB, "race-session")));
+
+                assertTrue(routes.lookupAllBindings(userId).isEmpty(), "route remained on attempt " + attempt);
+                assertFalse(routes.getOnlinePlatforms(userId).contains(PlatformID.WEB),
+                        "platform remained online on attempt " + attempt);
+            }
+        } finally {
+            redis.close();
+        }
+    }
+
+    @Test
+    void taggedV3LayoutRejectsV2MarkerKeysFormatsAndConflictingRuntimeMarker() {
         RedisConfiguration redis = redisOrSkip();
         String legacyKey = "route:legacy-user-" + UUID.randomUUID();
+        String v2Key = "im:route:v2:{u-" + UUID.randomUUID() + "}";
+        String malformedV3Key = "im:route:v3:{u-" + UUID.randomUUID() + "}";
+        String malformedV3IndexKey = "im:route-node:v3:malformed-" + UUID.randomUUID();
         try (CloseableRedisCommands commands = redis.createSyncCommands()) {
             var sync = commands.<io.lettuce.core.cluster.api.sync.RedisClusterCommands<String, String>>sync();
             sync.set("im:route:key-layout", "tagged-v2");
+            assertThrows(IllegalStateException.class, () ->
+                    new RedisRouteTable(redis, new SessionManager(), "node-a", "tagged-v3"));
+
+            sync.del("im:route:key-layout");
             sync.hset(legacyKey, "1:legacy", "old-node|1");
             assertThrows(IllegalStateException.class, () ->
-                    new RedisRouteTable(redis, new SessionManager(), "node-a", "tagged-v2"));
+                    new RedisRouteTable(redis, new SessionManager(), "node-a", "tagged-v3"));
             sync.del(legacyKey);
 
+            sync.hset(v2Key, "1:old", "old-node|1");
+            assertThrows(IllegalStateException.class, () ->
+                    new RedisRouteTable(redis, new SessionManager(), "node-a", "tagged-v3"));
+            sync.del(v2Key);
+
+            sync.hset(malformedV3Key, "1:no-generation", "node-a|9999999999999");
+            assertThrows(IllegalStateException.class, () ->
+                    new RedisRouteTable(redis, new SessionManager(), "node-a", "tagged-v3"));
+            sync.del(malformedV3Key);
+
+            sync.sadd(malformedV3IndexKey, "user|5:session");
+            assertThrows(IllegalStateException.class, () ->
+                    new RedisRouteTable(redis, new SessionManager(), "node-a", "tagged-v3"));
+            sync.del(malformedV3IndexKey);
+
             RedisRouteTable routes = new RedisRouteTable(
-                    redis, new SessionManager(), "node-a", "tagged-v2");
-            sync.set("im:route:key-layout", "draining");
+                    redis, new SessionManager(), "node-a", "tagged-v3");
+            sync.set("im:route:key-layout", "draining-v3");
             assertThrows(IllegalStateException.class, () ->
                     routes.online("route-marker-user-" + UUID.randomUUID(), "node-a", PlatformID.WEB, "session"));
         } finally {
             try (CloseableRedisCommands commands = redis.createSyncCommands()) {
                 var sync = commands.<io.lettuce.core.cluster.api.sync.RedisClusterCommands<String, String>>sync();
                 sync.del(legacyKey);
+                sync.del(v2Key);
+                sync.del(malformedV3Key);
+                sync.del(malformedV3IndexKey);
                 sync.del("im:route:key-layout");
             }
             redis.close();
@@ -227,7 +380,7 @@ class RedisRouteTableE2ETest {
         try (CloseableRedisCommands commands = redis.createSyncCommands()) {
             var sync = commands.<io.lettuce.core.cluster.api.sync.RedisClusterCommands<String, String>>sync();
             while (System.nanoTime() < deadline) {
-                Long size = sync.scard("im:route-node:v2:" + nodeId);
+                Long size = sync.scard("im:route-node:v3:" + nodeId);
                 if (size != null && size < initialSize) return;
                 Thread.onSpinWait();
             }
@@ -238,13 +391,59 @@ class RedisRouteTableE2ETest {
     private static boolean nodeIndexContainsPrefix(RedisConfiguration redis, String nodeId, String prefix) {
         try (CloseableRedisCommands commands = redis.createSyncCommands()) {
             return commands.<io.lettuce.core.cluster.api.sync.RedisClusterCommands<String, String>>sync()
-                    .smembers("im:route-node:v2:" + nodeId).stream().anyMatch(entry -> entry.startsWith(prefix));
+                    .smembers("im:route-node:v3:" + nodeId).stream().anyMatch(entry -> entry.startsWith(prefix));
         }
     }
 
     private static java.util.Set<String> nodeIndexMembers(RedisConfiguration redis, String key) {
         try (CloseableRedisCommands commands = redis.createSyncCommands()) {
             return commands.<io.lettuce.core.cluster.api.sync.RedisClusterCommands<String, String>>sync().smembers(key);
+        }
+    }
+
+    private static String routeValue(RedisConfiguration redis, String userId, String field) {
+        try (CloseableRedisCommands commands = redis.createSyncCommands()) {
+            return commands.<io.lettuce.core.cluster.api.sync.RedisClusterCommands<String, String>>sync()
+                    .hget(routeKey(userId), field);
+        }
+    }
+
+    private static List<String> userIdsOnEveryClusterMaster(RedisConfiguration redis) {
+        try (CloseableRedisCommands commands = redis.createSyncCommands()) {
+            RedisAdvancedClusterCommands<String, String> cluster =
+                    (RedisAdvancedClusterCommands<String, String>) commands.sync();
+            List<RedisClusterNode> masters = cluster.getStatefulConnection().getPartitions().stream()
+                    .filter(node -> node.is(RedisClusterNode.NodeFlag.UPSTREAM) && !node.hasNoSlots())
+                    .toList();
+            Assumptions.assumeTrue(masters.size() > 1, "route scan test requires multiple Redis masters");
+
+            Map<String, String> userIdByMaster = new LinkedHashMap<>();
+            for (int candidate = 0; candidate < 100_000 && userIdByMaster.size() < masters.size(); candidate++) {
+                String userId = "route-master-slot-user-" + candidate + "-" + UUID.randomUUID();
+                int slot = SlotHash.getSlot(routeKey(userId));
+                masters.stream()
+                        .filter(master -> master.hasSlot(slot))
+                        .findFirst()
+                        .ifPresent(master -> userIdByMaster.putIfAbsent(master.getNodeId(), userId));
+            }
+            assertEquals(masters.size(), userIdByMaster.size(),
+                    "failed to select a route hash slot on every Redis master");
+            return List.copyOf(userIdByMaster.values());
+        }
+    }
+
+    private static String routeKey(String userId) {
+        return "im:route:v3:{u-" + Base64.getUrlEncoder().withoutPadding()
+                .encodeToString(userId.getBytes(StandardCharsets.UTF_8)) + "}";
+    }
+
+    private static void removeNodeIndexMembersWithPrefix(RedisConfiguration redis, String nodeId, String prefix) {
+        String key = "im:route-node:v3:" + nodeId;
+        try (CloseableRedisCommands commands = redis.createSyncCommands()) {
+            var sync = commands.<io.lettuce.core.cluster.api.sync.RedisClusterCommands<String, String>>sync();
+            for (String member : sync.smembers(key)) {
+                if (member.startsWith(prefix)) sync.srem(key, member);
+            }
         }
     }
 }

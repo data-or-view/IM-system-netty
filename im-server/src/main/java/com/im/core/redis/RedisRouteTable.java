@@ -6,6 +6,9 @@ import com.im.api.PlatformID;
 import com.im.api.RouteBinding;
 import com.im.api.RouteNode;
 import com.im.common.exception.PersistenceExceptions;
+import io.lettuce.core.KeyScanCursor;
+import io.lettuce.core.ScanArgs;
+import io.lettuce.core.ScanCursor;
 import io.lettuce.core.ScriptOutputType;
 import io.lettuce.core.cluster.api.async.RedisClusterAsyncCommands;
 import io.lettuce.core.cluster.api.sync.RedisClusterCommands;
@@ -15,6 +18,7 @@ import org.slf4j.LoggerFactory;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -27,9 +31,9 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * 数据模型（Redis）：
  * <pre>
- *   im:route:v2:{u-&lt;base64url-user-id&gt;}  → {platformId:sessionId: nodeId|expireAt} (Hash, TTL=180s)
- *   im:online:v2:{u-&lt;base64url-user-id&gt;} → {platform: timestamp} (ZSet, TTL=180s)
- *   im:route-node:v2:&lt;node-id&gt;           → {userId|platformId:sessionId} (Set, TTL=210s)
+ *   im:route:v3:{u-&lt;base64url-user-id&gt;}  → {platformId:sessionId: nodeId|expireAt|generation} (Hash, TTL=180s)
+ *   im:online:v3:{u-&lt;base64url-user-id&gt;} → {platform: timestamp} (ZSet, TTL=180s)
+ *   im:route-node:v3:&lt;node-id&gt;           → {userId|platformId:sessionId|generation} (Set, TTL=210s)
  * </pre>
  *
  * Lua 脚本（set_online）：
@@ -51,21 +55,23 @@ public class RedisRouteTable implements IRouteTable {
     private static final long ROUTE_TTL_SECONDS = 180;
 
     /** 在线状态 ZSet key 前缀 */
-    private static final String KEY_ONLINE_PREFIX = "im:online:v2:";
+    private static final String KEY_ONLINE_PREFIX = "im:online:v3:";
 
     /** 路由 key 前缀 */
-    private static final String KEY_ROUTE_PREFIX = "im:route:v2:";
+    private static final String KEY_ROUTE_PREFIX = "im:route:v3:";
 
     /** 节点反向路由索引 key 前缀 */
-    private static final String KEY_ROUTE_NODE_PREFIX = "im:route-node:v2:";
+    private static final String KEY_ROUTE_NODE_PREFIX = "im:route-node:v3:";
 
     private static final String LEGACY_ONLINE_PREFIX = "online:";
     private static final String LEGACY_ROUTE_PREFIX = "route:";
     private static final String LEGACY_ROUTE_NODE_PREFIX = "route_node:";
+    private static final String V2_ONLINE_PREFIX = "im:online:v2:";
+    private static final String V2_ROUTE_PREFIX = "im:route:v2:";
+    private static final String V2_ROUTE_NODE_PREFIX = "im:route-node:v2:";
     private static final String LAYOUT_MARKER_KEY = "im:route:key-layout";
-    private static final String LEGACY_LAYOUT = "legacy";
-    private static final String DRAINING_LAYOUT = "draining";
-    private static final String TAGGED_LAYOUT = "tagged-v2";
+    private static final String DRAINING_LAYOUT = "draining-v3";
+    private static final String TAGGED_LAYOUT = "tagged-v3";
 
     /** 节点反向路由索引 TTL（秒），略长于 route TTL 便于节点过期清理 */
     private static final long ROUTE_NODE_INDEX_TTL_SECONDS = ROUTE_TTL_SECONDS + 30;
@@ -81,6 +87,43 @@ public class RedisRouteTable implements IRouteTable {
             return 1
             """;
 
+    private static final String LUA_REGISTER_ROUTE = """
+            local routeKey = KEYS[1]
+            local field = ARGV[1]
+            local routeValue = ARGV[2]
+            local ttl = tonumber(ARGV[3])
+            local previous = redis.call('hget', routeKey, field)
+            if previous and not string.match(previous, '^[^|]+|%d+|[^|]+$') then
+              return redis.error_reply('invalid tagged-v3 route value')
+            end
+            redis.call('hset', routeKey, field, routeValue)
+            redis.call('expire', routeKey, ttl)
+            return previous or ''
+            """;
+
+    private static final String LUA_RENEW_ROUTE = """
+            local routeKey = KEYS[1]
+            local onlineKey = KEYS[2]
+            local field = ARGV[1]
+            local expected = ARGV[2]
+            local replacement = ARGV[3]
+            local platformId = ARGV[4]
+            local now = tonumber(ARGV[5])
+            local expireAt = tonumber(ARGV[6])
+            local ttl = tonumber(ARGV[7])
+            local current = redis.call('hget', routeKey, field)
+            if current ~= expected then return 0 end
+            if not string.match(current, '^[^|]+|%d+|[^|]+$') then
+              return redis.error_reply('invalid tagged-v3 route value')
+            end
+            redis.call('hset', routeKey, field, replacement)
+            redis.call('expire', routeKey, ttl)
+            redis.call('zremrangebyscore', onlineKey, '-inf', now)
+            redis.call('zadd', onlineKey, expireAt, platformId)
+            redis.call('expire', onlineKey, ttl)
+            return 1
+            """;
+
     /** Deletes one route and only removes the platform when no live binding remains. */
     private static final String LUA_REMOVE_ROUTE = """
             local routeKey = KEYS[1]
@@ -93,11 +136,14 @@ public class RedisRouteTable implements IRouteTable {
             local ttl = tonumber(ARGV[6])
             local expectedGeneration = ARGV[7]
             local current = redis.call('hget', routeKey, field)
-            local removed = 0
+            local removedValue = ''
             local currentGeneration = current and string.match(current, '|([^|]+)$') or ''
+            if current ~= false and not string.match(current, '^[^|]+|%d+|[^|]+$') then
+              return redis.error_reply('invalid tagged-v3 route value')
+            end
             if current ~= false and string.sub(current, 1, string.len(expectedNode) + 1) == expectedNode .. '|'
                 and (expectedGeneration == '' or currentGeneration == expectedGeneration) then
-              removed = redis.call('hdel', routeKey, field)
+              if redis.call('hdel', routeKey, field) > 0 then removedValue = current end
             end
             local hasLiveBinding = false
             local entries = redis.call('hgetall', routeKey)
@@ -105,6 +151,9 @@ public class RedisRouteTable implements IRouteTable {
               local bindingField = entries[index]
               local bindingValue = entries[index + 1]
               if string.sub(bindingField, 1, string.len(platformPrefix)) == platformPrefix then
+                if not string.match(bindingValue, '^[^|]+|%d+|[^|]+$') then
+                  return redis.error_reply('invalid tagged-v3 route value')
+                end
                 local separator = string.find(bindingValue, '|', 1, true)
                 local generationSeparator = separator and string.find(bindingValue, '|', separator + 1, true)
                 local expiresAt = separator and tonumber(string.sub(bindingValue, separator + 1,
@@ -121,7 +170,7 @@ public class RedisRouteTable implements IRouteTable {
               redis.call('zrem', onlineKey, platformId)
               if redis.call('zcard', onlineKey) > 0 then redis.call('expire', onlineKey, ttl) end
             end
-            return removed
+            return removedValue
             """;
 
     /** Redis 前缀 Lua 脚本：原子更新在线状态 */
@@ -182,6 +231,7 @@ public class RedisRouteTable implements IRouteTable {
         this.localNodeId = localNodeId;
         this.keyLayout = KeyLayout.parse(keyLayout);
         ensureLayoutReady();
+        reconcileNodeIndex(localNodeId);
         log.info("RedisRouteTable created: nodeId={}, keyLayout={}", localNodeId, this.keyLayout.value);
     }
 
@@ -200,16 +250,16 @@ public class RedisRouteTable implements IRouteTable {
         PersistenceExceptions.runRedis("route online", () -> {
             String key = routeKey(userId);
             String field = routeField(platformId, sessionId);
-            String previous = async.hget(key, field).toCompletableFuture().join();
             String generation = UUID.randomUUID().toString();
-            async.hset(key, field, routeValue(nodeId, routeExpireAt(), generation))
+            String previous = (String) async.eval(LUA_REGISTER_ROUTE, ScriptOutputType.VALUE,
+                            new String[]{key}, field, routeValue(nodeId, routeExpireAt(), generation),
+                            String.valueOf(ROUTE_TTL_SECONDS))
                     .toCompletableFuture().join();
-            async.expire(key, ROUTE_TTL_SECONDS).toCompletableFuture().join();
-            if (previous != null) {
+            addNodeRouteIndex(nodeId, userId, field, generation);
+            if (previous != null && !previous.isBlank()) {
                 RouteValue old = parseRouteValue(previous);
                 if (nodeId.equals(old.nodeId())) removeNodeRouteIndex(nodeId, userId, field, old.generation());
             }
-            addNodeRouteIndex(nodeId, userId, field, generation);
             log.info("Route online: userId={}, node={}, platform={}, session={}",
                     userId, nodeId, platformId, sessionId);
             return null;
@@ -221,10 +271,11 @@ public class RedisRouteTable implements IRouteTable {
         requireLayoutReady(userId);
         PersistenceExceptions.runRedis("route offline", () -> {
             String field = routeField(platformId, sessionId);
-            String current = async.hget(routeKey(userId), field).toCompletableFuture().join();
-            String generation = current != null ? parseRouteValue(current).generation() : "";
-            boolean removed = removeRoute(userId, nodeId, platformId, field, generation);
-            removeNodeRouteIndex(nodeId, userId, field, generation);
+            String removedValue = removeRoute(userId, nodeId, platformId, field, "");
+            boolean removed = removedValue != null && !removedValue.isBlank();
+            if (removed) {
+                removeNodeRouteIndex(nodeId, userId, field, parseRouteValue(removedValue).generation());
+            }
             log.info("Route offline: userId={}, node={}, platform={}, session={}, removed={}",
                     userId, nodeId, platformId, sessionId, removed);
             return null;
@@ -356,6 +407,7 @@ public class RedisRouteTable implements IRouteTable {
     @Override
     public Map<String, List<Integer>> batchGetOnlinePlatforms(List<String> userIds) {
         requireLayoutMarker();
+        userIds.forEach(this::requireNoPreV3UserState);
         return PersistenceExceptions.runRedis("batch get online platforms", () -> {
             long now = System.currentTimeMillis();
             Map<String, List<Integer>> result = new ConcurrentHashMap<>();
@@ -389,12 +441,11 @@ public class RedisRouteTable implements IRouteTable {
     public void renewOnline(String userId, int platformId, String sessionId) {
         requireLayoutReady(userId);
         PersistenceExceptions.runRedis("renew online platform", () -> {
-            String key = onlineKey(userId);
-            long expireAt = System.currentTimeMillis() + ONLINE_TTL_SECONDS * 1000L;
-
-            async.zadd(key, expireAt, String.valueOf(platformId)).toCompletableFuture().join();
-            async.expire(key, ONLINE_TTL_SECONDS).toCompletableFuture().join();
-            renewRouteBinding(userId, platformId, sessionId);
+            String field = routeField(platformId, sessionId);
+            String currentValue = async.hget(routeKey(userId), field).toCompletableFuture().join();
+            if (currentValue != null && !currentValue.isBlank()) {
+                renewRouteBinding(userId, platformId, sessionId, currentValue);
+            }
             log.trace("Online renewed: userId={}, platform={}, session={}", userId, platformId, sessionId);
             return null;
         });
@@ -403,37 +454,34 @@ public class RedisRouteTable implements IRouteTable {
     @Override
     public int cleanupNodeRoutes(String nodeId) {
         requireLayoutMarker();
-        if (Long.valueOf(1L).equals(async.exists(LEGACY_ROUTE_NODE_PREFIX + nodeId).toCompletableFuture().join())) {
-            throw new IllegalStateException("legacy route-node index exists for node " + nodeId
-                    + "; tagged-v2 cleanup refused");
+        if (Long.valueOf(1L).equals(async.exists(LEGACY_ROUTE_NODE_PREFIX + nodeId).toCompletableFuture().join())
+                || Long.valueOf(1L).equals(async.exists(V2_ROUTE_NODE_PREFIX + nodeId).toCompletableFuture().join())) {
+            throw new IllegalStateException("pre-v3 route-node index exists for node " + nodeId
+                    + "; tagged-v3 cleanup refused");
         }
         return PersistenceExceptions.runRedis("cleanup node routes", () -> {
             String nodeIndexKey = nodeIndexKey(nodeId);
-            Set<String> entries = async.smembers(nodeIndexKey).toCompletableFuture().join();
-            int count = 0;
-            if (entries != null) {
-                for (String entry : entries) {
-                    int separator = entry.indexOf('|');
-                    int generationSeparator = entry.lastIndexOf('|');
-                    if (separator <= 0 || generationSeparator <= separator || generationSeparator == entry.length() - 1) continue;
-                    String userId = entry.substring(0, separator);
-                    String field = entry.substring(separator + 1, generationSeparator);
-                    String generation = entry.substring(generationSeparator + 1);
-                    int fieldSeparator = field.indexOf(':');
-                    if (fieldSeparator <= 0 || fieldSeparator == field.length() - 1) continue;
-                    int platformId;
-                    try {
-                        platformId = Integer.parseInt(field.substring(0, fieldSeparator));
-                    } catch (NumberFormatException ignored) {
-                        continue;
-                    }
-                    if (removeRoute(userId, nodeId, platformId, field, generation)) count++;
-                    removeNodeRouteIndex(nodeId, userId, field, generation);
-                }
-            }
+            Set<String> entries = new LinkedHashSet<>();
+            Set<String> indexed = async.smembers(nodeIndexKey).toCompletableFuture().join();
+            if (indexed != null) entries.addAll(indexed);
+            entries.addAll(authoritativeNodeEntries(nodeId, false));
+            int count = cleanupNodeRoutes(nodeId, entries);
             log.info("Node routes cleaned: nodeId={}, removed={}", nodeId, count);
             return count;
         });
+    }
+
+    int cleanupNodeRoutes(String nodeId, Set<String> entries) {
+        int count = 0;
+        for (String entry : entries) {
+            NodeIndexEntry parsed = parseNodeIndexEntry(entry);
+            int platformId = Integer.parseInt(parsed.field().substring(0, parsed.field().indexOf(':')));
+            String removedValue = removeRoute(parsed.userId(), nodeId, platformId,
+                    parsed.field(), parsed.generation());
+            if (removedValue != null && !removedValue.isBlank()) count++;
+            removeNodeRouteIndex(nodeId, parsed.userId(), parsed.field(), parsed.generation());
+        }
+        return count;
     }
 
     private static String routeField(int platformId, String sessionId) {
@@ -449,22 +497,23 @@ public class RedisRouteTable implements IRouteTable {
         return System.currentTimeMillis() + ROUTE_TTL_SECONDS * 1000L;
     }
 
-    private void renewRouteBinding(String userId, int platformId, String sessionId) {
+    boolean renewRouteBinding(String userId, int platformId, String sessionId, String expectedValue) {
         String routeKey = routeKey(userId);
         String field = routeField(platformId, sessionId);
-        async.hget(routeKey, field).thenAccept(currentValue -> {
-            if (currentValue == null || currentValue.isBlank()) {
-                return;
-            }
-            RouteBinding current = toRouteBinding(userId, field, currentValue);
-            String generation = parseRouteValue(currentValue).generation();
-            async.hset(routeKey, field, routeValue(current.nodeId(), routeExpireAt(), generation))
-                    .thenCompose(ignored -> async.expire(routeKey, ROUTE_TTL_SECONDS))
-                    .thenCompose(ignored -> async.sadd(nodeIndexKey(current.nodeId()),
-                            nodeIndexEntry(userId, field, generation)))
-                    .thenCompose(ignored -> async.expire(nodeIndexKey(current.nodeId()),
-                            ROUTE_NODE_INDEX_TTL_SECONDS));
-        });
+        RouteValue current = parseRouteValue(expectedValue);
+        if (!localNodeId.equals(current.nodeId())) return false;
+        long expireAt = routeExpireAt();
+        String nextGeneration = UUID.randomUUID().toString();
+        String replacement = routeValue(current.nodeId(), expireAt, nextGeneration);
+        Number renewed = (Number) async.eval(LUA_RENEW_ROUTE, ScriptOutputType.INTEGER,
+                        new String[]{routeKey, onlineKey(userId)}, field, expectedValue, replacement,
+                        String.valueOf(platformId), String.valueOf(System.currentTimeMillis()),
+                        String.valueOf(expireAt), String.valueOf(ROUTE_TTL_SECONDS))
+                .toCompletableFuture().join();
+        if (renewed == null || renewed.longValue() == 0) return false;
+        addNodeRouteIndex(current.nodeId(), userId, field, nextGeneration);
+        removeNodeRouteIndex(current.nodeId(), userId, field, current.generation());
+        return true;
     }
 
     private void addNodeRouteIndex(String nodeId, String userId, String routeField, String generation) {
@@ -479,13 +528,12 @@ public class RedisRouteTable implements IRouteTable {
                 .toCompletableFuture().join();
     }
 
-    private boolean removeRoute(String userId, String nodeId, int platformId, String field, String generation) {
+    private String removeRoute(String userId, String nodeId, int platformId, String field, String generation) {
         long now = System.currentTimeMillis();
-        Number removed = (Number) async.eval(LUA_REMOVE_ROUTE, ScriptOutputType.INTEGER,
+        return (String) async.eval(LUA_REMOVE_ROUTE, ScriptOutputType.VALUE,
                 new String[]{routeKey(userId), onlineKey(userId)}, field, nodeId, platformId + ":",
                 String.valueOf(platformId), String.valueOf(now), String.valueOf(ONLINE_TTL_SECONDS), generation)
                 .toCompletableFuture().join();
-        return removed != null && removed.longValue() > 0;
     }
 
     private static String routeKey(String userId) {
@@ -505,16 +553,10 @@ public class RedisRouteTable implements IRouteTable {
     }
 
     private static RouteBinding toRouteBinding(String userId, String routeField, String routeValue) {
+        validateRouteField(routeField);
         String[] parts = routeField.split(":", 2);
-        int platformId = PlatformID.DEFAULT;
-        if (parts.length > 0) {
-            try {
-                platformId = Integer.parseInt(parts[0]);
-            } catch (NumberFormatException ignored) {
-                platformId = PlatformID.DEFAULT;
-            }
-        }
-        String sessionId = parts.length > 1 ? parts[1] : "default";
+        int platformId = Integer.parseInt(parts[0]);
+        String sessionId = parts[1];
         RouteValue value = parseRouteValue(routeValue);
         String nodeId = value.nodeId();
         long expireAt = value.expireAt();
@@ -522,44 +564,118 @@ public class RedisRouteTable implements IRouteTable {
     }
 
     private static RouteValue parseRouteValue(String routeValue) {
-        String[] valueParts = routeValue.split("\\|", 3);
-        String nodeId = valueParts[0];
-        long expireAt = 0;
-        if (valueParts.length > 1) {
-            try {
-                expireAt = Long.parseLong(valueParts[1]);
-            } catch (NumberFormatException ignored) {
-                expireAt = 0;
-            }
+        if (routeValue == null) {
+            throw new IllegalStateException("route value must include node, expiry, and generation");
         }
-        String generation = valueParts.length > 2 ? valueParts[2] : "";
+        String[] valueParts = routeValue.split("\\|", -1);
+        if (valueParts.length != 3 || valueParts[0].isBlank() || valueParts[2].isBlank()) {
+            throw new IllegalStateException("route value must include node, expiry, and generation: " + routeValue);
+        }
+        String nodeId = valueParts[0];
+        long expireAt;
+        try {
+            expireAt = Long.parseLong(valueParts[1]);
+        } catch (NumberFormatException e) {
+            throw new IllegalStateException("route expiry must be an epoch millisecond: " + routeValue, e);
+        }
+        String generation = valueParts[2];
         return new RouteValue(nodeId, expireAt, generation);
+    }
+
+    private static void validateRouteField(String routeField) {
+        if (routeField == null) {
+            throw new IllegalStateException("route field must include platform and session");
+        }
+        int separator = routeField.indexOf(':');
+        if (separator <= 0 || separator == routeField.length() - 1) {
+            throw new IllegalStateException("route field must include platform and session: " + routeField);
+        }
+        try {
+            Integer.parseInt(routeField.substring(0, separator));
+        } catch (NumberFormatException e) {
+            throw new IllegalStateException("route field platform must be numeric: " + routeField, e);
+        }
+    }
+
+    private static NodeIndexEntry parseNodeIndexEntry(String member) {
+        int separator = member != null ? member.indexOf('|') : -1;
+        int generationSeparator = member != null ? member.lastIndexOf('|') : -1;
+        if (separator <= 0 || generationSeparator <= separator || generationSeparator == member.length() - 1) {
+            throw new IllegalStateException("route reverse-index member must include generation: " + member);
+        }
+        String field = member.substring(separator + 1, generationSeparator);
+        validateRouteField(field);
+        return new NodeIndexEntry(member.substring(0, separator), field,
+                member.substring(generationSeparator + 1));
     }
 
     private record RouteValue(String nodeId, long expireAt, String generation) { }
 
+    private record NodeIndexEntry(String userId, String field, String generation) { }
+
+    private void reconcileNodeIndex(String nodeId) {
+        if (nodeId == null || nodeId.isBlank()) return;
+        for (String member : authoritativeNodeEntries(nodeId, true)) {
+            NodeIndexEntry entry = parseNodeIndexEntry(member);
+            addNodeRouteIndex(nodeId, entry.userId(), entry.field(), entry.generation());
+        }
+    }
+
+    private Set<String> authoritativeNodeEntries(String nodeId, boolean liveOnly) {
+        Set<String> entries = new LinkedHashSet<>();
+        long now = System.currentTimeMillis();
+        try (CloseableRedisCommands redis = redisConfig.createSyncCommands()) {
+            RedisClusterCommands<String, String> commands = redis.sync();
+            for (String key : scanKeys(commands, KEY_ROUTE_PREFIX + "*")) {
+                String userId = userIdFromRouteKey(key);
+                for (Map.Entry<String, String> route : commands.hgetall(key).entrySet()) {
+                    validateRouteField(route.getKey());
+                    RouteValue value = parseRouteValue(route.getValue());
+                    if (nodeId.equals(value.nodeId()) && (!liveOnly || value.expireAt() > now)) {
+                        entries.add(nodeIndexEntry(userId, route.getKey(), value.generation()));
+                    }
+                }
+            }
+        }
+        return entries;
+    }
+
+    private static String userIdFromRouteKey(String key) {
+        if (key == null || !key.startsWith(KEY_ROUTE_PREFIX + "{u-") || !key.endsWith("}")) {
+            throw new IllegalStateException("invalid tagged-v3 route key: " + key);
+        }
+        String encoded = key.substring((KEY_ROUTE_PREFIX + "{u-").length(), key.length() - 1);
+        try {
+            return new String(Base64.getUrlDecoder().decode(encoded), StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalStateException("invalid tagged-v3 route user hash tag: " + key, e);
+        }
+    }
+
     private void ensureLayoutReady() {
-        if (keyLayout != KeyLayout.TAGGED_V2) {
-            throw new IllegalStateException("legacy route Redis key layout is unsafe; use tagged-v2");
+        if (keyLayout != KeyLayout.TAGGED_V3) {
+            throw new IllegalStateException("legacy route Redis key layout is unsafe; use tagged-v3");
         }
         try (CloseableRedisCommands redis = redisConfig.createSyncCommands()) {
             RedisClusterCommands<String, String> commands = redis.sync();
             for (int attempt = 0; attempt < 4; attempt++) {
                 String current = commands.get(LAYOUT_MARKER_KEY);
-                if (hasAnyLegacyState(commands)) {
-                    throw new IllegalStateException("legacy route/online keys must expire before tagged-v2 cutover");
+                if (hasAnyPreV3State(commands)) {
+                    throw new IllegalStateException("pre-v3 route state must expire before tagged-v3 cutover");
                 }
+                validateV3State(commands);
                 if (TAGGED_LAYOUT.equals(current)) return;
-                if (current != null && !LEGACY_LAYOUT.equals(current) && !DRAINING_LAYOUT.equals(current)) {
+                if (current != null && !DRAINING_LAYOUT.equals(current)) {
                     throw new IllegalStateException("unsupported route Redis key layout marker: " + current);
                 }
                 if (!DRAINING_LAYOUT.equals(current)) {
                     if (!compareAndSetLayout(commands, current, DRAINING_LAYOUT)) continue;
                 }
-                if (hasAnyLegacyState(commands)) {
-                    throw new IllegalStateException("legacy route state appeared during tagged-v2 cutover; "
+                if (hasAnyPreV3State(commands)) {
+                    throw new IllegalStateException("pre-v3 route state appeared during tagged-v3 cutover; "
                             + "old binaries must remain stopped");
                 }
+                validateV3State(commands);
                 if (compareAndSetLayout(commands, DRAINING_LAYOUT, TAGGED_LAYOUT)
                         || TAGGED_LAYOUT.equals(commands.get(LAYOUT_MARKER_KEY))) {
                     return;
@@ -571,17 +687,23 @@ public class RedisRouteTable implements IRouteTable {
 
     private void requireLayoutReady(String userId) {
         requireLayoutMarker();
+        requireNoPreV3UserState(userId);
+    }
+
+    private void requireNoPreV3UserState(String userId) {
         if (Long.valueOf(1L).equals(async.exists(LEGACY_ROUTE_PREFIX + userId).toCompletableFuture().join())
-                || Long.valueOf(1L).equals(async.exists(LEGACY_ONLINE_PREFIX + userId).toCompletableFuture().join())) {
-            throw new IllegalStateException("legacy route state exists for user " + userId
-                    + "; tagged-v2 operation refused");
+                || Long.valueOf(1L).equals(async.exists(LEGACY_ONLINE_PREFIX + userId).toCompletableFuture().join())
+                || Long.valueOf(1L).equals(async.exists(V2_ROUTE_PREFIX + userHashTag(userId)).toCompletableFuture().join())
+                || Long.valueOf(1L).equals(async.exists(V2_ONLINE_PREFIX + userHashTag(userId)).toCompletableFuture().join())) {
+            throw new IllegalStateException("pre-v3 route state exists for user " + userId
+                    + "; tagged-v3 operation refused");
         }
     }
 
     private void requireLayoutMarker() {
         String current = async.get(LAYOUT_MARKER_KEY).toCompletableFuture().join();
         if (!TAGGED_LAYOUT.equals(current)) {
-            throw new IllegalStateException("route Redis key layout marker changed; tagged-v2 operation refused");
+            throw new IllegalStateException("route Redis key layout marker changed; tagged-v3 operation refused");
         }
     }
 
@@ -592,10 +714,40 @@ public class RedisRouteTable implements IRouteTable {
         return Long.valueOf(1L).equals(changed);
     }
 
-    private static boolean hasAnyLegacyState(RedisClusterCommands<String, String> commands) {
-        return !commands.keys(LEGACY_ROUTE_PREFIX + "*").isEmpty()
-                || !commands.keys(LEGACY_ONLINE_PREFIX + "*").isEmpty()
-                || !commands.keys(LEGACY_ROUTE_NODE_PREFIX + "*").isEmpty();
+    private static boolean hasAnyPreV3State(RedisClusterCommands<String, String> commands) {
+        return !scanKeys(commands, LEGACY_ROUTE_PREFIX + "*").isEmpty()
+                || !scanKeys(commands, LEGACY_ONLINE_PREFIX + "*").isEmpty()
+                || !scanKeys(commands, LEGACY_ROUTE_NODE_PREFIX + "*").isEmpty()
+                || !scanKeys(commands, V2_ROUTE_PREFIX + "*").isEmpty()
+                || !scanKeys(commands, V2_ONLINE_PREFIX + "*").isEmpty()
+                || !scanKeys(commands, V2_ROUTE_NODE_PREFIX + "*").isEmpty();
+    }
+
+    private static void validateV3State(RedisClusterCommands<String, String> commands) {
+        for (String key : scanKeys(commands, KEY_ROUTE_PREFIX + "*")) {
+            userIdFromRouteKey(key);
+            for (Map.Entry<String, String> entry : commands.hgetall(key).entrySet()) {
+                validateRouteField(entry.getKey());
+                parseRouteValue(entry.getValue());
+            }
+        }
+        for (String key : scanKeys(commands, KEY_ROUTE_NODE_PREFIX + "*")) {
+            for (String member : commands.smembers(key)) {
+                parseNodeIndexEntry(member);
+            }
+        }
+    }
+
+    private static Set<String> scanKeys(RedisClusterCommands<String, String> commands, String pattern) {
+        Set<String> keys = new LinkedHashSet<>();
+        ScanCursor cursor = ScanCursor.INITIAL;
+        ScanArgs args = new ScanArgs().match(pattern).limit(500);
+        do {
+            KeyScanCursor<String> result = commands.scan(cursor, args);
+            keys.addAll(result.getKeys());
+            cursor = result;
+        } while (!cursor.isFinished());
+        return keys;
     }
 
     private static String userHashTag(String userId) {
@@ -605,7 +757,7 @@ public class RedisRouteTable implements IRouteTable {
     }
 
     private enum KeyLayout {
-        TAGGED_V2(TAGGED_LAYOUT);
+        TAGGED_V3(TAGGED_LAYOUT);
 
         private final String value;
 
@@ -614,7 +766,7 @@ public class RedisRouteTable implements IRouteTable {
         }
 
         private static KeyLayout parse(String value) {
-            if (TAGGED_LAYOUT.equalsIgnoreCase(value)) return TAGGED_V2;
+            if (TAGGED_LAYOUT.equalsIgnoreCase(value)) return TAGGED_V3;
             throw new IllegalArgumentException("unsupported route Redis key layout: " + value);
         }
     }

@@ -242,7 +242,7 @@ final class ServerComponentsFactory {
 
     static String routeRedisKeyLayout(Config config) {
         return config.getString("im.route.redis-key-layout",
-                config.getString("im.route.redis.key.layout", "tagged-v2"));
+                config.getString("im.route.redis.key.layout", "tagged-v3"));
     }
 
     static void requireCallCredentials(Config config) {
