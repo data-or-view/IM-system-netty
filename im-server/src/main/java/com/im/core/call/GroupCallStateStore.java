@@ -4,9 +4,11 @@ public interface GroupCallStateStore {
 
     GroupCallSession getActiveByGroup(String groupId);
 
-    GroupCallSession createIfAbsent(GroupCallSession session);
+    GroupCallReservation reserve(GroupCallSession session);
 
-    GroupCallSession addParticipant(String groupId, String userId);
+    GroupCallSession activate(String groupId, String roomId, String sfuEndpoint, long now);
+
+    GroupCallAdmission admit(String groupId, String userId, int maxParticipants, long now);
 
     GroupCallSession removeParticipant(String groupId, String userId);
 

@@ -11,31 +11,58 @@ class InMemoryGroupCallStateStore implements GroupCallStateStore {
 
     @Override
     public GroupCallSession getActiveByGroup(String groupId) {
-        MutableSession session = sessions.get(groupId);
-        return session != null ? session.snapshot() : null;
+        synchronized (sessions) {
+            MutableSession session = sessions.get(groupId);
+            return session != null ? session.snapshot() : null;
+        }
     }
 
     @Override
-    public GroupCallSession createIfAbsent(GroupCallSession session) {
-        MutableSession existing = sessions.putIfAbsent(session.groupId(), new MutableSession(session));
-        return existing != null ? existing.snapshot() : session;
+    public GroupCallReservation reserve(GroupCallSession session) {
+        synchronized (sessions) {
+            MutableSession existing = sessions.get(session.groupId());
+            if (existing != null) {
+                return new GroupCallReservation(existing.snapshot(), false);
+            }
+            MutableSession created = new MutableSession(session);
+            sessions.put(session.groupId(), created);
+            return new GroupCallReservation(created.snapshot(), true);
+        }
     }
 
     @Override
-    public GroupCallSession addParticipant(String groupId, String userId) {
-        MutableSession session = sessions.get(groupId);
-        if (session == null) return null;
-        synchronized (session) {
-            session.participants.putIfAbsent(userId, System.currentTimeMillis());
+    public GroupCallSession activate(String groupId, String roomId, String sfuEndpoint, long now) {
+        synchronized (sessions) {
+            MutableSession session = sessions.get(groupId);
+            if (session == null || !session.base.roomId().equals(roomId)) return null;
+            session.base = new GroupCallSession(groupId, roomId, session.base.callType(),
+                    session.base.initiatorUserId(), sfuEndpoint, session.base.startedAt(), now,
+                    session.participants.size(), List.of(), false);
             return session.snapshot();
         }
     }
 
     @Override
+    public GroupCallAdmission admit(String groupId, String userId, int maxParticipants, long now) {
+        synchronized (sessions) {
+            MutableSession session = sessions.get(groupId);
+            if (session == null) return new GroupCallAdmission(null, false, false);
+            if (session.participants.containsKey(userId)) {
+                return new GroupCallAdmission(session.snapshot(), true, false);
+            }
+            if (maxParticipants > 0 && session.participants.size() >= maxParticipants) {
+                return new GroupCallAdmission(session.snapshot(), false, true);
+            }
+            session.participants.put(userId, now);
+            return new GroupCallAdmission(session.snapshot(), true, false);
+        }
+    }
+
+    @Override
     public GroupCallSession removeParticipant(String groupId, String userId) {
-        MutableSession session = sessions.get(groupId);
-        if (session == null) return null;
-        synchronized (session) {
+        synchronized (sessions) {
+            MutableSession session = sessions.get(groupId);
+            if (session == null) return null;
             session.participants.remove(userId);
             if (session.participants.isEmpty()) {
                 sessions.remove(groupId);
@@ -47,12 +74,14 @@ class InMemoryGroupCallStateStore implements GroupCallStateStore {
 
     @Override
     public GroupCallSession end(String groupId) {
-        MutableSession session = sessions.remove(groupId);
-        return session != null ? session.snapshot().markEnded() : null;
+        synchronized (sessions) {
+            MutableSession session = sessions.remove(groupId);
+            return session != null ? session.snapshot().markEnded() : null;
+        }
     }
 
     private static final class MutableSession {
-        private final GroupCallSession base;
+        private GroupCallSession base;
         private final Map<String, Long> participants = new LinkedHashMap<>();
 
         private MutableSession(GroupCallSession base) {

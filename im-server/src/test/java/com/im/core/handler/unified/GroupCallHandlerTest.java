@@ -13,6 +13,8 @@ import com.im.api.QueueMessageHandler;
 import com.im.api.RoomInformation;
 import com.im.core.handler.WebhookService;
 import com.im.core.call.GroupCallParticipant;
+import com.im.core.call.GroupCallAdmission;
+import com.im.core.call.GroupCallReservation;
 import com.im.core.call.GroupCallSession;
 import com.im.core.call.GroupCallManager;
 import com.im.core.call.GroupCallStateStore;
@@ -132,20 +134,33 @@ class GroupCallHandlerTest {
         @Override public GroupCallSession getActiveByGroup(String groupId) { return session; }
 
         @Override
-        public GroupCallSession createIfAbsent(GroupCallSession session) {
-            if (this.session != null) return this.session;
+        public GroupCallReservation reserve(GroupCallSession session) {
+            if (this.session != null) return new GroupCallReservation(this.session, false);
             this.session = session;
             participants.add(session.initiatorUserId());
+            return new GroupCallReservation(session, true);
+        }
+
+        @Override
+        public GroupCallSession activate(String groupId, String roomId, String sfuEndpoint, long now) {
+            if (session == null || !session.roomId().equals(roomId)) return null;
+            session = new GroupCallSession(session.groupId(), session.roomId(), session.callType(),
+                    session.initiatorUserId(), sfuEndpoint, session.startedAt(), now, session.participantCount(),
+                    session.participants(), false);
             return session;
         }
 
         @Override
-        public GroupCallSession addParticipant(String groupId, String userId) {
+        public GroupCallAdmission admit(String groupId, String userId, int maxParticipants, long now) {
+            if (session == null) return new GroupCallAdmission(null, false, false);
+            if (!participants.contains(userId) && maxParticipants > 0 && participants.size() >= maxParticipants) {
+                return new GroupCallAdmission(session, false, true);
+            }
             participants.add(userId);
             session = session.withParticipants(participants.stream()
-                    .map(user -> new GroupCallParticipant(user, System.currentTimeMillis()))
+                    .map(user -> new GroupCallParticipant(user, now))
                     .toList());
-            return session;
+            return new GroupCallAdmission(session, true, false);
         }
 
         @Override
@@ -159,6 +174,7 @@ class GroupCallHandlerTest {
 
         @Override
         public GroupCallSession end(String groupId) {
+            if (session == null) return null;
             GroupCallSession ended = session.markEnded();
             session = null;
             participants.clear();

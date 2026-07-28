@@ -22,7 +22,9 @@ import com.im.config.Config;
 import com.im.api.IPasswordHasher;
 import com.im.api.IUserCredentialStore;
 import com.im.core.call.CallStateManager;
+import com.im.core.call.GroupCallAdmission;
 import com.im.core.call.GroupCallManager;
+import com.im.core.call.GroupCallReservation;
 import com.im.core.call.GroupCallSession;
 import com.im.core.call.GroupCallStateStore;
 import com.im.core.dispatcher.ApiDispatcher;
@@ -152,13 +154,18 @@ class DispatcherFactoryTest {
         }
 
         @Override
-        public GroupCallSession createIfAbsent(GroupCallSession session) {
-            return session;
+        public GroupCallReservation reserve(GroupCallSession session) {
+            return new GroupCallReservation(session, true);
         }
 
         @Override
-        public GroupCallSession addParticipant(String groupId, String userId) {
+        public GroupCallSession activate(String groupId, String roomId, String sfuEndpoint, long now) {
             return null;
+        }
+
+        @Override
+        public GroupCallAdmission admit(String groupId, String userId, int maxParticipants, long now) {
+            return new GroupCallAdmission(null, false, false);
         }
 
         @Override

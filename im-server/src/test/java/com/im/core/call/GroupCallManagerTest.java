@@ -11,6 +11,13 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -104,9 +111,97 @@ class GroupCallManagerTest {
         assertThrows(ValidationException.class, () -> manager.start("u1", "g1", "screen"));
     }
 
+    @Test
+    void simultaneousStartsProduceOneReservationAndOneRoomCreation() throws Exception {
+        FakeGroupManager groups = new FakeGroupManager();
+        groups.members.put("g1", Set.of("u1", "u2"));
+        FakeCallManager calls = new FakeCallManager();
+        GroupCallManager manager = new GroupCallManager(groups, calls, new InMemoryGroupCallStateStore(), 16);
+
+        List<GroupCallSession> sessions = callConcurrently(2, () -> manager.start("u1", "g1", "video"));
+
+        assertEquals(1, sessions.stream().map(GroupCallSession::roomId).distinct().count());
+        assertEquals(1, calls.createRoomCalls.get());
+    }
+
+    @Test
+    void concurrentJoinNeverExceedsMaximumAndRetryIsIdempotent() throws Exception {
+        FakeGroupManager groups = new FakeGroupManager();
+        groups.members.put("g1", Set.of("owner", "u1", "u2", "u3", "u4", "u5", "u6", "u7"));
+        InMemoryGroupCallStateStore store = new InMemoryGroupCallStateStore();
+        GroupCallManager manager = new GroupCallManager(groups, new FakeCallManager(), store, 2);
+        manager.start("owner", "g1", "video");
+
+        AtomicInteger userIndex = new AtomicInteger(1);
+        callConcurrently(7, () -> {
+            try {
+                return manager.join("u" + userIndex.getAndIncrement(), "g1");
+            } catch (ForbiddenException expected) {
+                return null;
+            }
+        });
+
+        assertTrue(manager.active("owner", "g1").participantCount() <= 2);
+        String admittedUser = manager.active("owner", "g1").participants().stream()
+                .map(GroupCallParticipant::userId)
+                .filter(userId -> !"owner".equals(userId))
+                .findFirst()
+                .orElseThrow();
+        manager.join(admittedUser, "g1");
+        assertEquals(2, manager.active("owner", "g1").participantCount());
+    }
+
+    @Test
+    void joinDoesNotIssueTokenWhenAtomicAdmissionDidNotAddMember() {
+        FakeGroupManager groups = new FakeGroupManager();
+        groups.members.put("g1", Set.of("u1"));
+        GroupCallSession active = new GroupCallSession("g1", "room1", "video", "u1", "ws://livekit.test",
+                1L, 1L, 1, List.of(new GroupCallParticipant("u1", 1L)), false);
+        GroupCallStateStore store = new GroupCallStateStore() {
+            @Override public GroupCallSession getActiveByGroup(String groupId) { return active; }
+            @Override public GroupCallReservation reserve(GroupCallSession session) { return new GroupCallReservation(active, false); }
+            @Override public GroupCallSession activate(String groupId, String roomId, String sfuEndpoint, long now) { return active; }
+            @Override public GroupCallAdmission admit(String groupId, String userId, int maxParticipants, long now) {
+                return new GroupCallAdmission(active, false, false);
+            }
+            @Override public GroupCallSession removeParticipant(String groupId, String userId) { return active; }
+            @Override public GroupCallSession end(String groupId) { return active.markEnded(); }
+        };
+        GroupCallManager manager = new GroupCallManager(groups, new FakeCallManager(), store, 16);
+
+        assertThrows(ValidationException.class, () -> manager.join("u1", "g1"));
+    }
+
+    private static <T> List<T> callConcurrently(int count, Callable<T> operation) throws Exception {
+        ExecutorService executor = Executors.newFixedThreadPool(count);
+        CountDownLatch ready = new CountDownLatch(count);
+        CountDownLatch start = new CountDownLatch(1);
+        try {
+            List<Future<T>> futures = java.util.stream.IntStream.range(0, count)
+                    .mapToObj(index -> executor.submit(() -> {
+                        ready.countDown();
+                        assertTrue(start.await(5, TimeUnit.SECONDS));
+                        return operation.call();
+                    }))
+                    .toList();
+            assertTrue(ready.await(5, TimeUnit.SECONDS));
+            start.countDown();
+            java.util.ArrayList<T> results = new java.util.ArrayList<>(count);
+            for (Future<T> future : futures) {
+                results.add(future.get(5, TimeUnit.SECONDS));
+            }
+            return results;
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
     private static final class FakeCallManager implements ICallManager {
+        private final AtomicInteger createRoomCalls = new AtomicInteger();
+
         @Override
         public RoomInformation createRoom(String callerId, String calleeId, String roomId) {
+            createRoomCalls.incrementAndGet();
             String id = roomId != null ? roomId : "room_group_g1";
             return new RoomInformation(id, getSfuEndpoint(), "token-" + callerId + "-" + id, null);
         }

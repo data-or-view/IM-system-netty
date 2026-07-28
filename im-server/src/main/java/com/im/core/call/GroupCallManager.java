@@ -25,31 +25,33 @@ public class GroupCallManager {
     public GroupCallSession start(String operatorId, String groupId, String callType) {
         requireMember(groupId, operatorId);
         String normalizedCallType = normalizeCallType(callType);
-        GroupCallSession existing = stateStore.getActiveByGroup(groupId);
-        if (existing != null) return existing;
-
         String roomId = IdGenerator.roomId();
-        RoomInformation room = callManager.createRoom(operatorId, null, roomId);
         long now = System.currentTimeMillis();
-        GroupCallSession session = new GroupCallSession(groupId, room.getRoomId(), normalizedCallType,
-                operatorId, room.getSfuEndpoint(), now, now, 1,
+        GroupCallSession requested = new GroupCallSession(groupId, roomId, normalizedCallType,
+                operatorId, "", now, now, 1,
                 java.util.List.of(new GroupCallParticipant(operatorId, now)), false);
-        return stateStore.createIfAbsent(session);
+        GroupCallReservation reservation = stateStore.reserve(requested);
+        if (!reservation.created()) {
+            return reservation.session();
+        }
+        RoomInformation room = callManager.createRoom(operatorId, null, reservation.session().roomId());
+        return stateStore.activate(groupId, reservation.session().roomId(), room.getSfuEndpoint(), now);
     }
 
     public GroupCallJoinResult join(String userId, String groupId) {
         requireMember(groupId, userId);
-        GroupCallSession active = stateStore.getActiveByGroup(groupId);
-        if (active == null) {
+        GroupCallAdmission admission = stateStore.admit(groupId, userId, maxParticipants, System.currentTimeMillis());
+        if (admission.session() == null) {
             throw new ValidationException("no active group call");
         }
-        boolean alreadyJoined = active.participants().stream().anyMatch(participant -> userId.equals(participant.userId()));
-        if (!alreadyJoined && maxParticipants > 0 && active.participantCount() >= maxParticipants) {
+        if (admission.full()) {
             throw new ForbiddenException("group call is full");
         }
-        GroupCallSession joined = stateStore.addParticipant(groupId, userId);
-        String token = callManager.issueToken(userId, active.roomId());
-        return new GroupCallJoinResult(joined, token, callManager.getSfuEndpoint());
+        if (!admission.joined()) {
+            throw new ValidationException("group call is not accepting participants");
+        }
+        String token = callManager.issueToken(userId, admission.session().roomId());
+        return new GroupCallJoinResult(admission.session(), token, callManager.getSfuEndpoint());
     }
 
     public GroupCallSession leave(String userId, String groupId) {
