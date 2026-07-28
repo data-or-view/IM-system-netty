@@ -24,6 +24,13 @@ public interface SingleCallStateStore {
 
     List<SingleCallSession> claimExpiredRinging(long nowEpochMillis, int limit);
 
+    /**
+     * Removes the durable timeout-delivery work item after both deterministic
+     * recipient effects have been published or recorded for compensation.
+     */
+    default void acknowledgeTimeoutDelivery(String roomId) {
+    }
+
     SingleCallSession end(String roomId);
 
     default SingleCallSession endBy(String roomId, String actorId) {

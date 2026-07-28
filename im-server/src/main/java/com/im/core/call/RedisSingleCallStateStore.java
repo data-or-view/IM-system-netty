@@ -15,6 +15,7 @@ public class RedisSingleCallStateStore implements SingleCallStateStore {
     private static final String USER_KEY_PREFIX = "im:single_call:{state}:user:";
     private static final String DEADLINE_KEY = "im:single_call:{state}:deadlines";
     private static final long DEFAULT_TTL_SECONDS = 2 * 60 * 60;
+    private static final long TIMEOUT_DELIVERY_LEASE_MILLIS = 10_000L;
     private static final String CREATE_IF_IDLE_SCRIPT = """
             if redis.call('exists', KEYS[2]) == 1 or redis.call('exists', KEYS[3]) == 1 then
               return 0
@@ -102,7 +103,7 @@ public class RedisSingleCallStateStore implements SingleCallStateStore {
             local claimed = {}
             for candidate = 1, (#KEYS - 1) / 3 do
               local keyIndex = 2 + (candidate - 1) * 3
-              local argIndex = 4 + (candidate - 1) * 3
+              local argIndex = 6 + (candidate - 1) * 3
               local roomKey = KEYS[keyIndex]
               local callerKey = KEYS[keyIndex + 1]
               local calleeKey = KEYS[keyIndex + 2]
@@ -111,19 +112,27 @@ public class RedisSingleCallStateStore implements SingleCallStateStore {
               local expectedCallee = ARGV[argIndex + 2]
               local caller = redis.call('hget', roomKey, 'callerId')
               local callee = redis.call('hget', roomKey, 'calleeId')
-              if redis.call('hget', roomKey, 'status') == ARGV[1]
-                  and caller == expectedCaller and callee == expectedCallee then
+              local dueAt = redis.call('zscore', KEYS[1], roomId)
+              local status = redis.call('hget', roomKey, 'status')
+              local deadlineAt = redis.call('hget', roomKey, 'deadlineAt')
+              local claimable = dueAt ~= false and tonumber(dueAt) <= tonumber(ARGV[4])
+                  and caller == expectedCaller and callee == expectedCallee
+              local timedOut = status == ARGV[2]
+              if claimable and ((status == ARGV[1] and deadlineAt ~= false
+                    and tonumber(deadlineAt) <= tonumber(ARGV[4])) or timedOut) then
                 local callType = redis.call('hget', roomKey, 'callType') or ''
                 local sfuEndpoint = redis.call('hget', roomKey, 'sfuEndpoint') or ''
                 local startedAt = redis.call('hget', roomKey, 'startedAt') or '0'
                 local acceptedAt = redis.call('hget', roomKey, 'acceptedAt') or '0'
-                local deadlineAt = redis.call('hget', roomKey, 'deadlineAt') or '0'
+                deadlineAt = deadlineAt or '0'
                 local caller = redis.call('hget', roomKey, 'callerId')
                 local callee = redis.call('hget', roomKey, 'calleeId')
-                redis.call('zrem', KEYS[1], roomId)
-                redis.call('del', callerKey, calleeKey)
-                redis.call('hset', roomKey, 'status', ARGV[2])
+                if not timedOut then
+                  redis.call('del', callerKey, calleeKey)
+                  redis.call('hset', roomKey, 'status', ARGV[2])
+                end
                 redis.call('expire', roomKey, ARGV[3])
+                redis.call('zadd', KEYS[1], tonumber(ARGV[4]) + tonumber(ARGV[5]), roomId)
                 table.insert(claimed, roomId)
                 table.insert(claimed, caller)
                 table.insert(claimed, callee)
@@ -133,7 +142,7 @@ public class RedisSingleCallStateStore implements SingleCallStateStore {
                 table.insert(claimed, startedAt)
                 table.insert(claimed, acceptedAt)
                 table.insert(claimed, deadlineAt)
-              else
+              elseif dueAt ~= false and status ~= ARGV[1] and not timedOut then
                 redis.call('zrem', KEYS[1], roomId)
               end
             end
@@ -259,14 +268,16 @@ public class RedisSingleCallStateStore implements SingleCallStateStore {
 
             String[] keys = new String[1 + candidates.size() * 3];
             keys[0] = deadlineKey();
-            String[] args = new String[3 + candidates.size() * 3];
+            String[] args = new String[5 + candidates.size() * 3];
             args[0] = SingleCallSession.STATUS_RINGING;
             args[1] = SingleCallSession.STATUS_TIMED_OUT;
             args[2] = String.valueOf(ttlSeconds);
+            args[3] = String.valueOf(nowEpochMillis);
+            args[4] = String.valueOf(TIMEOUT_DELIVERY_LEASE_MILLIS);
             for (int index = 0; index < candidates.size(); index++) {
                 ClaimCandidate candidate = candidates.get(index);
                 int keyIndex = 1 + index * 3;
-                int argIndex = 3 + index * 3;
+                int argIndex = 5 + index * 3;
                 keys[keyIndex] = roomKey(candidate.roomId());
                 keys[keyIndex + 1] = userKey(candidate.callerIdOrMissing());
                 keys[keyIndex + 2] = userKey(candidate.calleeIdOrMissing());
@@ -278,6 +289,14 @@ public class RedisSingleCallStateStore implements SingleCallStateStore {
             @SuppressWarnings("unchecked")
             List<Object> rawSnapshots = sync.eval(CLAIM_EXPIRED_RINGING_SCRIPT, ScriptOutputType.MULTI, keys, args);
             return toClaimedSessions(rawSnapshots);
+        }
+    }
+
+    @Override
+    public void acknowledgeTimeoutDelivery(String roomId) {
+        if (!hasText(roomId)) return;
+        try (CloseableRedisCommands redis = redisConfig.createSyncCommands()) {
+            redis.sync().zrem(deadlineKey(), roomId);
         }
     }
 

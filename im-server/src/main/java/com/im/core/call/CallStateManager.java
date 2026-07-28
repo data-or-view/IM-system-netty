@@ -60,7 +60,7 @@ public class CallStateManager {
         this.messageQueue = messageQueue;
         this.stateStore = stateStore;
         this.timeoutSeconds = timeoutSeconds;
-        this.timeoutBatchSize = timeoutBatchSize;
+        this.timeoutBatchSize = Math.max(1, timeoutBatchSize);
         this.retryExecutor = retryExecutor != null ? retryExecutor : new FailsafeRetryExecutor();
         this.failureStore = failureStore != null ? failureStore : BusinessMessageDlqStore.none();
         this.timeoutExecutor = IMExecutors.newScheduledExecutor("im-call-timeout", 1);
@@ -158,7 +158,9 @@ public class CallStateManager {
 
     public void scanExpiredCalls() {
         for (SingleCallSession session : stateStore.claimExpiredRinging(System.currentTimeMillis(), timeoutBatchSize)) {
-            publishTimeoutOnce(session);
+            if (publishTimeoutOnce(session)) {
+                stateStore.acknowledgeTimeoutDelivery(session.roomId());
+            }
         }
     }
 
@@ -188,7 +190,7 @@ public class CallStateManager {
         }
     }
 
-    private void publishTimeoutOnce(SingleCallSession session) {
+    private boolean publishTimeoutOnce(SingleCallSession session) {
         String roomId = session.roomId();
         log.info("Call timeout claimed: room={}, caller={}, callee={}", roomId, session.callerId(), session.calleeId());
 
@@ -196,13 +198,19 @@ public class CallStateManager {
         signal.setReason("timeout");
         String content = new String(ContentSerializer.toBytes(signal), StandardCharsets.UTF_8);
         long now = System.currentTimeMillis();
-        publishTimeoutRecipient(session, session.callerId(), content, now);
-        publishTimeoutRecipient(session, session.calleeId(), content, now);
-        log.info("Timeout messages published or queued for recovery: room={}, caller={}, callee={}",
-                roomId, session.callerId(), session.calleeId());
+        boolean callerRecovered = publishTimeoutRecipient(session, session.callerId(), content, now);
+        boolean calleeRecovered = publishTimeoutRecipient(session, session.calleeId(), content, now);
+        if (callerRecovered && calleeRecovered) {
+            log.info("Timeout messages published or queued for recovery: room={}, caller={}, callee={}",
+                    roomId, session.callerId(), session.calleeId());
+            return true;
+        }
+        log.error("Timeout delivery remains leased for another scanner: room={}, callerRecovered={}, calleeRecovered={}",
+                roomId, callerRecovered, calleeRecovered);
+        return false;
     }
 
-    private void publishTimeoutRecipient(SingleCallSession session, String recipientId, String content, long timestamp) {
+    private boolean publishTimeoutRecipient(SingleCallSession session, String recipientId, String content, long timestamp) {
         Message message = Message.createSingle(SYSTEM_USER_ID, recipientId, null,
                 ContentType.SIGNAL.getId(), content, 0);
         message.setMessageId(timeoutMessageId(session.roomId(), recipientId));
@@ -212,14 +220,17 @@ public class CallStateManager {
                 messageQueue.publish(MessageQueueTopics.DELIVER, message);
                 return null;
             });
+            return true;
         } catch (RuntimeException publishFailure) {
             try {
                 failureStore.recordFailure(MessageQueueTopics.DELIVER, message, publishFailure);
                 log.warn("Timeout delivery queued for business-DLQ recovery: room={}, recipient={}, failure={}",
                         session.roomId(), recipientId, publishFailure.toString());
+                return true;
             } catch (RuntimeException failureRecordError) {
                 log.error("Timeout delivery and business-DLQ recording both failed: room={}, recipient={}",
                         session.roomId(), recipientId, failureRecordError);
+                return false;
             }
         }
     }
