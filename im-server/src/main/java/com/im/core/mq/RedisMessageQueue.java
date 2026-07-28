@@ -75,6 +75,9 @@ public class RedisMessageQueue implements IMessageQueue {
     /** 连接失败重试间隔 */
     private static final Duration RETRY_INTERVAL = Duration.ofSeconds(1);
 
+    /** Shutdown keeps dependencies alive while an in-flight consumer exits. */
+    private static final Duration CONSUMER_STOP_TIMEOUT = Duration.ofSeconds(5);
+
     private final RedisConfiguration redisConfig;
     private final String consumerId;
     private final Duration pendingMinIdle;
@@ -85,6 +88,9 @@ public class RedisMessageQueue implements IMessageQueue {
 
     /** topic → 消费者任务 */
     private final ConcurrentHashMap<String, ConsumerTask> consumerTasks = new ConcurrentHashMap<>();
+
+    /** Serializes lifecycle transitions with the final Redis Streams acknowledgement. */
+    private final Object lifecycleLock = new Object();
 
     private final AtomicBoolean running = new AtomicBoolean(false);
 
@@ -119,12 +125,18 @@ public class RedisMessageQueue implements IMessageQueue {
 
     @Override
     public void stop() {
-        if (!running.compareAndSet(true, false)) return;
+        List<ConsumerTask> tasks;
+        synchronized (lifecycleLock) {
+            if (!running.compareAndSet(true, false)) return;
 
-        List<ConsumerTask> tasks = new ArrayList<>(consumerTasks.values());
-        consumerTasks.clear();
+            tasks = new ArrayList<>(consumerTasks.values());
+            consumerTasks.clear();
+            for (ConsumerTask task : tasks) {
+                task.stop();
+            }
+        }
         for (ConsumerTask task : tasks) {
-            task.stop();
+            task.awaitStopped(CONSUMER_STOP_TIMEOUT);
         }
 
         log.info("RedisMessageQueue stopped: consumerId={}", consumerId);
@@ -235,9 +247,29 @@ public class RedisMessageQueue implements IMessageQueue {
         }
 
         void stop() {
-            stopped = true;
-            if (thread != null) {
-                thread.interrupt();
+            synchronized (lifecycleLock) {
+                stopped = true;
+                if (thread != null) {
+                    thread.interrupt();
+                }
+            }
+        }
+
+        void awaitStopped(Duration timeout) {
+            Thread current = thread;
+            if (current == null || current == Thread.currentThread()) {
+                return;
+            }
+            try {
+                current.join(timeout);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                log.warn("Interrupted while waiting for Redis stream consumer shutdown: topic={}", topic);
+                return;
+            }
+            if (current.isAlive()) {
+                log.error("Redis stream consumer did not stop before drain timeout; leaving in-flight messages pending: topic={}, timeoutMs={}",
+                        topic, timeout.toMillis());
             }
         }
 
@@ -348,7 +380,7 @@ public class RedisMessageQueue implements IMessageQueue {
                 String payload = msg.getBody().get("payload");
                 if (payload == null || payload.isEmpty()) {
                     log.warn("Message missing payload field, stream={}, id={}", streamKey, msg.getId());
-                    sync.xack(streamKey, groupName, msg.getId());
+                    acknowledgeIfActive(sync, streamKey, groupName, msg.getId());
                     return;
                 }
 
@@ -364,9 +396,10 @@ public class RedisMessageQueue implements IMessageQueue {
                         }
                     }
 
-                    sync.xack(streamKey, groupName, msg.getId());
-                    log.debug(StructuredLog.event(LogEvents.MQ_MESSAGE_ACKED,
-                            redisFields(topic, cmd, streamKey, msg.getId())));
+                    if (acknowledgeIfActive(sync, streamKey, groupName, msg.getId())) {
+                        log.debug(StructuredLog.event(LogEvents.MQ_MESSAGE_ACKED,
+                                redisFields(topic, cmd, streamKey, msg.getId())));
+                    }
                 }
             } catch (Exception e) {
                 Map<String, Object> fields = new LinkedHashMap<>();
@@ -375,6 +408,17 @@ public class RedisMessageQueue implements IMessageQueue {
                 fields.put(LogFields.CONSUMER_ID, consumerId);
                 fields.put(LogFields.EXCEPTION_CLASS, e.getClass().getSimpleName());
                 log.error(StructuredLog.event(LogEvents.MQ_CONSUME_FAILED, fields), e);
+            }
+        }
+
+        private boolean acknowledgeIfActive(RedisCommands<String, String> sync, String streamKey,
+                                            String groupName, String messageId) {
+            synchronized (lifecycleLock) {
+                if (stopped || !running.get() || Thread.currentThread().isInterrupted()) {
+                    return false;
+                }
+                sync.xack(streamKey, groupName, messageId);
+                return true;
             }
         }
 

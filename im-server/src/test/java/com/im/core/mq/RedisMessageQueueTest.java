@@ -18,15 +18,141 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RedisMessageQueueTest {
 
     private static final ObjectMapper MAPPER = ObjectMapperProvider.get();
+
+    @Test
+    void stopWaitsForInFlightHandlerToExitBeforeReturning() throws Exception {
+        RedisConfiguration redis = redisOrSkip();
+        String topic = "test-stop-waits-" + UUID.randomUUID();
+        String streamKey = RedisMessageQueue.STREAM_PREFIX + topic;
+        RedisMessageQueue queue = new RedisMessageQueue(redis, "stop-waits-node");
+        CountDownLatch handlerEntered = new CountDownLatch(1);
+        CountDownLatch allowHandlerExit = new CountDownLatch(1);
+        CountDownLatch handlerExited = new CountDownLatch(1);
+        CountDownLatch stopReturned = new CountDownLatch(1);
+        ExecutorService stopper = Executors.newSingleThreadExecutor();
+        try {
+            queue.subscribe(topic, ignored -> {
+                handlerEntered.countDown();
+                awaitUninterruptibly(allowHandlerExit);
+                handlerExited.countDown();
+            });
+            queue.start();
+            queue.publish(topic, message("msg-stop-waits-" + UUID.randomUUID()));
+
+            assertTrue(handlerEntered.await(5, TimeUnit.SECONDS), "handler did not start");
+            stopper.submit(() -> {
+                queue.stop();
+                stopReturned.countDown();
+            });
+
+            assertFalse(stopReturned.await(300, TimeUnit.MILLISECONDS),
+                    "queue stop must wait for the in-flight handler before returning");
+
+            allowHandlerExit.countDown();
+            assertTrue(handlerExited.await(5, TimeUnit.SECONDS), "handler did not exit after release");
+            assertTrue(stopReturned.await(5, TimeUnit.SECONDS), "queue stop did not finish after handler exit");
+        } finally {
+            allowHandlerExit.countDown();
+            queue.stop();
+            stopper.shutdownNow();
+            try (CloseableRedisCommands commands = redis.createSyncCommands()) {
+                commands.<RedisCommands<String, String>>sync().del(streamKey);
+            } finally {
+                redis.close();
+            }
+        }
+    }
+
+    @Test
+    void shutdownReleasedHandlerLeavesMessagePendingForAnotherConsumerToReclaim() throws Exception {
+        RedisConfiguration redis = redisOrSkip();
+        String topic = "test-shutdown-pending-" + UUID.randomUUID();
+        String streamKey = RedisMessageQueue.STREAM_PREFIX + topic;
+        String groupName = RedisMessageQueue.GROUP_PREFIX + topic;
+        String messageId = "msg-shutdown-pending-" + UUID.randomUUID();
+        RedisMessageQueue firstQueue = new RedisMessageQueue(redis, "shutdown-pending-first");
+        RedisMessageQueue secondQueue = null;
+        CountDownLatch handlerEntered = new CountDownLatch(1);
+        CountDownLatch shutdownInterruptedHandler = new CountDownLatch(1);
+        CountDownLatch allowHandlerExit = new CountDownLatch(1);
+        ExecutorService stopper = Executors.newSingleThreadExecutor();
+        try {
+            firstQueue.subscribe(topic, ignored -> {
+                handlerEntered.countDown();
+                boolean interrupted = false;
+                try {
+                    while (true) {
+                        try {
+                            allowHandlerExit.await();
+                            return;
+                        } catch (InterruptedException ignoredInterrupt) {
+                            interrupted = true;
+                            shutdownInterruptedHandler.countDown();
+                        }
+                    }
+                } finally {
+                    if (interrupted) {
+                        Thread.currentThread().interrupt();
+                    }
+                }
+            });
+            firstQueue.start();
+            firstQueue.publish(topic, message(messageId));
+
+            assertTrue(handlerEntered.await(5, TimeUnit.SECONDS), "first handler did not start");
+            Future<?> stopFuture = stopper.submit(firstQueue::stop);
+            assertFalse(stopFuture.isDone(), "stop should wait while the handler is blocked");
+            assertTrue(shutdownInterruptedHandler.await(5, TimeUnit.SECONDS),
+                    "shutdown did not interrupt the blocked first handler");
+
+            allowHandlerExit.countDown();
+            stopFuture.get(5, TimeUnit.SECONDS);
+
+            try (CloseableRedisCommands commands = redis.createSyncCommands()) {
+                assertEquals(1, commands.<RedisCommands<String, String>>sync().xpending(streamKey, groupName).getCount(),
+                        "message released after shutdown began must remain pending");
+            }
+
+            CountDownLatch reclaimed = new CountDownLatch(1);
+            AtomicReference<Message> reclaimedMessage = new AtomicReference<>();
+            Thread.sleep(100);
+            secondQueue = new RedisMessageQueue(redis, "shutdown-pending-second", Duration.ofMillis(50), 10);
+            secondQueue.subscribe(topic, recovered -> {
+                reclaimedMessage.set(recovered);
+                reclaimed.countDown();
+            });
+            secondQueue.start();
+
+            assertTrue(reclaimed.await(5, TimeUnit.SECONDS), "second consumer did not reclaim the pending message");
+            assertEquals(messageId, reclaimedMessage.get().getMessageId());
+            waitUntilNoPending(redis, streamKey, groupName);
+        } finally {
+            allowHandlerExit.countDown();
+            firstQueue.stop();
+            if (secondQueue != null) {
+                secondQueue.stop();
+            }
+            stopper.shutdownNow();
+            try (CloseableRedisCommands commands = redis.createSyncCommands()) {
+                commands.<RedisCommands<String, String>>sync().del(streamKey);
+            } finally {
+                redis.close();
+            }
+        }
+    }
 
     @Test
     void consumerClaimsAndAcksTimedOutPendingMessages() throws Exception {
@@ -166,6 +292,24 @@ class RedisMessageQueueTest {
             Thread.sleep(50);
         }
         assertEquals(0, pending != null ? pending.getCount() : -1, "pending messages should be acked after recovery");
+    }
+
+    private static void awaitUninterruptibly(CountDownLatch latch) {
+        boolean interrupted = false;
+        try {
+            while (true) {
+                try {
+                    latch.await();
+                    return;
+                } catch (InterruptedException ignored) {
+                    interrupted = true;
+                }
+            }
+        } finally {
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
+        }
     }
 
     private static Message message(String messageId) {
