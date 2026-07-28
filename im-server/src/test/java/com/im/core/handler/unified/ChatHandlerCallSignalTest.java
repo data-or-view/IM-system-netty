@@ -201,6 +201,69 @@ class ChatHandlerCallSignalTest {
     }
 
     @Test
+    void failedTerminalRequestCannotReuseItsIdentityForAnotherRoom() {
+        ChatHandler handler = handler(new AllowPolicy());
+        callStateStore.session = ringing();
+        queue.failuresRemaining = 1;
+        ApiRequest original = signalRequest("caller", "callee", "CANCEL", "client-cross-room", null);
+
+        assertThrows(InfrastructureException.class, () -> handler.handle(original));
+        callStateStore.session = ringing("room-2");
+
+        ApiRequest changedRoom = signalRequest("caller", "callee", "CANCEL", "client-cross-room", null, "room-2");
+        assertThrows(ConflictException.class, () -> handler.handle(changedRoom));
+
+        assertEquals("room-2", callStateStore.session.roomId());
+        assertEquals(1, callStateStore.endCalls);
+    }
+
+    @Test
+    void failedTerminalRequestCannotReuseItsIdentityForIce() {
+        ChatHandler handler = handler(new AllowPolicy());
+        callStateStore.session = ringing();
+        queue.failuresRemaining = 1;
+        ApiRequest original = signalRequest("caller", "callee", "CANCEL", "client-terminal-to-ice", null);
+
+        assertThrows(InfrastructureException.class, () -> handler.handle(original));
+
+        ApiRequest changedAction = signalRequest("caller", "callee", "ICE", "client-terminal-to-ice", null);
+        assertThrows(ConflictException.class, () -> handler.handle(changedAction));
+
+        assertEquals(1, callStateStore.endCalls);
+        assertEquals(0, queue.published.size());
+    }
+
+    @Test
+    void acknowledgedTerminalRequestCannotReuseIdentityWithChangedPayload() {
+        ChatHandler handler = handler(new AllowPolicy(), new CachingIdempotency());
+        callStateStore.session = ringing();
+        ApiRequest original = signalRequest("caller", "callee", "CANCEL", "client-after-ack", "original");
+
+        handler.handle(original);
+
+        ApiRequest changedPayload = signalRequest("caller", "callee", "CANCEL", "client-after-ack", "changed");
+        assertThrows(ConflictException.class, () -> handler.handle(changedPayload));
+
+        assertEquals(1, callStateStore.endCalls);
+        assertEquals(2, queue.published.size());
+    }
+
+    @Test
+    void acknowledgedTerminalRequestCannotReuseActorAndClientIdentityWithChangedPeer() {
+        ChatHandler handler = handler(new AllowPolicy(), new CachingIdempotency());
+        callStateStore.session = ringing();
+        ApiRequest original = signalRequest("caller", "callee", "CANCEL", "client-changed-peer", null);
+
+        handler.handle(original);
+
+        ApiRequest changedPeer = signalRequest("caller", "other-callee", "CANCEL", "client-changed-peer", null);
+        assertThrows(ConflictException.class, () -> handler.handle(changedPeer));
+
+        assertEquals(1, callStateStore.endCalls);
+        assertEquals(2, queue.published.size());
+    }
+
+    @Test
     void retryAfterAcknowledgeFailureUsesCachedSendAndClearsIntent() {
         ChatHandler handler = handler(new AllowPolicy(), new CachingIdempotency());
         callStateStore.session = ringing();
@@ -286,9 +349,14 @@ class ChatHandlerCallSignalTest {
 
     private ApiRequest signalRequest(String actorId, String toUserId, String action,
                                      String clientMsgId, String reason) {
+        return signalRequest(actorId, toUserId, action, clientMsgId, reason, "room-1");
+    }
+
+    private ApiRequest signalRequest(String actorId, String toUserId, String action,
+                                     String clientMsgId, String reason, String roomId) {
         Map<String, Object> signal = new HashMap<>();
         signal.put("action", action);
-        signal.put("roomId", "room-1");
+        signal.put("roomId", roomId);
         if (reason != null) signal.put("reason", reason);
         ApiRequest request = new ApiRequest(
                 Operation.CHAT_SEND,
@@ -322,7 +390,11 @@ class ChatHandlerCallSignalTest {
     }
 
     private SingleCallSession ringing() {
-        return new SingleCallSession("room-1", "caller", "callee", "voice",
+        return ringing("room-1");
+    }
+
+    private SingleCallSession ringing(String roomId) {
+        return new SingleCallSession(roomId, "caller", "callee", "voice",
                 SingleCallSession.STATUS_RINGING, "ws://sfu", System.currentTimeMillis(), 0);
     }
 
@@ -338,6 +410,7 @@ class ChatHandlerCallSignalTest {
         String acceptActorId;
         String endActorId;
         TerminalSignalIntent pendingSignal;
+        final Map<String, TerminalSignalIntent> terminalRequests = new HashMap<>();
 
         @Override public SingleCallSession getByRoom(String roomId) { return session; }
         @Override public SingleCallSession getActiveByUser(String userId) { return null; }
@@ -366,28 +439,49 @@ class ChatHandlerCallSignalTest {
             return SingleCallStateStore.super.endBy(roomId, actorId);
         }
 
-        @Override public TerminalSignalIntent getPendingTerminalSignal(String roomId) { return pendingSignal; }
+        @Override
+        public TerminalSignalIntent getPendingTerminalSignal(String roomId) {
+            return pendingSignal != null && pendingSignal.roomId().equals(roomId) ? pendingSignal : null;
+        }
+
+        @Override
+        public TerminalSignalIntent getTerminalSignalByRequest(String actorId, String peerUserId, String clientMsgId) {
+            return terminalRequests.get(requestKey(actorId, clientMsgId));
+        }
 
         @Override
         public boolean transitionTerminalSignal(TerminalSignalIntent intent) {
             terminalTransitionCalls++;
-            if (pendingSignal != null) return pendingSignal.equals(intent);
+            TerminalSignalIntent request = getTerminalSignalByRequest(
+                    intent.actorId(), intent.peerUserId(), intent.clientMsgId());
+            if (request != null) {
+                return request.roomId().equals(intent.roomId())
+                        && request.actorId().equals(intent.actorId())
+                        && request.peerUserId().equals(intent.peerUserId())
+                        && request.action() == intent.action()
+                        && request.clientMsgId().equals(intent.clientMsgId())
+                        && request.requestContentBase64().equals(intent.requestContentBase64());
+            }
+            TerminalSignalIntent roomPending = getPendingTerminalSignal(intent.roomId());
+            if (roomPending != null) return roomPending.equals(intent);
             SingleCallSession transitioned = intent.action() == SignalingAction.ACCEPT
                     ? acceptBy(intent.roomId(), intent.actorId())
                     : endBy(intent.roomId(), intent.actorId());
             if (transitioned == null) return false;
             pendingSignal = intent;
+            terminalRequests.put(requestKey(intent.actorId(), intent.clientMsgId()), intent);
             return true;
         }
 
         @Override
         public boolean acknowledgeTerminalSignal(TerminalSignalIntent intent) {
-            if (pendingSignal == null
-                    || !pendingSignal.roomId().equals(intent.roomId())
-                    || !pendingSignal.actorId().equals(intent.actorId())
-                    || !pendingSignal.peerUserId().equals(intent.peerUserId())
-                    || pendingSignal.action() != intent.action()
-                    || !pendingSignal.clientMsgId().equals(intent.clientMsgId())) {
+            TerminalSignalIntent request = getTerminalSignalByRequest(
+                    intent.actorId(), intent.peerUserId(), intent.clientMsgId());
+            if (request == null || !request.roomId().equals(intent.roomId())
+                    || !request.actorId().equals(intent.actorId())
+                    || !request.peerUserId().equals(intent.peerUserId())
+                    || request.action() != intent.action()
+                    || !request.clientMsgId().equals(intent.clientMsgId())) {
                 return false;
             }
             if (acknowledgementFailuresRemaining > 0) {
@@ -395,8 +489,14 @@ class ChatHandlerCallSignalTest {
                 throw new IllegalStateException("acknowledgement unavailable");
             }
             terminalAcknowledgements++;
-            pendingSignal = null;
+            if (pendingSignal != null && pendingSignal.roomId().equals(intent.roomId())) {
+                pendingSignal = null;
+            }
             return true;
+        }
+
+        private static String requestKey(String actorId, String clientMsgId) {
+            return actorId + '|' + clientMsgId;
         }
     }
 

@@ -10,6 +10,7 @@ import com.im.api.content.ContentType;
 import com.im.core.serialization.jackson.ObjectMapperProvider;
 
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.Map;
 import java.util.Objects;
 
@@ -18,22 +19,32 @@ public record TerminalSignalIntent(String roomId,
                                    String peerUserId,
                                    SignalingAction action,
                                    String clientMsgId,
-                                   String messageJson) {
+                                   String messageJson,
+                                   String requestContentBase64) {
 
     private static final ObjectMapper MAPPER = ObjectMapperProvider.get();
     private static final TypeReference<Map<String, Object>> MESSAGE_MAP = new TypeReference<>() { };
 
     public TerminalSignalIntent(String roomId, String actorId, String peerUserId,
                                 SignalingAction action, String clientMsgId) {
-        this(roomId, actorId, peerUserId, action, clientMsgId, null);
+        this(roomId, actorId, peerUserId, action, clientMsgId, null, null);
+    }
+
+    public TerminalSignalIntent(String roomId, String actorId, String peerUserId,
+                                SignalingAction action, String clientMsgId, String messageJson) {
+        this(roomId, actorId, peerUserId, action, clientMsgId, messageJson, null);
     }
 
     public static TerminalSignalIntent withMessage(String roomId, String actorId, String peerUserId,
                                                    SignalingAction action, String clientMsgId, Message message) {
         if (message == null) throw new IllegalArgumentException("terminal signal message is required");
+        byte[] body = message.getBody();
+        if (body == null || body.length == 0) {
+            throw new IllegalArgumentException("terminal signal message body is required");
+        }
         try {
             return new TerminalSignalIntent(roomId, actorId, peerUserId, action, clientMsgId,
-                    MAPPER.writeValueAsString(message.toJsonMap()));
+                    MAPPER.writeValueAsString(message.toJsonMap()), Base64.getEncoder().encodeToString(body));
         } catch (Exception e) {
             throw new IllegalStateException("failed to serialize terminal signal message", e);
         }
@@ -58,6 +69,10 @@ public record TerminalSignalIntent(String roomId,
                 || !Objects.equals(peerUserId, requestPeerUserId)
                 || action != requestAction
                 || !Objects.equals(clientMsgId, requestClientMsgId)) {
+            return false;
+        }
+        if (requestContentBase64 != null
+                && !Objects.equals(requestContentBase64, Base64.getEncoder().encodeToString(serializedContent))) {
             return false;
         }
         Message prepared = message();

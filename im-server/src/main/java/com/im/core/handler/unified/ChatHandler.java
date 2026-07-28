@@ -89,8 +89,11 @@ public class ChatHandler implements RequestHandler {
                 SendMessageResult result = sendMessageUseCase.executePreparedSingle(
                         req.params(), uid, toUserId, content,
                         pending != null ? pending.message() : null,
-                        message -> callStateManager.transitionSignal(
-                                uid, toUserId, signal, clientMsgId, message, pending));
+                        message -> {
+                            TerminalSignalIntent resolved = callStateManager.transitionSignal(
+                                    uid, toUserId, signal, clientMsgId, message, pending);
+                            return resolved != null ? resolved.message() : message;
+                        });
                 if (result == null) {
                     throw new ForbiddenException("message sending blocked");
                 }

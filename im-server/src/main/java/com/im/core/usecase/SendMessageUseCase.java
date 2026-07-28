@@ -30,7 +30,7 @@ import org.slf4j.LoggerFactory;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.regex.Pattern;
 
 public class SendMessageUseCase {
@@ -139,14 +139,17 @@ public class SendMessageUseCase {
                                                    String toUserId, IMessageContent content,
                                                    Runnable beforePublish) {
         return executePreparedSingle(params, fromUserId, toUserId, content, null,
-                beforePublish != null ? message -> beforePublish.run() : null);
+                beforePublish != null ? message -> {
+                    beforePublish.run();
+                    return message;
+                } : null);
     }
 
     /** Replays an immutable prepared message and transitions before its first publish. */
     public SendMessageResult executePreparedSingle(Map<String, Object> params, String fromUserId,
                                                    String toUserId, IMessageContent content,
                                                    Message preparedMessage,
-                                                   Consumer<Message> beforePublish) {
+                                                   Function<Message, Message> beforePublish) {
         if (fromUserId == null || toUserId == null) {
             return null;
         }
@@ -163,12 +166,15 @@ public class SendMessageUseCase {
                                                 String toUserId, IMessageContent content, boolean preflighted,
                                                 Runnable beforePublish) {
         return handleSingleChat(params, fromUserId, toUserId, content, preflighted, null,
-                beforePublish != null ? message -> beforePublish.run() : null);
+                beforePublish != null ? message -> {
+                    beforePublish.run();
+                    return message;
+                } : null);
     }
 
     private SendMessageResult handleSingleChat(Map<String, Object> params, String fromUserId,
                                                 String toUserId, IMessageContent content, boolean preflighted,
-                                                Message preparedMessage, Consumer<Message> beforePublish) {
+                                                Message preparedMessage, Function<Message, Message> beforePublish) {
         if (toUserId == null) return null;
 
         String conversationId = ConversationIds.single(fromUserId, toUserId);
@@ -184,7 +190,10 @@ public class SendMessageUseCase {
                     : prepareMessage(params, fromUserId, toUserId, null, content,
                     conversationId, clientMsgId);
             if (beforePublish != null) {
-                beforePublish.accept(message);
+                message = beforePublish.apply(message);
+                if (message == null) {
+                    throw new IllegalStateException("message transition hook returned no message");
+                }
             }
 
             SendMessageResult result = publishPreparedMessage(message);

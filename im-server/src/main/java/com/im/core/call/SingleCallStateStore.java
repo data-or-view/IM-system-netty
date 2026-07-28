@@ -13,6 +13,15 @@ public interface SingleCallStateStore {
     TerminalSignalIntent getPendingTerminalSignal(String roomId);
 
     /**
+     * Finds the durable terminal request record by its send idempotency identity.
+     * Implementations retain this record after delivery acknowledgement so a
+     * changed retry cannot bypass the message idempotency cache.
+     */
+    default TerminalSignalIntent getTerminalSignalByRequest(String actorId, String peerUserId, String clientMsgId) {
+        return null;
+    }
+
+    /**
      * Atomically applies a terminal call transition and records its exact
      * message intent, or resumes an already-recorded equivalent intent.
      */
