@@ -9,6 +9,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class BootstrapSecurityChecksTest {
 
@@ -35,16 +36,63 @@ class BootstrapSecurityChecksTest {
     }
 
     @Test
-    void explicitOverrideAllowsDevelopmentDefaults() {
+    void missingEnvironmentDoesNotPermitKnownDevelopmentSecret() {
+        Config config = new TestConfig(Map.of());
+
+        assertThrows(IllegalStateException.class, () -> BootstrapSecurityChecks.requireSafeSecret(
+                config,
+                "im.token.secret",
+                BootstrapSecurityChecks.DEFAULT_TOKEN_SECRET,
+                BootstrapSecurityChecks.DEFAULT_TOKEN_SECRET));
+    }
+
+    @Test
+    void explicitFullOverrideAllowsDevelopmentDefaults() {
         Config config = new TestConfig(Map.of(
                 "im.env", "prod",
-                "im.security.allow-dev-defaults", "true"));
+                "im.security.allow-development-defaults", "true"));
 
         assertDoesNotThrow(() -> BootstrapSecurityChecks.requireSafeSecret(
                 config,
                 "im.minio.secret-key",
                 BootstrapSecurityChecks.DEFAULT_MINIO_SECRET_KEY,
                 BootstrapSecurityChecks.DEFAULT_MINIO_SECRET_KEY));
+        assertTrue(BootstrapSecurityChecks.allowsDevDefaults(config));
+    }
+
+    @Test
+    void legacyDevelopmentOverrideDoesNotPermitUnsafeCredentials() {
+        Config config = new TestConfig(Map.of(
+                "im.env", "prod",
+                "im.security.allow-dev-defaults", "true"));
+
+        assertThrows(IllegalStateException.class, () -> BootstrapSecurityChecks.requireSafeSecret(
+                config,
+                "im.token.secret",
+                BootstrapSecurityChecks.DEFAULT_TOKEN_SECRET,
+                BootstrapSecurityChecks.DEFAULT_TOKEN_SECRET));
+    }
+
+    @Test
+    void storageCredentialsRejectEitherDefaultOutsideExplicitLocalEnvironment() {
+        Config config = new TestConfig(Map.of("im.env", "prod"));
+
+        assertThrows(IllegalStateException.class, () -> StorageComponentsFactory.requireMinioCredentials(
+                config, BootstrapSecurityChecks.DEFAULT_MINIO_ACCESS_KEY, "custom-secret"));
+        assertThrows(IllegalStateException.class, () -> StorageComponentsFactory.requireMinioCredentials(
+                config, "custom-access-key", BootstrapSecurityChecks.DEFAULT_MINIO_SECRET_KEY));
+    }
+
+    @Test
+    void enabledCallRejectsKnownDevelopmentCredentialsOutsideExplicitLocalEnvironment() {
+        Config config = new TestConfig(Map.of(
+                "im.env", "prod",
+                "im.call.enabled", "true",
+                "im.call.api-key", BootstrapSecurityChecks.DEFAULT_CALL_API_KEY,
+                "im.call.api-secret", BootstrapSecurityChecks.DEFAULT_CALL_API_SECRET));
+
+        assertThrows(IllegalStateException.class,
+                () -> ServerComponentsFactory.requireCallCredentials(config));
     }
 
     @Test

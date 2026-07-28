@@ -60,10 +60,7 @@ final class StorageComponentsFactory {
                 .orElse(BootstrapSecurityChecks.DEFAULT_MINIO_ACCESS_KEY);
         String minioSecretKey = config.getString("im.minio.secret-key")
                 .orElse(BootstrapSecurityChecks.DEFAULT_MINIO_SECRET_KEY);
-        BootstrapSecurityChecks.requireSafeSecret(config, "im.minio.access-key", minioAccessKey,
-                BootstrapSecurityChecks.DEFAULT_MINIO_ACCESS_KEY);
-        BootstrapSecurityChecks.requireSafeSecret(config, "im.minio.secret-key", minioSecretKey,
-                BootstrapSecurityChecks.DEFAULT_MINIO_SECRET_KEY);
+        requireMinioCredentials(config, minioAccessKey, minioSecretKey);
         IFileStorageService fileStorage = new MinioFileStorageService(
                 config.getString("im.minio.endpoint").orElse(BootstrapDefaults.MINIO_ENDPOINT),
                 minioAccessKey,
@@ -96,5 +93,12 @@ final class StorageComponentsFactory {
         return config.getLong("im.file.max-upload-bytes")
                 .or(() -> config.getLong("im.minio.max-file-size"))
                 .orElse(DEFAULT_MAX_UPLOAD_BYTES);
+    }
+
+    static void requireMinioCredentials(Config config, String accessKey, String secretKey) {
+        BootstrapSecurityChecks.requireSafeSecret(config, "im.minio.access-key", accessKey,
+                BootstrapSecurityChecks.DEFAULT_MINIO_ACCESS_KEY);
+        BootstrapSecurityChecks.requireSafeSecret(config, "im.minio.secret-key", secretKey,
+                BootstrapSecurityChecks.DEFAULT_MINIO_SECRET_KEY);
     }
 }

@@ -9,6 +9,9 @@ im:
   # file:
   #   max-upload-bytes: 104857600 # Primary upload limit; im.minio.max-file-size is a deprecated fallback.
 
+  security:
+    allow-development-defaults: false # Set true only for explicitly authorized local development.
+
   # ── 服务器 ──
   server:
     boss-threads: 1              # Boss 线程数

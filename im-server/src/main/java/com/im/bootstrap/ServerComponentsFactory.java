@@ -200,9 +200,7 @@ final class ServerComponentsFactory {
             String sfuEndpoint = config.getString("im.call.sfu-endpoint", BootstrapDefaults.LIVEKIT_SFU_ENDPOINT);
             String apiKey = config.getString("im.call.api-key", BootstrapSecurityChecks.DEFAULT_CALL_API_KEY);
             String apiSecret = config.getString("im.call.api-secret", "");
-            BootstrapSecurityChecks.requireSafeSecret(config, "im.call.api-key", apiKey,
-                    BootstrapSecurityChecks.DEFAULT_CALL_API_KEY);
-            BootstrapSecurityChecks.requireSafeSecret(config, "im.call.api-secret", apiSecret, "");
+            requireCallCredentials(config);
             callManager = new LiveKitCallManager(
                     apiKey,
                     apiSecret,
@@ -226,6 +224,18 @@ final class ServerComponentsFactory {
                 config.getInt("im.call.group.max-participants", 16))
                 : null;
         return new CallDependencies(callManager, callStateManager, groupCallManager);
+    }
+
+    static void requireCallCredentials(Config config) {
+        if (!config.getBoolean("im.call.enabled", false)) {
+            return;
+        }
+        String apiKey = config.getString("im.call.api-key", BootstrapSecurityChecks.DEFAULT_CALL_API_KEY);
+        String apiSecret = config.getString("im.call.api-secret", "");
+        BootstrapSecurityChecks.requireSafeSecret(config, "im.call.api-key", apiKey,
+                BootstrapSecurityChecks.DEFAULT_CALL_API_KEY);
+        BootstrapSecurityChecks.requireSafeSecret(config, "im.call.api-secret", apiSecret,
+                BootstrapSecurityChecks.DEFAULT_CALL_API_SECRET, "");
     }
 
     private static void applyMultiLoginStrategy(Config config, SessionManager sessionManager) {
