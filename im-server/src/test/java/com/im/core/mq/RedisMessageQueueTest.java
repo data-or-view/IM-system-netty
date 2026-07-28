@@ -23,11 +23,13 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RedisMessageQueueTest {
@@ -83,6 +85,50 @@ class RedisMessageQueueTest {
                 assertEquals(1, commands.<RedisCommands<String, String>>sync().xpending(streamKey, groupName).getCount(),
                         "message handled during self-stop must remain pending");
             }
+        } finally {
+            allowConsumerTermination.countDown();
+            queue.stop();
+            stopper.shutdownNow();
+            try (CloseableRedisCommands commands = redis.createSyncCommands()) {
+                commands.<RedisCommands<String, String>>sync().del(streamKey);
+            } finally {
+                redis.close();
+            }
+        }
+    }
+
+    @Test
+    void stopWaitsForUnsubscribedConsumerRetirementTailBeforeReturning() throws Exception {
+        RedisConfiguration redis = redisOrSkip();
+        String topic = "test-unsubscribe-retirement-tail-" + UUID.randomUUID();
+        String streamKey = RedisMessageQueue.STREAM_PREFIX + topic;
+        CountDownLatch consumerRetired = new CountDownLatch(1);
+        CountDownLatch allowConsumerTermination = new CountDownLatch(1);
+        AtomicReference<Thread> consumerThread = new AtomicReference<>();
+        ExecutorService stopper = Executors.newSingleThreadExecutor();
+        RedisMessageQueue queue = new RedisMessageQueue(redis, "unsubscribe-retirement-tail-node",
+                Duration.ofSeconds(30), 10, () -> {
+                    consumerThread.set(Thread.currentThread());
+                    consumerRetired.countDown();
+                    awaitUninterruptibly(allowConsumerTermination);
+                });
+        QueueMessageHandler handler = ignored -> { };
+        try {
+            queue.subscribe(topic, handler);
+            queue.start();
+
+            queue.unsubscribe(topic, handler);
+            assertTrue(consumerRetired.await(5, TimeUnit.SECONDS),
+                    "consumer did not enter its retirement tail after unsubscribe");
+
+            Future<?> externalStop = stopper.submit(queue::stop);
+            assertThrows(TimeoutException.class, () -> externalStop.get(300, TimeUnit.MILLISECONDS),
+                    "external stop returned before an unsubscribed consumer thread terminated");
+
+            allowConsumerTermination.countDown();
+            externalStop.get(5, TimeUnit.SECONDS);
+            assertFalse(consumerThread.get().isAlive(),
+                    "external stop returned before the unsubscribed consumer thread terminated");
         } finally {
             allowConsumerTermination.countDown();
             queue.stop();

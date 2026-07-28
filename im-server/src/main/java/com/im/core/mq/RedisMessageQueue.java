@@ -127,6 +127,7 @@ public class RedisMessageQueue implements IMessageQueue {
     public void start() {
         synchronized (lifecycleLock) {
             if (!awaitCurrentShutdownLocked() || !running.compareAndSet(false, true)) return;
+            removeTerminatedConsumerTasksLocked();
             this.async = redisConfig.async();
 
             // 启动已有订阅的消费者线程
@@ -153,6 +154,7 @@ public class RedisMessageQueue implements IMessageQueue {
                 awaitCurrentShutdownLocked();
                 return;
             }
+            removeTerminatedConsumerTasksLocked();
             if (!running.get() && liveConsumerTasks.isEmpty()) return;
 
             tasks = beginShutdownLocked();
@@ -192,6 +194,15 @@ public class RedisMessageQueue implements IMessageQueue {
             stopping = false;
             lifecycleLock.notifyAll();
         }
+    }
+
+    /**
+     * A consumer removes its topic mapping while it is retiring, but stays live until its
+     * thread has terminated. Removing only tasks already observed dead closes the gap where
+     * a concurrent stop could otherwise miss an exiting thread.
+     */
+    private void removeTerminatedConsumerTasksLocked() {
+        liveConsumerTasks.removeIf(ConsumerTask::hasTerminated);
     }
 
     @Override
@@ -362,6 +373,11 @@ public class RedisMessageQueue implements IMessageQueue {
             }
         }
 
+        boolean hasTerminated() {
+            Thread current = thread;
+            return current != null && !current.isAlive();
+        }
+
         @Override
         public void run() {
             currentConsumerTask.set(this);
@@ -410,7 +426,6 @@ public class RedisMessageQueue implements IMessageQueue {
                 currentConsumerTask.remove();
                 synchronized (lifecycleLock) {
                     consumerTasks.remove(topic, this);
-                    liveConsumerTasks.remove(this);
                     lifecycleLock.notifyAll();
                 }
                 afterConsumerTaskRetired.run();
