@@ -123,6 +123,11 @@ public class SendMessageUseCase {
         return clientMsgId;
     }
 
+    /** Validates and returns the client id before replaying a durable send intent. */
+    public String requireSingleClientMsgId(Map<String, Object> params) {
+        return requireClientMsgId(params);
+    }
+
     /** Publishes a single message after {@link #preflightSingle} has succeeded. */
     public SendMessageResult executePreparedSingle(Map<String, Object> params, String fromUserId,
                                                    String toUserId, IMessageContent content) {

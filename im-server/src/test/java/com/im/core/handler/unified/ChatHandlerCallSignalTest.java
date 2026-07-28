@@ -141,6 +141,28 @@ class ChatHandlerCallSignalTest {
     }
 
     @Test
+    void retriesPendingTerminalSignalWhenPolicyChangesAfterTheTransition() {
+        TogglePolicy policy = new TogglePolicy();
+        ChatHandler handler = handler(policy);
+        callStateStore.session = ringing();
+        queue.failuresRemaining = 1;
+        ApiRequest request = signalRequest("caller", "callee", "CANCEL");
+
+        assertThrows(InfrastructureException.class, () -> handler.handle(request));
+        assertNotNull(callStateStore.pendingSignal);
+        assertEquals(1, callStateStore.endCalls);
+
+        policy.allow = false;
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> response = (Map<String, Object>) handler.handle(request);
+
+        assertEquals("RECEIVED", response.get("status"));
+        assertNull(callStateStore.pendingSignal);
+        assertEquals(1, callStateStore.endCalls);
+    }
+
+    @Test
     void differentTerminalRequestCannotReplayOrOverwritePendingIntent() {
         ChatHandler handler = handler(new AllowPolicy());
         callStateStore.session = ringing();
@@ -438,6 +460,17 @@ class ChatHandlerCallSignalTest {
     private static final class DenyPolicy implements IChatSendPolicy {
         @Override public void requireCanSendSingle(String fromUserId, String toUserId) {
             throw new ForbiddenException("denied");
+        }
+        @Override public void requireCanSendGroup(String fromUserId, String groupId) {}
+    }
+
+    private static final class TogglePolicy implements IChatSendPolicy {
+        private boolean allow = true;
+
+        @Override public void requireCanSendSingle(String fromUserId, String toUserId) {
+            if (!allow) {
+                throw new ForbiddenException("denied after terminal transition");
+            }
         }
         @Override public void requireCanSendGroup(String fromUserId, String groupId) {}
     }

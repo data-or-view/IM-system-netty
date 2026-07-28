@@ -79,9 +79,12 @@ public class ChatHandler implements RequestHandler {
                 return handleInvite(req.params(), uid, toUserId, signal);
             }
             if (callStateManager != null) {
-                String clientMsgId = sendMessageUseCase.preflightSingle(req.params(), uid, toUserId, content);
+                String clientMsgId = sendMessageUseCase.requireSingleClientMsgId(req.params());
                 TerminalSignalIntent pending = callStateManager.requirePendingSignalCompatible(
                         uid, toUserId, signal, clientMsgId);
+                if (pending == null) {
+                    sendMessageUseCase.preflightSingle(req.params(), uid, toUserId, content);
+                }
                 TerminalSignalIntent intent = newTerminalIntent(uid, toUserId, signal, clientMsgId);
                 SendMessageResult result = sendMessageUseCase.executePreparedSingle(
                         req.params(), uid, toUserId, content,
