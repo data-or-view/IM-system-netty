@@ -22,8 +22,8 @@ public interface SingleCallStateStore {
     }
 
     /**
-     * Atomically applies a terminal call transition and records its exact
-     * message intent, or resumes an already-recorded equivalent intent.
+     * Atomically applies a terminal call transition or records an ICE request,
+     * then resumes an already-recorded equivalent intent.
      */
     boolean transitionTerminalSignal(TerminalSignalIntent intent);
 

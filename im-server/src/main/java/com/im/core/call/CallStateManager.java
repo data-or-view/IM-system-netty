@@ -127,7 +127,7 @@ public class CallStateManager {
         byte[] serializedContent = ContentSerializer.toBytes(signal);
         TerminalSignalIntent requestIntent = stateStore.getTerminalSignalByRequest(actorId, peerUserId, clientMsgId);
         if (requestIntent != null) {
-            if (!isTerminal(signal) || !requestIntent.matchesRequest(
+            if (!isRequestTracked(signal) || !requestIntent.matchesRequest(
                     actorId, peerUserId, signal.getAction(), clientMsgId, serializedContent)) {
                 throw new ConflictException("terminal call request identity has already been used");
             }
@@ -148,7 +148,7 @@ public class CallStateManager {
                                                  SignalingContent signal, String clientMsgId,
                                                  Message preparedMessage, TerminalSignalIntent replayIntent) {
         String roomId = requireRoomId(signal);
-        if (!isTerminal(signal)) {
+        if (!isRequestTracked(signal)) {
             if (stateStore.getTerminalSignalByRequest(actorId, peerUserId, clientMsgId) != null) {
                 throw new ConflictException("terminal call request identity has already been used");
             }
@@ -168,13 +168,18 @@ public class CallStateManager {
                 ContentSerializer.toBytes(signal))) {
             throw new ConflictException("terminal call request identity has already been used");
         }
-        if (existing == null) {
+        if (existing == null && isTerminal(signal)) {
             TerminalSignalIntent pending = stateStore.getPendingTerminalSignal(roomId);
             if (pending == null) {
                 requireCanSendSignal(actorId, peerUserId, signal);
             } else if (!pending.matchesRequest(actorId, peerUserId, signal.getAction(), clientMsgId,
                     ContentSerializer.toBytes(signal))) {
                 throw new ConflictException("another terminal call signal is pending delivery");
+            }
+        } else if (existing == null) {
+            requireCanSendSignal(actorId, peerUserId, signal);
+            if (stateStore.getByRoom(roomId) == null) {
+                throw new ConflictException("call state changed before signal could be applied");
             }
         }
         if (!stateStore.transitionTerminalSignal(intent)) {
@@ -240,6 +245,10 @@ public class CallStateManager {
         SignalingAction action = signal != null ? signal.getAction() : null;
         return action == SignalingAction.ACCEPT || action == SignalingAction.REJECT
                 || action == SignalingAction.CANCEL || action == SignalingAction.HANGUP;
+    }
+
+    private boolean isRequestTracked(SignalingContent signal) {
+        return isTerminal(signal) || (signal != null && signal.getAction() == SignalingAction.ICE);
     }
 
     private void requireParticipant(SingleCallSession session, String userId) {

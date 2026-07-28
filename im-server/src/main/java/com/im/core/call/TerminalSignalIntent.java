@@ -61,6 +61,19 @@ public record TerminalSignalIntent(String roomId,
         }
     }
 
+    /** Restores the fingerprint required by modern request indexes from a legacy stored message. */
+    public TerminalSignalIntent withDerivedRequestContentFingerprint() {
+        if (requestContentBase64 != null && !requestContentBase64.isBlank()) {
+            return this;
+        }
+        byte[] body = message().getBody();
+        if (body == null || body.length == 0) {
+            throw new IllegalStateException("stored signal message body is required");
+        }
+        return new TerminalSignalIntent(roomId, actorId, peerUserId, action, clientMsgId,
+                messageJson, Base64.getEncoder().encodeToString(body));
+    }
+
     public boolean matchesRequest(String requestActorId, String requestPeerUserId,
                                   SignalingAction requestAction, String requestClientMsgId,
                                   byte[] serializedContent) {

@@ -205,6 +205,88 @@ class RedisSingleCallStateStoreE2ETest {
         }
     }
 
+    @Test
+    void iceRequestResolvesOneCanonicalMessageAndFencesChangedRetries() {
+        RedisConfiguration redis = redisOrSkip();
+        String roomId = "single-call-ice-request-" + UUID.randomUUID();
+        String actorId = "caller-" + roomId;
+        String peerUserId = "callee-" + roomId;
+        String clientMsgId = "client-ice-request";
+        String requestKey = RedisSingleCallStateStore.requestSignalKey(actorId, peerUserId, clientMsgId);
+        String requestOwnerKey = RedisSingleCallStateStore.requestOwnerKey(actorId, clientMsgId);
+        try {
+            RedisSingleCallStateStore store = new RedisSingleCallStateStore(redis, 3600);
+            assertNotNull(store.createIfUsersIdle(ringing(roomId, System.currentTimeMillis() + 60_000L)));
+            TerminalSignalIntent original = terminalIntent(
+                    roomId, actorId, peerUserId, SignalingAction.ICE, clientMsgId,
+                    "candidate", 61L, 1_785_000_000_061L);
+            TerminalSignalIntent exactRaceCandidate = terminalIntent(
+                    roomId, actorId, peerUserId, SignalingAction.ICE, clientMsgId,
+                    "candidate", 62L, 1_785_000_000_062L);
+
+            assertTrue(store.transitionTerminalSignal(original));
+            assertNotNull(store.getByRoom(roomId), "ICE must not transition the call state");
+            assertNull(store.getPendingTerminalSignal(roomId));
+            assertEquals(original, store.getTerminalSignalByRequest(actorId, peerUserId, clientMsgId));
+            assertTrue(store.transitionTerminalSignal(exactRaceCandidate));
+            TerminalSignalIntent canonical = store.getTerminalSignalByRequest(actorId, peerUserId, clientMsgId);
+            assertEquals(original, canonical);
+            assertSameMessage(original.message(), canonical.message());
+
+            assertFalse(store.transitionTerminalSignal(terminalIntent(
+                    roomId + "-changed", actorId, peerUserId, SignalingAction.ICE, clientMsgId, "candidate")));
+            assertFalse(store.transitionTerminalSignal(terminalIntent(
+                    roomId, actorId, peerUserId, SignalingAction.CANCEL, clientMsgId, "candidate")));
+            assertFalse(store.transitionTerminalSignal(terminalIntent(
+                    roomId, actorId, "other-" + peerUserId, SignalingAction.ICE, clientMsgId, "candidate")));
+            assertFalse(store.transitionTerminalSignal(terminalIntent(
+                    roomId, actorId, peerUserId, SignalingAction.ICE, clientMsgId, "changed")));
+            assertNotNull(store.getByRoom(roomId));
+        } finally {
+            cleanup(redis, roomId, requestKey, requestOwnerKey);
+            redis.close();
+        }
+    }
+
+    @Test
+    void legacyPendingIntentDerivesFingerprintAndMigratesIndexesOnExactReplay() {
+        RedisConfiguration redis = redisOrSkip();
+        String roomId = "single-call-legacy-pending-" + UUID.randomUUID();
+        String actorId = "caller-" + roomId;
+        String peerUserId = "callee-" + roomId;
+        String clientMsgId = "client-legacy-pending";
+        String pendingKey = "im:single_call:{state}:pending_signal:" + roomId;
+        String requestKey = RedisSingleCallStateStore.requestSignalKey(actorId, peerUserId, clientMsgId);
+        String requestOwnerKey = RedisSingleCallStateStore.requestOwnerKey(actorId, clientMsgId);
+        try {
+            RedisSingleCallStateStore store = new RedisSingleCallStateStore(redis, 3600);
+            assertNotNull(store.createIfUsersIdle(ringing(roomId, System.currentTimeMillis() + 60_000L)));
+            TerminalSignalIntent original = terminalIntent(
+                    roomId, actorId, peerUserId, SignalingAction.CANCEL, clientMsgId, "legacy");
+            try (CloseableRedisCommands commands = redis.createSyncCommands()) {
+                RedisClusterCommands<String, String> sync = commands.sync();
+                sync.hset(pendingKey, java.util.Map.of(
+                        "roomId", original.roomId(),
+                        "actorId", original.actorId(),
+                        "peerUserId", original.peerUserId(),
+                        "action", original.action().name(),
+                        "clientMsgId", original.clientMsgId(),
+                        "messageJson", original.messageJson()));
+                sync.expire(pendingKey, SEND_IDEMPOTENCY_TTL_SECONDS);
+            }
+
+            TerminalSignalIntent loaded = store.getPendingTerminalSignal(roomId);
+            assertNotNull(loaded);
+            assertEquals(original.requestContentBase64(), loaded.requestContentBase64());
+            assertTrue(store.transitionTerminalSignal(loaded));
+            assertEquals(original, store.getTerminalSignalByRequest(actorId, peerUserId, clientMsgId));
+            assertEquals(original.requestContentBase64(), redisHget(redis, pendingKey, "requestContentBase64"));
+        } finally {
+            cleanup(redis, roomId, requestKey, requestOwnerKey);
+            redis.close();
+        }
+    }
+
     private static SingleCallSession ringing(String roomId, long deadlineAt) {
         return new SingleCallSession(roomId, "caller-" + roomId, "callee-" + roomId, "voice",
                 SingleCallSession.STATUS_RINGING, "ws://sfu", deadlineAt - 10L, 0L, deadlineAt);
@@ -300,6 +382,12 @@ class RedisSingleCallStateStoreE2ETest {
     private static long redisTtl(RedisConfiguration redis, String key) {
         try (CloseableRedisCommands commands = redis.createSyncCommands()) {
             return commands.<RedisClusterCommands<String, String>>sync().ttl(key);
+        }
+    }
+
+    private static String redisHget(RedisConfiguration redis, String key, String field) {
+        try (CloseableRedisCommands commands = redis.createSyncCommands()) {
+            return commands.<RedisClusterCommands<String, String>>sync().hget(key, field);
         }
     }
 

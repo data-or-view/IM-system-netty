@@ -234,6 +234,38 @@ class ChatHandlerCallSignalTest {
     }
 
     @Test
+    void iceFirstRequestPublishesItsCanonicalMessageAndFencesChangedRetries() {
+        ChatHandler handler = handler(new AllowPolicy(), new CachingIdempotency());
+        callStateStore.session = ringing();
+        queue.failuresRemaining = 1;
+        ApiRequest original = signalRequest("caller", "callee", "ICE", "client-ice-first", "original");
+
+        assertThrows(InfrastructureException.class, () -> handler.handle(original));
+        TerminalSignalIntent canonical = callStateStore.getTerminalSignalByRequest(
+                "caller", "callee", "client-ice-first");
+        assertNotNull(canonical);
+        assertEquals(0, callStateStore.endCalls, "ICE must not transition the call state");
+
+        handler.handle(original);
+
+        assertEquals(2, queue.published.size());
+        assertSameMessage(canonical.message(), queue.published.get(0));
+        assertSameMessage(canonical.message(), queue.published.get(1));
+
+        assertThrows(ConflictException.class,
+                () -> handler.handle(signalRequest("caller", "callee", "CANCEL", "client-ice-first", "original")));
+        assertThrows(ConflictException.class,
+                () -> handler.handle(signalRequest("caller", "callee", "ICE", "client-ice-first", "original", "room-2")));
+        assertThrows(ConflictException.class,
+                () -> handler.handle(signalRequest("caller", "other-callee", "ICE", "client-ice-first", "original")));
+        assertThrows(ConflictException.class,
+                () -> handler.handle(signalRequest("caller", "callee", "ICE", "client-ice-first", "changed")));
+
+        assertEquals(2, queue.published.size(), "changed ICE retries must fail before cached send results");
+        assertEquals(0, callStateStore.endCalls);
+    }
+
+    @Test
     void acknowledgedTerminalRequestCannotReuseIdentityWithChangedPayload() {
         ChatHandler handler = handler(new AllowPolicy(), new CachingIdempotency());
         callStateStore.session = ringing();
@@ -464,6 +496,10 @@ class ChatHandlerCallSignalTest {
             }
             TerminalSignalIntent roomPending = getPendingTerminalSignal(intent.roomId());
             if (roomPending != null) return roomPending.equals(intent);
+            if (intent.action() == SignalingAction.ICE) {
+                terminalRequests.put(requestKey(intent.actorId(), intent.clientMsgId()), intent);
+                return true;
+            }
             SingleCallSession transitioned = intent.action() == SignalingAction.ACCEPT
                     ? acceptBy(intent.roomId(), intent.actorId())
                     : endBy(intent.roomId(), intent.actorId());

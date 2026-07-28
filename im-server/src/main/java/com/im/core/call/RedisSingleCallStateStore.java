@@ -154,7 +154,9 @@ public class RedisSingleCallStateStore implements SingleCallStateStore {
                   and redis.call('hget', KEYS[5], 'action') == ARGV[4]
                   and redis.call('hget', KEYS[5], 'clientMsgId') == ARGV[5]
                   and redis.call('hget', KEYS[5], 'messageJson') == ARGV[6]
-                  and redis.call('hget', KEYS[5], 'requestContentBase64') == ARGV[7] then
+                  and (redis.call('hget', KEYS[5], 'requestContentBase64') == false
+                    or redis.call('hget', KEYS[5], 'requestContentBase64') == ARGV[7]) then
+                redis.call('hset', KEYS[5], 'requestContentBase64', ARGV[7])
                 redis.call('expire', KEYS[5], ARGV[12])
                 redis.call('hset', KEYS[6],
                   'roomId', ARGV[1],
@@ -247,6 +249,75 @@ public class RedisSingleCallStateStore implements SingleCallStateStore {
             else
               redis.call('del', KEYS[1], KEYS[2], KEYS[3])
             end
+            return 1
+            """;
+    private static final String ICE_SIGNAL_REQUEST_SCRIPT = """
+            local ownerRoom = redis.call('hget', KEYS[3], 'roomId')
+            if ownerRoom ~= false then
+              if ownerRoom == ARGV[1]
+                  and redis.call('hget', KEYS[3], 'actorId') == ARGV[2]
+                  and redis.call('hget', KEYS[3], 'peerUserId') == ARGV[3]
+                  and redis.call('hget', KEYS[3], 'action') == ARGV[4]
+                  and redis.call('hget', KEYS[3], 'clientMsgId') == ARGV[5]
+                  and redis.call('hget', KEYS[3], 'requestContentBase64') == ARGV[7] then
+                redis.call('expire', KEYS[2], ARGV[8])
+                redis.call('expire', KEYS[3], ARGV[8])
+                return 2
+              end
+              return 0
+            end
+
+            local requestRoom = redis.call('hget', KEYS[2], 'roomId')
+            if requestRoom ~= false then
+              if requestRoom == ARGV[1]
+                  and redis.call('hget', KEYS[2], 'actorId') == ARGV[2]
+                  and redis.call('hget', KEYS[2], 'peerUserId') == ARGV[3]
+                  and redis.call('hget', KEYS[2], 'action') == ARGV[4]
+                  and redis.call('hget', KEYS[2], 'clientMsgId') == ARGV[5]
+                  and redis.call('hget', KEYS[2], 'requestContentBase64') == ARGV[7] then
+                redis.call('hset', KEYS[3],
+                  'roomId', redis.call('hget', KEYS[2], 'roomId'),
+                  'actorId', redis.call('hget', KEYS[2], 'actorId'),
+                  'peerUserId', redis.call('hget', KEYS[2], 'peerUserId'),
+                  'action', redis.call('hget', KEYS[2], 'action'),
+                  'clientMsgId', redis.call('hget', KEYS[2], 'clientMsgId'),
+                  'messageJson', redis.call('hget', KEYS[2], 'messageJson'),
+                  'requestContentBase64', redis.call('hget', KEYS[2], 'requestContentBase64'))
+                redis.call('expire', KEYS[2], ARGV[8])
+                redis.call('expire', KEYS[3], ARGV[8])
+                return 2
+              end
+              return 0
+            end
+
+            local caller = redis.call('hget', KEYS[1], 'callerId')
+            local callee = redis.call('hget', KEYS[1], 'calleeId')
+            if caller == false or callee == false
+                or ARGV[4] ~= 'ICE'
+                or (ARGV[2] ~= caller and ARGV[2] ~= callee)
+                or (ARGV[3] ~= caller and ARGV[3] ~= callee)
+                or redis.call('hget', KEYS[1], 'status') == ARGV[9] then
+              return 0
+            end
+
+            redis.call('hset', KEYS[2],
+              'roomId', ARGV[1],
+              'actorId', ARGV[2],
+              'peerUserId', ARGV[3],
+              'action', ARGV[4],
+              'clientMsgId', ARGV[5],
+              'messageJson', ARGV[6],
+              'requestContentBase64', ARGV[7])
+            redis.call('expire', KEYS[2], ARGV[8])
+            redis.call('hset', KEYS[3],
+              'roomId', ARGV[1],
+              'actorId', ARGV[2],
+              'peerUserId', ARGV[3],
+              'action', ARGV[4],
+              'clientMsgId', ARGV[5],
+              'messageJson', ARGV[6],
+              'requestContentBase64', ARGV[7])
+            redis.call('expire', KEYS[3], ARGV[8])
             return 1
             """;
     private static final String ACKNOWLEDGE_TERMINAL_SIGNAL_SCRIPT = """
@@ -414,6 +485,22 @@ public class RedisSingleCallStateStore implements SingleCallStateStore {
         }
         try (CloseableRedisCommands redis = redisConfig.createSyncCommands()) {
             RedisClusterCommands<String, String> sync = redis.sync();
+            if (intent.action() == SignalingAction.ICE) {
+                Long result = sync.eval(ICE_SIGNAL_REQUEST_SCRIPT, ScriptOutputType.INTEGER,
+                        new String[]{roomKey(intent.roomId()),
+                                requestSignalKey(intent.actorId(), intent.peerUserId(), intent.clientMsgId()),
+                                requestOwnerKey(intent.actorId(), intent.clientMsgId())},
+                        intent.roomId(),
+                        intent.actorId(),
+                        intent.peerUserId(),
+                        intent.action().name(),
+                        intent.clientMsgId(),
+                        intent.messageJson(),
+                        intent.requestContentBase64(),
+                        String.valueOf(pendingSignalTtlSeconds),
+                        SingleCallSession.STATUS_TIMED_OUT);
+                return Long.valueOf(1L).equals(result) || Long.valueOf(2L).equals(result);
+            }
             SingleCallSession session = read(sync, intent.roomId());
             String callerId = session != null ? session.callerId() : "missing-caller:" + intent.roomId();
             String calleeId = session != null ? session.calleeId() : "missing-callee:" + intent.roomId();
@@ -612,7 +699,7 @@ public class RedisSingleCallStateStore implements SingleCallStateStore {
         Map<String, String> data = sync.hgetall(key);
         if (data == null || data.isEmpty()) return null;
         try {
-            return new TerminalSignalIntent(
+            TerminalSignalIntent intent = new TerminalSignalIntent(
                     data.get("roomId"),
                     data.get("actorId"),
                     data.get("peerUserId"),
@@ -620,6 +707,7 @@ public class RedisSingleCallStateStore implements SingleCallStateStore {
                     data.get("clientMsgId"),
                     data.get("messageJson"),
                     data.get("requestContentBase64"));
+            return intent.withDerivedRequestContentFingerprint();
         } catch (RuntimeException e) {
             throw new IllegalStateException("invalid terminal signal for " + description, e);
         }
