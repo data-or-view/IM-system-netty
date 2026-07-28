@@ -48,6 +48,12 @@ public final class SchemaInitializer {
             "(?im)^\\s*`?([a-z][a-z0-9_]*)`?\\s+"
                     + "(BIGINT|INT|SMALLINT|TINYINT|MEDIUMTEXT|TEXT|VARCHAR\\(([0-9]+)\\)|CHAR\\(([0-9]+)\\))"
                     + "(?=\\s|,)([^\\r\\n]*)");
+    private static final Pattern TABLE_PRIMARY_KEY_PATTERN = Pattern.compile(
+            "(?im)^\\s*PRIMARY\\s+KEY\\s*\\(([^\\r\\n)]*)\\)");
+    private static final Pattern NAMED_KEY_PATTERN = Pattern.compile(
+            "(?im)^\\s*(UNIQUE\\s+)?(?:KEY|INDEX)\\s+`?([a-z][a-z0-9_]*)`?\\s*\\(([^\\r\\n)]*)\\)");
+    private static final Pattern KEY_COLUMN_PATTERN = Pattern.compile(
+            "(?i)^\\s*`?([a-z][a-z0-9_]*)`?(?:\\s*\\([0-9]+\\))?(?:\\s+(?:ASC|DESC))?\\s*$");
 
     private static final List<String> LEGACY_V11_TABLE_NAMES = List.of(
             "im_users", "im_friends", "im_friend_requests", "im_blacklist", "im_refresh_tokens",
@@ -185,23 +191,18 @@ public final class SchemaInitializer {
         }
 
         requireLegacyV11ColumnFingerprint(connection);
-
-        requireKnownIndexIfPresent(connection, "im_messages", "uk_client_msg", false, List.of("client_msg_id"));
-        requireKnownIndexIfPresent(connection, "im_messages", "uk_conversation_client_msg", false,
-                List.of("conversation_id", "client_msg_id"));
-        requireKnownIndexIfPresent(connection, "im_messages", "idx_client_msg", true, List.of("client_msg_id"));
-        for (IndexInfo index : indexes(connection, "im_messages").values()) {
-            if (!index.nonUnique() && index.columns().equals(List.of("client_msg_id"))
-                    && !index.name().equalsIgnoreCase("uk_client_msg")) {
-                throw incompatibleSchema("unknown global client_msg_id unique index " + index.name());
-            }
-        }
+        Map<String, Map<String, IndexInfo>> expectedKeys = expectedKeyDefinitions();
+        requireLegacyV11KeyFingerprint(connection, expectedKeys);
 
         if (catalog.hasTable("im_conversation_projection_events")) {
             requireProjectionTableFingerprint(connection);
+            requireExactKeyFingerprint(connection, "im_conversation_projection_events",
+                    expectedKeys.get("im_conversation_projection_events"), true);
         }
         if (catalog.hasTable("im_schema_versions")) {
             requireVersionTableFingerprint(connection);
+            requireExactKeyFingerprint(connection, "im_schema_versions",
+                    expectedKeys.get("im_schema_versions"), true);
             if (!readVersions(connection).isEmpty()) {
                 throw incompatibleSchema("schema metadata exists but does not contain the expected Version 2 record");
             }
@@ -323,8 +324,10 @@ public final class SchemaInitializer {
         }
 
         Map<String, Map<String, ExpectedColumn>> expectedByTable = expectedColumnDefinitions();
+        Map<String, Map<String, IndexInfo>> expectedKeysByTable = expectedKeyDefinitions();
         for (String table : IM_TABLE_NAMES) {
             requireTableColumnFingerprint(connection, table, expectedByTable.get(table));
+            requireExactKeyFingerprint(connection, table, expectedKeysByTable.get(table), false);
         }
 
         ColumnInfo passwordHash = requireColumn(connection, "im_users", "password_hash");
@@ -405,6 +408,92 @@ public final class SchemaInitializer {
         }
     }
 
+    private static void requireLegacyV11KeyFingerprint(
+            Connection connection, Map<String, Map<String, IndexInfo>> expectedByTable) throws Exception {
+        for (String table : LEGACY_V11_TABLE_NAMES) {
+            Map<String, IndexInfo> expected = expectedByTable.get(table);
+            if ("im_messages".equals(table)) {
+                requireMessageMigrationKeyPrefix(connection, expected);
+            } else {
+                requireExactKeyFingerprint(connection, table, expected, true);
+            }
+        }
+    }
+
+    private static void requireMessageMigrationKeyPrefix(
+            Connection connection, Map<String, IndexInfo> expectedV2) throws Exception {
+        if (expectedV2 == null) {
+            throw incompatibleSchema("missing canonical key definitions for im_messages");
+        }
+
+        Map<String, IndexInfo> stableExpected = new LinkedHashMap<>(expectedV2);
+        IndexInfo expectedConversationUnique = stableExpected.remove("uk_conversation_client_msg");
+        IndexInfo expectedClientLookup = stableExpected.remove("idx_client_msg");
+
+        Map<String, IndexInfo> stableActual = new LinkedHashMap<>(indexes(connection, "im_messages"));
+        IndexInfo globalUnique = stableActual.remove("uk_client_msg");
+        IndexInfo conversationUnique = stableActual.remove("uk_conversation_client_msg");
+        IndexInfo clientLookup = stableActual.remove("idx_client_msg");
+
+        if (!keyMapsMatch(stableExpected, stableActual)) {
+            throw incompatibleSchema("key fingerprint mismatch for im_messages");
+        }
+        if (globalUnique != null && !keyMatches(globalUnique,
+                new IndexInfo("uk_client_msg", false, List.of("client_msg_id")))) {
+            throw incompatibleSchema("incompatible im_messages.uk_client_msg");
+        }
+        if (conversationUnique != null && !keyMatches(conversationUnique, expectedConversationUnique)) {
+            throw incompatibleSchema("incompatible im_messages.uk_conversation_client_msg");
+        }
+        if (clientLookup != null && !keyMatches(clientLookup, expectedClientLookup)) {
+            throw incompatibleSchema("incompatible im_messages.idx_client_msg");
+        }
+
+        Set<String> prefixState = new LinkedHashSet<>();
+        if (globalUnique != null) prefixState.add("uk_client_msg");
+        if (conversationUnique != null) prefixState.add("uk_conversation_client_msg");
+        if (clientLookup != null) prefixState.add("idx_client_msg");
+        if (!Set.of(
+                Set.of("uk_client_msg"),
+                Set.<String>of(),
+                Set.of("uk_conversation_client_msg"),
+                Set.of("uk_conversation_client_msg", "idx_client_msg")
+        ).contains(Set.copyOf(prefixState))) {
+            throw incompatibleSchema("invalid im_messages key migration prefix " + prefixState);
+        }
+    }
+
+    private static void requireExactKeyFingerprint(Connection connection, String table,
+                                                   Map<String, IndexInfo> expected, boolean legacy)
+            throws Exception {
+        Map<String, IndexInfo> actual = indexes(connection, table);
+        if (expected == null || !keyMapsMatch(expected, actual)) {
+            String detail = "key fingerprint mismatch for " + table;
+            if (legacy) {
+                throw incompatibleSchema(detail);
+            }
+            throw new IllegalStateException("Version 2 fingerprint mismatch: " + table + " keys");
+        }
+    }
+
+    private static boolean keyMapsMatch(Map<String, IndexInfo> expected, Map<String, IndexInfo> actual) {
+        if (!expected.keySet().equals(actual.keySet())) {
+            return false;
+        }
+        for (Map.Entry<String, IndexInfo> entry : expected.entrySet()) {
+            if (!keyMatches(actual.get(entry.getKey()), entry.getValue())) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean keyMatches(IndexInfo actual, IndexInfo expected) {
+        return actual != null && expected != null
+                && actual.nonUnique() == expected.nonUnique()
+                && actual.columns().equals(expected.columns());
+    }
+
     private static void requireTableColumnFingerprint(Connection connection, String table,
                                                       Map<String, ExpectedColumn> expected) throws Exception {
         Map<String, ColumnInfo> actual = columns(connection, table);
@@ -441,14 +530,6 @@ public final class SchemaInitializer {
             throw new IllegalStateException("Required schema column is missing: " + table + "." + column);
         }
         return result;
-    }
-
-    private static void requireKnownIndexIfPresent(Connection connection, String table, String indexName,
-                                                   boolean nonUnique, List<String> columns) throws Exception {
-        IndexInfo actual = indexes(connection, table).get(indexName.toLowerCase(Locale.ROOT));
-        if (actual != null && (actual.nonUnique() != nonUnique || !actual.columns().equals(columns))) {
-            throw incompatibleSchema("incompatible " + table + "." + indexName);
-        }
     }
 
     private static void requireIndex(Connection connection, String table, String indexName,
@@ -658,6 +739,68 @@ public final class SchemaInitializer {
             definitions.put(table.getKey(), Map.copyOf(columns));
         }
         return Map.copyOf(definitions);
+    }
+
+    private static Map<String, Map<String, IndexInfo>> expectedKeyDefinitions() throws Exception {
+        Map<String, Map<String, IndexInfo>> definitions = new LinkedHashMap<>();
+        for (Map.Entry<String, String> table : loadCreateTableSql().entrySet()) {
+            String tableName = table.getKey();
+            String createSql = table.getValue();
+            Map<String, IndexInfo> keys = new LinkedHashMap<>();
+
+            Matcher columnMatcher = COLUMN_DEFINITION_PATTERN.matcher(createSql);
+            while (columnMatcher.find()) {
+                if (columnMatcher.group(5).toUpperCase(Locale.ROOT).contains("PRIMARY KEY")) {
+                    addExpectedKey(keys, tableName,
+                            new IndexInfo("PRIMARY", false,
+                                    List.of(columnMatcher.group(1).toLowerCase(Locale.ROOT))));
+                }
+            }
+
+            Matcher primaryMatcher = TABLE_PRIMARY_KEY_PATTERN.matcher(createSql);
+            while (primaryMatcher.find()) {
+                addExpectedKey(keys, tableName,
+                        new IndexInfo("PRIMARY", false,
+                                parseKeyColumns(tableName, "PRIMARY", primaryMatcher.group(1))));
+            }
+
+            Matcher namedMatcher = NAMED_KEY_PATTERN.matcher(createSql);
+            while (namedMatcher.find()) {
+                String keyName = namedMatcher.group(2);
+                addExpectedKey(keys, tableName,
+                        new IndexInfo(keyName, namedMatcher.group(1) == null,
+                                parseKeyColumns(tableName, keyName, namedMatcher.group(3))));
+            }
+
+            if (keys.isEmpty()) {
+                throw new IllegalStateException("No key definitions parsed for " + tableName);
+            }
+            definitions.put(tableName, Map.copyOf(keys));
+        }
+        return Map.copyOf(definitions);
+    }
+
+    private static void addExpectedKey(Map<String, IndexInfo> keys, String table, IndexInfo key) {
+        String normalizedName = key.name().toLowerCase(Locale.ROOT);
+        if (keys.putIfAbsent(normalizedName, key) != null) {
+            throw new IllegalStateException("Duplicate key definition in " + table + ": " + key.name());
+        }
+    }
+
+    private static List<String> parseKeyColumns(String table, String key, String definition) {
+        List<String> columns = new ArrayList<>();
+        for (String rawColumn : definition.split(",")) {
+            Matcher matcher = KEY_COLUMN_PATTERN.matcher(rawColumn);
+            if (!matcher.matches()) {
+                throw new IllegalStateException(
+                        "Unsupported key column definition in " + table + "." + key + ": " + rawColumn.strip());
+            }
+            columns.add(matcher.group(1).toLowerCase(Locale.ROOT));
+        }
+        if (columns.isEmpty()) {
+            throw new IllegalStateException("No key columns parsed for " + table + "." + key);
+        }
+        return List.copyOf(columns);
     }
 
     private static String v2Checksum() throws Exception {

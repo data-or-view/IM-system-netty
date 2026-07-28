@@ -58,6 +58,16 @@ class BootstrapSecurityChecksTest {
     }
 
     @Test
+    void rebuildSchemaWithWhitespaceIsRejectedOutsideLocalEnvironment() {
+        Config config = new TestConfig(Map.of(
+                "im.env", "prod",
+                "im.db.schema", " rebuild "));
+
+        assertThrows(IllegalStateException.class,
+                () -> DatabaseComponentsFactory.requireAllowedSchemaMode(config));
+    }
+
+    @Test
     void rebuildSchemaIsAllowedInExplicitLocalEnvironment() {
         Config config = new TestConfig(Map.of(
                 "im.env", "test",

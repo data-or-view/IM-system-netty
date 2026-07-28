@@ -128,6 +128,53 @@ class SchemaMigrationE2ETest extends BaseE2ETest {
         assertFalse(tableExists(migrationDataSource, "im_schema_versions"));
     }
 
+    @Test
+    void migrateRejectsLegacySchemaMissingIdempotencyPrimaryKeyBeforeDdl() throws Exception {
+        createLegacyV11Fixture(migrationDataSource);
+        try (Connection connection = migrationDataSource.getConnection(); Statement statement = connection.createStatement()) {
+            statement.execute("ALTER TABLE im_idempotency_records DROP PRIMARY KEY");
+        }
+
+        assertMigrationRejectedWithoutDdl();
+    }
+
+    @Test
+    void migrateRejectsLegacySchemaMissingConversationSequenceKeyBeforeDdl() throws Exception {
+        createLegacyV11Fixture(migrationDataSource);
+        try (Connection connection = migrationDataSource.getConnection(); Statement statement = connection.createStatement()) {
+            statement.execute("ALTER TABLE im_messages DROP INDEX uk_conversation_seq");
+        }
+
+        assertMigrationRejectedWithoutDdl();
+    }
+
+    @Test
+    void autoRejectsManagedV2SchemaMissingCanonicalKey() throws Exception {
+        SchemaInitializer.initialize(migrationDataSource, "auto");
+        try (Connection connection = migrationDataSource.getConnection(); Statement statement = connection.createStatement()) {
+            statement.execute("ALTER TABLE im_messages DROP INDEX uk_conversation_seq");
+        }
+        List<String> before = metadataSnapshot(migrationDataSource);
+
+        assertThrows(DatabasePersistenceException.class,
+                () -> SchemaInitializer.initialize(migrationDataSource, "auto"));
+
+        assertEquals(before, metadataSnapshot(migrationDataSource));
+        assertEquals(1, versionTwoCount(migrationDataSource));
+    }
+
+    private static void assertMigrationRejectedWithoutDdl() throws Exception {
+        List<String> before = metadataSnapshot(migrationDataSource);
+
+        assertThrows(DatabasePersistenceException.class,
+                () -> SchemaInitializer.initialize(migrationDataSource, "migrate"));
+
+        assertEquals(before, metadataSnapshot(migrationDataSource));
+        assertFalse(columnExists(migrationDataSource, "im_users", "password_hash"));
+        assertFalse(tableExists(migrationDataSource, "im_conversation_projection_events"));
+        assertFalse(tableExists(migrationDataSource, "im_schema_versions"));
+    }
+
     private static void assertV2Fingerprint(DataSource dataSource) throws Exception {
         assertTrue(tableExists(dataSource, "im_conversation_projection_events"));
         assertTrue(indexExists(dataSource, "im_conversation_projection_events", "uk_conversation_projection_message"));

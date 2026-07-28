@@ -50,7 +50,7 @@ final class DatabaseComponentsFactory {
     }
 
     static void requireAllowedSchemaMode(Config config) {
-        String schemaMode = config.getString("im.db.schema").orElse("auto");
+        String schemaMode = config.getString("im.db.schema").orElse("auto").trim();
         if ("rebuild".equalsIgnoreCase(schemaMode) && !BootstrapSecurityChecks.allowsDevDefaults(config)) {
             throw new IllegalStateException(
                     "im.db.schema=rebuild is restricted to explicit local development or testing");
