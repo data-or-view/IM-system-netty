@@ -46,7 +46,8 @@ class DeliveryConsumerTest {
         TestMessageQueue queue = new TestMessageQueue();
         TestRouteTable routeTable = new TestRouteTable("node-a");
         routeTable.bindings.put("u2", List.of(new RouteBinding(
-                "u2", "node-a", PlatformID.IOS, phoneSession.getSessionId(), 0)));
+                "u2", "node-a", PlatformID.IOS, phoneSession.getSessionId(), 0,
+                "lease-a", "generation-phone")));
         DeliveryConsumer consumer = new DeliveryConsumer(
                 queue, sessionManager, routeTable, new NoopClusterMessageBus(), "node-a");
 
@@ -68,7 +69,8 @@ class DeliveryConsumerTest {
         TestMessageQueue queue = new TestMessageQueue();
         TestRouteTable routeTable = new TestRouteTable("node-a");
         routeTable.bindings.put("u2", List.of(new RouteBinding(
-                "u2", "node-a", PlatformID.IOS, "missing-session", 0)));
+                "u2", "node-a", PlatformID.IOS, "missing-session", 0,
+                "lease-a", "generation-missing")));
         DeliveryConsumer consumer = new DeliveryConsumer(
                 queue, new SessionManager(), routeTable, new NoopClusterMessageBus(), "node-a");
 
@@ -77,7 +79,8 @@ class DeliveryConsumerTest {
             queue.handler(MessageQueueTopics.DELIVER).onMessage(
                     Message.createSingle("u1", "u2", "c1", 101, "{\"text\":\"hi\"}", 1));
 
-            assertEquals(List.of("u2|node-a|1|missing-session"), routeTable.offlineCalls);
+            assertEquals(List.of("u2|node-a|1|missing-session|lease-a|generation-missing"),
+                    routeTable.offlineCalls);
         } finally {
             consumer.stop();
         }
@@ -89,7 +92,8 @@ class DeliveryConsumerTest {
         TestRouteTable routeTable = new TestRouteTable("node-a");
         RecordingClusterMessageBus bus = new RecordingClusterMessageBus();
         routeTable.bindings.put("u2", List.of(new RouteBinding(
-                "u2", "node-b", PlatformID.IOS, "s1", System.currentTimeMillis() - 1)));
+                "u2", "node-b", PlatformID.IOS, "s1", System.currentTimeMillis() - 1,
+                "lease-b", "generation-expired")));
         DeliveryConsumer consumer = new DeliveryConsumer(queue, new SessionManager(), routeTable, bus, "node-a");
 
         try {
@@ -108,7 +112,8 @@ class DeliveryConsumerTest {
         TestMessageQueue queue = new TestMessageQueue();
         TestRouteTable routeTable = new TestRouteTable("node-a");
         routeTable.bindings.put("u2", List.of(new RouteBinding(
-                "u2", "node-b", PlatformID.IOS, "s1", 0)));
+                "u2", "node-b", PlatformID.IOS, "s1", 0,
+                "lease-b", "generation-forward")));
         DeliveryConsumer consumer = new DeliveryConsumer(
                 queue, new SessionManager(), routeTable, new FailingClusterMessageBus(), "node-a");
 
@@ -129,8 +134,10 @@ class DeliveryConsumerTest {
         TestRouteTable routeTable = new TestRouteTable("node-a");
         RecordingClusterMessageBus bus = new RecordingClusterMessageBus();
         routeTable.bindings.put("u2", List.of(
-                new RouteBinding("u2", "node-b", PlatformID.IOS, "ios-session", 0),
-                new RouteBinding("u2", "node-b", PlatformID.WINDOWS, "pc-session", 0)));
+                new RouteBinding("u2", "node-b", PlatformID.IOS, "ios-session", 0,
+                        "lease-b", "generation-ios"),
+                new RouteBinding("u2", "node-b", PlatformID.WINDOWS, "pc-session", 0,
+                        "lease-b", "generation-pc")));
         DeliveryConsumer consumer = new DeliveryConsumer(queue, new SessionManager(), routeTable, bus, "node-a");
 
         try {
@@ -141,10 +148,14 @@ class DeliveryConsumerTest {
             assertEquals(2, bus.awaitSentCount(2), "same-node bindings must not be collapsed");
             assertTrue(bus.sent.stream().anyMatch(message ->
                     message.getTargetPlatformId() == PlatformID.IOS
-                            && "ios-session".equals(message.getTargetSessionId())));
+                            && "ios-session".equals(message.getTargetSessionId())
+                            && "lease-b".equals(message.getTargetNodeIncarnation())
+                            && "generation-ios".equals(message.getTargetGeneration())));
             assertTrue(bus.sent.stream().anyMatch(message ->
                     message.getTargetPlatformId() == PlatformID.WINDOWS
-                            && "pc-session".equals(message.getTargetSessionId())));
+                            && "pc-session".equals(message.getTargetSessionId())
+                            && "lease-b".equals(message.getTargetNodeIncarnation())
+                            && "generation-pc".equals(message.getTargetGeneration())));
         } finally {
             consumer.stop();
         }
@@ -210,6 +221,12 @@ class DeliveryConsumerTest {
         @Override
         public void offline(String userId, String nodeId, int platformId, String sessionId) {
             offlineCalls.add(userId + "|" + nodeId + "|" + platformId + "|" + sessionId);
+        }
+
+        @Override
+        public void offline(RouteBinding binding) {
+            offlineCalls.add(binding.userId() + "|" + binding.nodeId() + "|" + binding.platformId()
+                    + "|" + binding.sessionId() + "|" + binding.nodeIncarnation() + "|" + binding.generation());
         }
 
         @Override
