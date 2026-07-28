@@ -62,15 +62,15 @@ export class HttpTransport {
     });
   }
 
-  multipartInit(fileName: string, fileSize: number, mimeType: string): Promise<{ uploadId: string; fileId?: string; objectId?: string }> {
+  multipartInit(_fileName: string, _fileSize: number, _mimeType: string): Promise<{ uploadId: string; fileId?: string; objectId?: string }> {
     return Promise.reject(new IMProtocolError("Multipart uploads are disabled during POST upload migration"));
   }
 
-  uploadPart(uploadId: string, partNumber: number, data: UploadBody): Promise<string> {
+  uploadPart(_uploadId: string, _partNumber: number, _data: UploadBody): Promise<string> {
     return Promise.reject(new IMProtocolError("Multipart uploads are disabled during POST upload migration"));
   }
 
-  multipartComplete(uploadId: string, parts: Array<{ partNumber: number; etag: string }>): Promise<FileUploadResult> {
+  multipartComplete(_uploadId: string, _parts: Array<{ partNumber: number; etag: string }>): Promise<FileUploadResult> {
     return Promise.reject(new IMProtocolError("Multipart uploads are disabled during POST upload migration"));
   }
 

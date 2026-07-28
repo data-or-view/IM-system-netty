@@ -29,17 +29,17 @@ export class FileAPI {
   }
 
   /** 初始化分片上传 */
-  multipartInit(fileName: string, fileSize: number, mimeType?: string): Promise<MultipartInitResult> {
+  multipartInit(_fileName: string, _fileSize: number, _mimeType?: string): Promise<MultipartInitResult> {
     return this.multipartMigrationRequired();
   }
 
   /** 上传分片 */
-  multipartUpload(uploadId: string, partNumber: number, data: Uint8Array): Promise<string> {
+  multipartUpload(_uploadId: string, _partNumber: number, _data: Uint8Array): Promise<string> {
     return this.multipartMigrationRequired();
   }
 
   /** 完成分片上传 */
-  multipartComplete(uploadId: string, parts: Array<{ partNumber: number; etag: string }>): Promise<MultipartUploadResult> {
+  multipartComplete(_uploadId: string, _parts: Array<{ partNumber: number; etag: string }>): Promise<MultipartUploadResult> {
     return this.multipartMigrationRequired();
   }
 

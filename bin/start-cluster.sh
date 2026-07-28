@@ -2,7 +2,10 @@
 # =============================================
 # IM System — Cluster Startup Script
 # Starts two nodes for local cluster testing.
-# Both nodes share the same Redis for coordination.
+# Both nodes share the same Redis, MySQL, MQ, and MinIO.
+# Node-1 is the only schema owner; node-2 always starts with schema mode none.
+# Default owner mode auto bootstraps a blank DB or validates managed Version 2.
+# For a recognized v1.1 DB, use IM_CLUSTER_SCHEMA_OWNER_MODE=migrate.
 # =============================================
 set -euo pipefail
 
@@ -18,6 +21,15 @@ REDIS_HOST="${IM_REDIS_HOST:-127.0.0.1}"
 REDIS_PORT="${IM_REDIS_PORT:-6379}"
 REDIS_USERNAME="${IM_REDIS_USERNAME:-}"
 REDIS_PASSWORD="${IM_REDIS_PASSWORD:-difyai123456}"
+NODE1_SCHEMA_MODE="${IM_CLUSTER_SCHEMA_OWNER_MODE:-auto}"
+
+case "$NODE1_SCHEMA_MODE" in
+  auto|migrate) ;;
+  *)
+    echo "[ERROR] IM_CLUSTER_SCHEMA_OWNER_MODE must be 'auto' or 'migrate' (got: $NODE1_SCHEMA_MODE)."
+    exit 1
+    ;;
+esac
 
 # Node configurations
 NODE1_ID="node-1"
@@ -134,15 +146,15 @@ start_node() {
 
   echo "[START] $node_id → WS=$ws_port HTTP=$http_port"
 
-  local extra_opts=""
-  # Node-1 initializes the DB schema; subsequent nodes skip it to avoid "table already exists" errors
-  if [ "$node_id" != "$NODE1_ID" ]; then
-    extra_opts="-Dim.db.schema=none"
+  local schema_mode="none"
+  if [ "$node_id" = "$NODE1_ID" ]; then
+    schema_mode="$NODE1_SCHEMA_MODE"
   fi
 
   # Use the im.env=macbook-dev profile (has Redis/MySQL config), override ports and node ID
-  # shellcheck disable=SC2086
-  nohup java \
+  # Config gives IM_* precedence over -D. Remove an ambient IM_DB_SCHEMA so the
+  # per-node property below remains authoritative and node-2 cannot migrate.
+  nohup env -u IM_DB_SCHEMA java \
     "-Dim.env=macbook-dev" \
     "-Dim.node.id=$node_id" \
     "-Dim.ws.port=$ws_port" \
@@ -151,79 +163,82 @@ start_node() {
     "-Dim.redis.port=$REDIS_PORT" \
     "-Dim.redis.username=$REDIS_USERNAME" \
     "-Dim.redis.password=$REDIS_PASSWORD" \
-    $extra_opts \
+    "-Dim.db.schema=$schema_mode" \
     -jar "$JAR" \
     > "$log_file" 2>&1 < /dev/null &
 
   local pid=$!
   disown "$pid" 2>/dev/null || true
   echo "$pid" > "$pid_file"
-  echo "[OK] $node_id started with PID $pid (log: ${log_file/#$HOME/~})"
+  echo "[OK] $node_id started with PID $pid, schema=$schema_mode (log: ${log_file/#$HOME/~})"
 }
 
-# ----- Start nodes -----
-
-start_node "$NODE1_ID" "$NODE1_WS_PORT" "$NODE1_HTTP_PORT"
-start_node "$NODE2_ID" "$NODE2_WS_PORT" "$NODE2_HTTP_PORT"
-
-# ----- Wait and verify (poll up to 20s for "Server ready") -----
-
-echo ""
-echo "Waiting for nodes to be ready..."
-all_ok=true
-for node_id in "$NODE1_ID" "$NODE2_ID"; do
+wait_for_node() {
+  local node_id=$1
+  local ws_port=$2
+  local http_port=$3
+  local require_v2=$4
   pid_file="$PID_DIR/${node_id}.pid"
   log_file="$LOG_DIR/${node_id}.log"
-  if [ "$node_id" = "$NODE1_ID" ]; then
-    ws_port="$NODE1_WS_PORT"
-    http_port="$NODE1_HTTP_PORT"
-  else
-    ws_port="$NODE2_WS_PORT"
-    http_port="$NODE2_HTTP_PORT"
-  fi
 
   if [ ! -f "$pid_file" ]; then
     echo "[FAIL] $node_id — no PID file found"
-    all_ok=false
-    continue
+    return 1
   fi
 
   pid=$(cat "$pid_file")
   if ! kill -0 "$pid" 2>/dev/null; then
     echo "[FAIL] $node_id (PID $pid) — process died. Last 20 lines of log:"
     tail -20 "$log_file"
-    all_ok=false
-    continue
+    return 1
   fi
 
-  # Poll for "Server ready" in log
+  # The schema owner must prove Version 2 before any schema=none node starts.
   waited=0
-  while [ $waited -lt 20 ]; do
-    if grep -q "Server ready" "$log_file" 2>/dev/null; then
+  while [ $waited -lt 90 ]; do
+    schema_ready=true
+    if [ "$require_v2" = "true" ]; then
+      schema_ready=false
+      if grep -Eq "(managed|Managed) schema Version 2|Schema migration to Version 2" "$log_file" 2>/dev/null; then
+        schema_ready=true
+      fi
+    fi
+    if $schema_ready && grep -q "Server ready" "$log_file" 2>/dev/null; then
       if node_is_stable "$pid" "$ws_port" "$http_port"; then
-        echo "[READY] $node_id (PID $pid) — Server ready, ports listening"
-        break
+        echo "[READY] $node_id (PID $pid) — schema verified, Server ready, ports listening"
+        return 0
       fi
     fi
     if ! is_running "$pid"; then
       echo "[FAIL] $node_id (PID $pid) — process died during startup. Last 20 lines of log:"
       tail -20 "$log_file"
-      all_ok=false
-      break
+      return 1
     fi
     sleep 1
     waited=$((waited + 1))
   done
 
-  if [ $waited -ge 20 ]; then
-    if grep -q "Server ready" "$log_file" 2>/dev/null; then
-      echo "[READY] $node_id (PID $pid) — Server ready (late)"
-    else
-      echo "[WARN] $node_id (PID $pid) — process is running but 'Server ready' not in log after 20s"
-      echo "       Tail log: tail -f ${log_file/#$HOME/~}"
-    fi
-  fi
-done
+  echo "[FAIL] $node_id (PID $pid) — Version 2 validation and Server ready not observed after 90s"
+  echo "       Tail log: tail -f ${log_file/#$HOME/~}"
+  return 1
+}
+
+# ----- Start nodes in schema-owner order -----
+
+echo "[SCHEMA] node-1 owner mode: $NODE1_SCHEMA_MODE; node-2 mode: none"
+start_node "$NODE1_ID" "$NODE1_WS_PORT" "$NODE1_HTTP_PORT"
+echo "Waiting for node-1 Version 2 validation before starting node-2..."
+if ! wait_for_node "$NODE1_ID" "$NODE1_WS_PORT" "$NODE1_HTTP_PORT" true; then
+  echo "[ERROR] Schema owner did not become ready; node-2 was not started."
+  exit 1
+fi
+
+start_node "$NODE2_ID" "$NODE2_WS_PORT" "$NODE2_HTTP_PORT"
+echo "Waiting for node-2 to be ready with schema mode none..."
+all_ok=true
+if ! wait_for_node "$NODE2_ID" "$NODE2_WS_PORT" "$NODE2_HTTP_PORT" false; then
+  all_ok=false
+fi
 
 if $all_ok; then
   echo ""

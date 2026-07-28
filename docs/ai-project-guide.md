@@ -97,7 +97,13 @@ bin/start-cluster.sh
 | `node-1` | `8081` | `8088` | `logs/node-1.log` |
 | `node-2` | `8084` | `8089` | `logs/node-2.log` |
 
-脚本会检查端口、jar、Redis 可达性，并等待日志出现 `Server ready`。`node-2` 会追加 `-Dim.db.schema=none`，避免重复初始化 schema。
+脚本会检查端口、jar、Redis 可达性。`node-1` 是唯一 schema owner，默认使用 `auto`：空数据库初始化 Version 2，已托管 Version 2 做结构校验，v1.1 则拒绝启动且不修改表。升级受支持的 v1.1 数据库时显式运行：
+
+```bash
+IM_CLUSTER_SCHEMA_OWNER_MODE=migrate bin/start-cluster.sh
+```
+
+脚本等待 node-1 日志确认 Version 2 初始化/迁移/校验并出现 `Server ready`，之后才以 `-Dim.db.schema=none` 启动 node-2。它会移除传给子进程的环境变量 `IM_DB_SCHEMA`，避免该高优先级变量意外覆盖 node-2 的 `none`。
 
 停止：
 
@@ -158,7 +164,7 @@ IM_* 环境变量
 | `im.env` / `IM_ENV` | 选择 `application-{env}.yml`。本机常用 `macbook-dev`。 |
 | `im.redis.host` | 生产组合根必填；为空会启动失败。 |
 | `im.db.enabled` | 生产组合根必须为 `true`。 |
-| `im.db.schema` | `none`、`auto`、`rebuild`。集群多节点只让一个节点建表。 |
+| `im.db.schema` | `none`、`auto`、`migrate`、仅本地允许的 `rebuild`。集群只允许一个 schema owner；`auto` 不升级 v1.1，v1.1 必须显式用 `migrate`。 |
 | `im.mq.type` | `redis` / `redis-streams` / `rocketmq`。 |
 | `im.rocketmq.*` | RocketMQ name server、producer group、consumer group、topic prefix。 |
 | `im.minio.*` | 文件存储。 |
@@ -197,6 +203,17 @@ pnpm --dir im-scenario-tests scenario:full
 这两个命令默认把非 cluster 场景指向本地集群 node-1 (`HTTP=8088`、`WS=8081`)，最后再跑 `cluster-ha`。
 
 `*E2ETest` 是本地依赖型 Maven E2E，`im-server` 的 Surefire 默认排除它；需要 MySQL/Redis 等依赖和正确凭据时用 `-Dtest='*E2ETest'` 单独运行。
+
+## Version 2 发布顺序与客户端兼容性
+
+生产集群按以下顺序升级，不能并行启动 schema owner：
+
+1. 选择一个节点作为唯一 schema owner。
+2. 空数据库用 `-Dim.db.schema=auto`；现有受支持的 v1.1 数据库用 `-Dim.db.schema=migrate`。
+3. 等待日志确认 Version 2 初始化/校验/迁移完成，并确认该节点 ready。
+4. 其余所有节点统一用 `-Dim.db.schema=none` 启动。
+
+先升级文件上传客户端，再升级服务端。旧客户端的原始 `/api/file/upload`、预签名 `PUT` 和 multipart sign/complete 已禁用；当前 `im-sdk` 使用 `/api/file/upload/sign` 取得 MinIO POST policy，按 `formFields` 和 `fileField` 直传对象，最后调用 `/api/file/upload/complete`。协议细节见 [file-storage.md](file-storage.md)。
 
 ## 健康检查
 
@@ -324,6 +341,7 @@ DeliveryConsumer
 im_users, im_friends, im_friend_requests, im_blacklist, im_refresh_tokens
 im_groups, im_group_members, im_group_requests
 im_conversations, im_messages, im_message_read_states, im_message_visibility
+im_schema_versions, im_conversation_projection_events
 im_idempotency_records, im_message_send_failures
 im_objects
 im_sync_versions, im_sync_changes
@@ -382,6 +400,7 @@ src/pages/group-info/*
 ```bash
 pnpm --dir im-scenario-tests scenario:smoke
 pnpm --dir im-scenario-tests scenario:group-chat
+pnpm --dir im-scenario-tests scenario:file-upload-policy
 pnpm --dir im-scenario-tests scenario:cluster-ha
 pnpm --dir im-scenario-tests scenario:group-call
 ```
@@ -394,6 +413,15 @@ node-1 WS=ws://127.0.0.1:8081/ws
 node-2 HTTP=http://127.0.0.1:8089
 node-2 WS=ws://127.0.0.1:8084/ws
 ```
+
+`cluster-ha` 包含 node-1 停机验证，因此必须显式授权一个本地 PID 文件：
+
+```bash
+IM_SCENARIO_NODE1_PID_FILE=bin/pids/node-1.pid \
+pnpm --dir im-scenario-tests scenario:cluster-ha
+```
+
+场景只允许 loopback node-1 URL，并在发送 `SIGTERM` 前校验 PID 文件内容、PID 对 node-1 WS/HTTP 监听端口的所有权和 `/health/live` 的 `nodeId`。未设置变量时场景在任何停机动作前失败。`IM_SCENARIO_GROUP_CALL_MAX_PARTICIPANTS` 必须与服务端配置一致（默认 `16`）；`IM_SCENARIO_CALL_TIMEOUT_SECONDS` 必须与 `im.call.timeout-seconds` 一致（默认 `30`）。
 
 ## 常见开发任务
 

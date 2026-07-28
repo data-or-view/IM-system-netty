@@ -64,8 +64,14 @@ bin/restart-backend.sh
 启动本地双节点集群，默认 `node-1 WS=8081 HTTP=8088`，`node-2 WS=8084 HTTP=8089`：
 
 ```bash
+# 空数据库或已经托管的 Version 2 数据库
 bin/start-cluster.sh
+
+# 仅用于从受支持的 v1.1 schema 升级
+IM_CLUSTER_SCHEMA_OWNER_MODE=migrate bin/start-cluster.sh
 ```
+
+`node-1` 是唯一 schema owner，默认以 `-Dim.db.schema=auto` 启动；脚本只有在日志确认 Version 2 初始化/校验完成并出现 `Server ready` 后，才会以 `-Dim.db.schema=none` 启动 `node-2`。`auto` 不会升级 v1.1 数据库，v1.1 必须显式选择 `migrate`。
 
 停止本地集群：
 
@@ -88,6 +94,12 @@ VITE_HTTP_URL=http://127.0.0.1:8084
 ```
 
 如需连集群节点，显式覆盖 `VITE_WS_URL` 和 `VITE_HTTP_URL`。
+
+## Version 2 集群升级顺序
+
+升级时只选择一个节点操作 schema：空数据库用 `-Dim.db.schema=auto`，现有 v1.1 数据库用 `-Dim.db.schema=migrate`。等待该节点日志出现 `Blank database initialized at managed schema Version 2`、`Managed schema Version 2 validated` 或 `Schema migration to Version 2 completed`，并确认节点 ready；然后才用 `-Dim.db.schema=none` 启动其余节点。禁止多个节点并发执行 `auto` 或 `migrate`。
+
+服务端升级前，先把旧客户端升级到当前 SDK 的 POST-policy 文件上传流程。仍调用原始 `/api/file/upload`、预签名 `PUT` 或 multipart sign/complete 的客户端与新服务端不兼容；当前流程是 `/api/file/upload/sign` 返回 `method: "POST"`、`formFields` 和 `fileField`，客户端直传 MinIO 后再调用 `/api/file/upload/complete`。
 
 ## 常用验证
 
@@ -113,8 +125,12 @@ npm --prefix im-sdk test
 
 ```bash
 pnpm --dir im-scenario-tests scenario:smoke
+pnpm --dir im-scenario-tests scenario:file-upload-policy
+IM_SCENARIO_NODE1_PID_FILE=bin/pids/node-1.pid \
 pnpm --dir im-scenario-tests scenario:cluster-ha
 ```
+
+`cluster-ha` 会在验证 PID 文件、node-1 两个监听端口和 `/health/live` 身份后向 node-1 发送 `SIGTERM`；未显式设置 `IM_SCENARIO_NODE1_PID_FILE` 时会直接报告前置条件，不会停止任何进程。
 
 RocketMQ 真实 broker 测试见 [docs/rocketmq-integration-tests.md](docs/rocketmq-integration-tests.md)。
 

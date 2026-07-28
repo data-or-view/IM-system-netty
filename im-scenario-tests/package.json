@@ -12,6 +12,7 @@
     "scenario:group-chat": "pnpm run build && node dist/scenarios/group-chat.js",
     "scenario:group-chat-perf": "pnpm run build && node dist/scenarios/group-chat-perf.js",
     "scenario:cluster-ha": "pnpm run build && node dist/scenarios/cluster-ha.js",
+    "scenario:file-upload-policy": "pnpm run build && node dist/scenarios/file-upload-policy.js",
     "scenario:message-idempotency": "pnpm run build && node dist/scenarios/message-idempotency.js",
     "scenario:group-call": "pnpm run build && node dist/scenarios/group-call.js",
     "scenario:group-join-system": "pnpm run build && node dist/scenarios/group-join-system-message.js",
@@ -24,11 +25,11 @@
     "scenario:core:compiled": "node dist/scenarios/group-chat.js && node dist/scenarios/group-call.js && node dist/scenarios/group-join-system-message.js && node dist/scenarios/offline-sync.js && node dist/scenarios/friend-apply-notify.js && node dist/scenarios/group-apply-notify.js && node dist/scenarios/system-message.js && node dist/scenarios/friend-group-side-effects.js",
     "scenario:chaos": "pnpm run build && pnpm run scenario:chaos:compiled",
     "scenario:chaos:compiled": "node dist/scenarios/message-idempotency.js",
-    "scenario:p0": "pnpm run build && sh -c 'export IM_SCENARIO_HTTP_URL=\"${IM_SCENARIO_HTTP_URL:-http://127.0.0.1:8088}\" IM_SCENARIO_WS_URL=\"${IM_SCENARIO_WS_URL:-ws://127.0.0.1:8081/ws}\"; node dist/scenarios/smoke.js && pnpm run scenario:core:compiled && pnpm run scenario:chaos:compiled && node dist/scenarios/cluster-ha.js'",
+    "scenario:p0": "pnpm run build && sh -c 'export IM_SCENARIO_HTTP_URL=\"${IM_SCENARIO_HTTP_URL:-http://127.0.0.1:8088}\" IM_SCENARIO_WS_URL=\"${IM_SCENARIO_WS_URL:-ws://127.0.0.1:8081/ws}\"; node dist/scenarios/smoke.js && pnpm run scenario:core:compiled && pnpm run scenario:chaos:compiled && node dist/scenarios/file-upload-policy.js && node dist/scenarios/cluster-ha.js'",
     "scenario:ci": "pnpm run test",
     "scenario:full": "pnpm run build && sh -c 'export IM_SCENARIO_HTTP_URL=\"${IM_SCENARIO_HTTP_URL:-http://127.0.0.1:8088}\" IM_SCENARIO_WS_URL=\"${IM_SCENARIO_WS_URL:-ws://127.0.0.1:8081/ws}\"; pnpm run scenario:all:compiled && node dist/scenarios/cluster-ha.js'",
     "scenario:all": "pnpm run build && pnpm run scenario:all:compiled",
-    "scenario:all:compiled": "node dist/scenarios/smoke.js && node dist/scenarios/group-chat.js && node dist/scenarios/group-chat-perf.js && node dist/scenarios/group-call.js && node dist/scenarios/group-join-system-message.js && node dist/scenarios/offline-sync.js && node dist/scenarios/message-idempotency.js && node dist/scenarios/friend-apply-notify.js && node dist/scenarios/group-apply-notify.js && node dist/scenarios/system-message.js && node dist/scenarios/friend-group-side-effects.js"
+    "scenario:all:compiled": "node dist/scenarios/smoke.js && node dist/scenarios/group-chat.js && node dist/scenarios/group-chat-perf.js && node dist/scenarios/group-call.js && node dist/scenarios/group-join-system-message.js && node dist/scenarios/offline-sync.js && node dist/scenarios/message-idempotency.js && node dist/scenarios/friend-apply-notify.js && node dist/scenarios/group-apply-notify.js && node dist/scenarios/system-message.js && node dist/scenarios/friend-group-side-effects.js && node dist/scenarios/file-upload-policy.js"
   },
   "dependencies": {
     "ws": "^8.20.1"
