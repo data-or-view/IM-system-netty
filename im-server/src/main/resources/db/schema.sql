@@ -294,6 +294,7 @@ CREATE TABLE IF NOT EXISTS im_message_read_states (
     user_id           VARCHAR(64)  NOT NULL COMMENT '用户ID',
     conversation_id   VARCHAR(128) NOT NULL COMMENT '会话ID',
     read_seq          BIGINT       NOT NULL DEFAULT 0 COMMENT '该用户在此会话已读到的最大消息序号',
+    pending_read_seq  BIGINT       NOT NULL DEFAULT 0 COMMENT '已读意图中尚未投影的最大消息序号',
     delivered_seq     BIGINT       NOT NULL DEFAULT 0 COMMENT '该用户在此会话已投递到的最大消息序号',
     unread_count      INT          NOT NULL DEFAULT 0 COMMENT '该用户在此会话的未读消息数缓存',
     updated_at        BIGINT       NOT NULL DEFAULT 0 COMMENT '更新时间(毫秒)',

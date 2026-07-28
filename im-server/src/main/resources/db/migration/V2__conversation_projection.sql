@@ -33,6 +33,22 @@ CREATE TABLE IF NOT EXISTS im_conversation_projection_events (
     KEY idx_projection_unread (owner_user_id, conversation_id, message_seq)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Inbound conversation projection events';
 
+-- migration-step: add-pending-read-seq
+ALTER TABLE im_message_read_states
+    ADD COLUMN pending_read_seq BIGINT NOT NULL DEFAULT 0 AFTER read_seq;
+
+-- migration-step: backfill-conversation-projection-events
+INSERT IGNORE INTO im_conversation_projection_events
+    (owner_user_id, conversation_id, message_id, message_seq, created_at)
+SELECT c.owner_user_id,
+       c.conversation_id,
+       m.server_msg_id,
+       m.seq,
+       GREATEST(m.sent_at, m.created_at)
+FROM im_conversations c
+JOIN im_messages m ON m.conversation_id = c.conversation_id
+WHERE m.send_id <> c.owner_user_id;
+
 -- migration-step: create-schema-versions
 CREATE TABLE IF NOT EXISTS im_schema_versions (
     version       INT          NOT NULL PRIMARY KEY,

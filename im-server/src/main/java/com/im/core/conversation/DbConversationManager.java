@@ -121,6 +121,13 @@ public class DbConversationManager implements IConversationManager {
                 SeqUserMapper seqMapper = session.getMapper(SeqUserMapper.class);
                 seqMapper.upsertMaxSeq(ownerUserId, conversationId, newSeq, now);
 
+                MessageReadStateMapper readMapper = session.getMapper(MessageReadStateMapper.class);
+                readMapper.advanceReadIntentToObservedMaximum(ownerUserId, conversationId, newSeq, now);
+                MessageReadStateEntity readState = readMapper.selectByUserConversation(ownerUserId, conversationId);
+                if (readState != null) {
+                    seqMapper.updateReadSeq(ownerUserId, conversationId, readState.getReadSeq(), now);
+                }
+
                 session.commit();
             }
             return null;
@@ -176,16 +183,19 @@ public class DbConversationManager implements IConversationManager {
                 ConversationMapper mapper = session.getMapper(ConversationMapper.class);
                 ConversationEntity conversation = mapper.selectByUserAndConversation(ownerUserId, conversationId);
                 long observedMaxSeq = conversation != null ? conversation.getMaxSeq() : 0;
-                long clampedReadSeq = Math.min(Math.max(readSeq, 0), observedMaxSeq);
+                long requestedReadSeq = Math.max(readSeq, 0);
                 long now = System.currentTimeMillis();
                 mapper.updateUpdatedAt(ownerUserId, conversationId, now);
 
-                if (clampedReadSeq > 0) {
+                if (requestedReadSeq > 0) {
                     MessageReadStateMapper readMapper = session.getMapper(MessageReadStateMapper.class);
-                    readMapper.upsertState(
-                            ownerUserId, conversationId, clampedReadSeq, clampedReadSeq, 0, now);
+                    readMapper.recordReadIntent(
+                            ownerUserId, conversationId, requestedReadSeq, observedMaxSeq, now);
+                    MessageReadStateEntity readState = readMapper.selectByUserConversation(ownerUserId, conversationId);
                     SeqUserMapper seqMapper = session.getMapper(SeqUserMapper.class);
-                    seqMapper.updateReadSeq(ownerUserId, conversationId, clampedReadSeq, now);
+                    if (readState != null) {
+                        seqMapper.updateReadSeq(ownerUserId, conversationId, readState.getReadSeq(), now);
+                    }
                 }
 
                 session.commit();

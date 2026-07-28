@@ -158,6 +158,19 @@ class DbConversationManagerProjectionE2ETest {
     }
 
     @Test
+    void readIntentAheadOfProjectionIsAppliedWhenTheMessageIsProjected() {
+        project(inbound("m1", 1, 41, "first"));
+
+        manager.markRead(OWNER_USER_ID, CONVERSATION_ID, 2);
+        assertEquals(1, manager.getReadSeq(OWNER_USER_ID, CONVERSATION_ID));
+
+        project(inbound("m2", 2, 42, "arrived after read"));
+
+        assertEquals(2, manager.getReadSeq(OWNER_USER_ID, CONVERSATION_ID));
+        assertEquals(0, manager.getUnreadCount(OWNER_USER_ID, CONVERSATION_ID));
+    }
+
+    @Test
     void syncChangeIsRecordedOnlyAfterProjectionCommit() throws Exception {
         project(inbound("m1", 1, 31, "committed"));
 

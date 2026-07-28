@@ -21,6 +21,9 @@ public class MessageReadStateEntity {
     @TableField("read_seq")
     private long readSeq;
 
+    @TableField("pending_read_seq")
+    private long pendingReadSeq;
+
     @TableField("delivered_seq")
     private long deliveredSeq;
 
@@ -41,6 +44,9 @@ public class MessageReadStateEntity {
 
     public long getReadSeq() { return readSeq; }
     public void setReadSeq(long readSeq) { this.readSeq = readSeq; }
+
+    public long getPendingReadSeq() { return pendingReadSeq; }
+    public void setPendingReadSeq(long pendingReadSeq) { this.pendingReadSeq = pendingReadSeq; }
 
     public long getDeliveredSeq() { return deliveredSeq; }
     public void setDeliveredSeq(long deliveredSeq) { this.deliveredSeq = deliveredSeq; }

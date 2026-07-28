@@ -79,6 +79,36 @@ class SchemaMigrationE2ETest extends BaseE2ETest {
     }
 
     @Test
+    void migrateBackfillsLegacyInboundEventsWithoutChangingUnreadState() throws Exception {
+        createLegacyV11Fixture(migrationDataSource);
+        try (Connection connection = migrationDataSource.getConnection(); Statement statement = connection.createStatement()) {
+            statement.executeUpdate("INSERT INTO im_conversations (owner_user_id, conversation_id, max_seq, unread_count) "
+                    + "VALUES ('receiver', 'single_receiver_sender', 2, 1)");
+            statement.executeUpdate("INSERT INTO im_messages "
+                    + "(client_msg_id, server_msg_id, conversation_id, seq, send_id, recv_id, created_at) "
+                    + "VALUES ('self-1', 'self-1', 'single_receiver_sender', 1, 'receiver', 'sender', 1)");
+            statement.executeUpdate("INSERT INTO im_messages "
+                    + "(client_msg_id, server_msg_id, conversation_id, seq, send_id, recv_id, created_at) "
+                    + "VALUES ('inbound-2', 'inbound-2', 'single_receiver_sender', 2, 'sender', 'receiver', 2)");
+            statement.executeUpdate("INSERT INTO im_message_read_states "
+                    + "(user_id, conversation_id, read_seq, delivered_seq, unread_count, updated_at) "
+                    + "VALUES ('receiver', 'single_receiver_sender', 1, 1, 1, 2)");
+        }
+
+        SchemaInitializer.initialize(migrationDataSource, "migrate");
+
+        assertEquals(1, queryLong(migrationDataSource,
+                "SELECT COUNT(*) FROM im_conversation_projection_events "
+                        + "WHERE owner_user_id='receiver' AND conversation_id='single_receiver_sender'"));
+        assertEquals(1, queryLong(migrationDataSource,
+                "SELECT COUNT(*) FROM im_conversation_projection_events e "
+                        + "LEFT JOIN im_message_read_states r "
+                        + "ON r.user_id=e.owner_user_id AND r.conversation_id=e.conversation_id "
+                        + "WHERE e.owner_user_id='receiver' AND e.conversation_id='single_receiver_sender' "
+                        + "AND e.message_seq > COALESCE(r.read_seq, 0)"));
+    }
+
+    @Test
     void migrateResumesAfterFirstV2DdlWasApplied() throws Exception {
         createLegacyV11Fixture(migrationDataSource);
         try (Connection connection = migrationDataSource.getConnection(); Statement statement = connection.createStatement()) {
@@ -276,6 +306,14 @@ class SchemaMigrationE2ETest extends BaseE2ETest {
              ResultSet result = statement.executeQuery("SELECT COUNT(*) FROM im_schema_versions WHERE version = 2")) {
             assertTrue(result.next());
             return result.getInt(1);
+        }
+    }
+
+    private static long queryLong(DataSource dataSource, String sql) throws Exception {
+        try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement();
+             ResultSet result = statement.executeQuery(sql)) {
+            assertTrue(result.next());
+            return result.getLong(1);
         }
     }
 

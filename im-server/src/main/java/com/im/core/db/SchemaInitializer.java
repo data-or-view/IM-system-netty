@@ -224,6 +224,8 @@ public final class SchemaInitializer {
                     List.of("client_msg_id"), step.sql());
             case CREATE_CONVERSATION_PROJECTION_EVENTS -> createTableIfMissing(connection,
                     "im_conversation_projection_events", step.sql());
+            case ADD_PENDING_READ_SEQ -> addPendingReadSequenceIfMissing(connection, step.sql());
+            case BACKFILL_CONVERSATION_PROJECTION_EVENTS -> executeBackfill(connection, step.sql());
             case CREATE_SCHEMA_VERSIONS -> createTableIfMissing(connection, "im_schema_versions", step.sql());
         };
         if (applied) {
@@ -284,6 +286,23 @@ public final class SchemaInitializer {
         if (tableExists(connection, table)) {
             return false;
         }
+        execute(connection, sql);
+        return true;
+    }
+
+    private static boolean addPendingReadSequenceIfMissing(Connection connection, String sql) throws Exception {
+        ColumnInfo existing = column(connection, "im_message_read_states", "pending_read_seq");
+        if (existing == null) {
+            execute(connection, sql);
+            return true;
+        }
+        if (!existing.typeIs("bigint") || existing.nullable()) {
+            throw incompatibleSchema("incompatible im_message_read_states.pending_read_seq");
+        }
+        return false;
+    }
+
+    private static boolean executeBackfill(Connection connection, String sql) throws SQLException {
         execute(connection, sql);
         return true;
     }
@@ -392,6 +411,10 @@ public final class SchemaInitializer {
                 String columnName = entry.getKey();
                 ColumnInfo actualColumn = actual.get(columnName);
                 if ("im_users".equals(table) && "password_hash".equals(columnName) && actualColumn == null) {
+                    continue;
+                }
+                if ("im_message_read_states".equals(table)
+                        && "pending_read_seq".equals(columnName) && actualColumn == null) {
                     continue;
                 }
                 if (actualColumn == null) {
@@ -839,6 +862,8 @@ public final class SchemaInitializer {
         ADD_CONVERSATION_CLIENT_MSG_UNIQUE("add-conversation-client-msg-unique"),
         ADD_CLIENT_MSG_LOOKUP("add-client-msg-lookup"),
         CREATE_CONVERSATION_PROJECTION_EVENTS("create-conversation-projection-events"),
+        ADD_PENDING_READ_SEQ("add-pending-read-seq"),
+        BACKFILL_CONVERSATION_PROJECTION_EVENTS("backfill-conversation-projection-events"),
         CREATE_SCHEMA_VERSIONS("create-schema-versions");
 
         private final String resourceId;

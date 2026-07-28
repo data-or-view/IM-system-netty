@@ -22,7 +22,7 @@ public interface ConversationProjectionEventMapper {
             + "LEFT JOIN im_message_read_states r "
             + "ON r.user_id = e.owner_user_id AND r.conversation_id = e.conversation_id "
             + "WHERE e.owner_user_id = #{ownerUserId} AND e.conversation_id = #{conversationId} "
-            + "AND e.message_seq > COALESCE(r.read_seq, 0)")
+            + "AND e.message_seq > GREATEST(COALESCE(r.read_seq, 0), COALESCE(r.pending_read_seq, 0))")
     long countUnreadAfter(@Param("ownerUserId") String ownerUserId,
                           @Param("conversationId") String conversationId);
 }
