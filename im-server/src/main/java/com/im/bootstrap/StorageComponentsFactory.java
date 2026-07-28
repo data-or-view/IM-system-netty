@@ -36,6 +36,7 @@ final class StorageComponentsFactory {
     private static final String MQ_TYPE_REDIS = "redis";
     private static final String MQ_TYPE_REDIS_STREAMS = "redis-streams";
     private static final String MQ_TYPE_ROCKETMQ = "rocketmq";
+    private static final long DEFAULT_MAX_UPLOAD_BYTES = 100L * 1024 * 1024;
 
     private StorageComponentsFactory() {
     }
@@ -74,8 +75,7 @@ final class StorageComponentsFactory {
                 new DbFileObjectMetadataStore(fileBucket),
                 fileBucket,
                 config.getInt("im.minio.presign-expire-seconds", 900),
-                config.getLong("im.file.max-upload-bytes")
-                        .orElseGet(() -> config.getLong("im.minio.max-file-size", 100L * 1024 * 1024)));
+                resolveMaxUploadBytes(config));
         ISystemMessageStore systemMessageStore = new DbSystemMessageStore();
         return new StorageDependencies(
                 sequenceManager, messageStore, singleMessageStore, groupMessageStore, messageQueue,
@@ -90,5 +90,11 @@ final class StorageComponentsFactory {
             case MQ_TYPE_ROCKETMQ -> new RocketMqMessageQueue(config, nodeId);
             default -> throw new IllegalArgumentException("Unsupported " + MQ_TYPE_KEY + ": " + type);
         };
+    }
+
+    static long resolveMaxUploadBytes(Config config) {
+        return config.getLong("im.file.max-upload-bytes")
+                .or(() -> config.getLong("im.minio.max-file-size"))
+                .orElse(DEFAULT_MAX_UPLOAD_BYTES);
     }
 }

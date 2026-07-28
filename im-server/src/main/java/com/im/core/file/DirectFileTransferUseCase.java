@@ -79,7 +79,15 @@ public class DirectFileTransferUseCase {
     public FileUploadCompleteResult completeSingleUpload(String userId, String fileId) {
         validateUser(userId);
         UploadSession session = uploadSessionStore.getByFileId(fileId);
-        if (session == null || session.multipart()) {
+        if (session == null) {
+            FileObjectMetadata metadata = metadataStore.findByFileId(fileId);
+            if (metadata == null) {
+                throw new ImException(ImErrorCode.NOT_FOUND, "upload session not found");
+            }
+            ensureOwner(metadata, userId);
+            return completedResult(metadata);
+        }
+        if (session.multipart()) {
             throw new ImException(ImErrorCode.NOT_FOUND, "upload session not found");
         }
         return complete(session, userId);
@@ -162,9 +170,7 @@ public class DirectFileTransferUseCase {
                 LogFields.UPLOAD_ID, session.uploadId(),
                 LogFields.FILE_SIZE, session.fileSize(),
                 LogFields.FILE_GROUP, session.fileGroup()));
-        return new FileUploadCompleteResult(fileStorage.presignGetObject(
-                session.bucket(), session.objectKey(), presignExpiresSeconds),
-                session.fileId(), session.objectKey(), session.fileName(), session.contentType(), session.fileSize());
+        return completedResult(metadata);
     }
 
     private static void validateUser(String userId) {
@@ -187,6 +193,18 @@ public class DirectFileTransferUseCase {
         if (!session.userId().equals(userId)) {
             throw new ImException(ImErrorCode.FORBIDDEN, "file upload does not belong to current user");
         }
+    }
+
+    private static void ensureOwner(FileObjectMetadata metadata, String userId) {
+        if (!metadata.userId().equals(userId)) {
+            throw new ImException(ImErrorCode.FORBIDDEN, "file upload does not belong to current user");
+        }
+    }
+
+    private FileUploadCompleteResult completedResult(FileObjectMetadata metadata) {
+        return new FileUploadCompleteResult(fileStorage.presignGetObject(
+                metadata.bucket(), metadata.objectKey(), presignExpiresSeconds),
+                metadata.fileId(), metadata.objectKey(), metadata.fileName(), metadata.contentType(), metadata.fileSize());
     }
 
     private static String objectKey(String fileId, String fileName) {

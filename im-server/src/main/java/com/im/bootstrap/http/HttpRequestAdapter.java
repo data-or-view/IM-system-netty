@@ -188,6 +188,20 @@ public class HttpRequestAdapter extends SimpleChannelInboundHandler<FullHttpRequ
                     JsonResponse.imError(ctx, ImErrorCode.BAD_REQUEST, "invalid json body", requestId, requestOrigin);
                     return;
                 }
+            } else if (operation != Operation.FILE_UPLOAD) {
+                log.warn(StructuredLog.event(LogEvents.REQUEST_REJECTED,
+                        LogFields.NODE_ID, nodeId,
+                        LogFields.REQUEST_ID, requestId,
+                        LogFields.TRACE_ID, traceId,
+                        LogFields.OPERATION, operation.opName(),
+                        LogFields.PROTOCOL, "http",
+                        LogFields.CLIENT_IP, clientIp,
+                        LogFields.HTTP_METHOD, method,
+                        LogFields.HTTP_PATH, path,
+                        LogFields.ERROR_CODE, ImErrorCode.BAD_REQUEST.getCode(),
+                        LogFields.REASON, "non_json_body"));
+                JsonResponse.imError(ctx, ImErrorCode.BAD_REQUEST, "non-json request body is not supported", requestId, requestOrigin);
+                return;
             }
         }
 

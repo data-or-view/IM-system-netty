@@ -26,6 +26,7 @@ import io.netty.handler.codec.http.HttpObjectAggregator;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.AbstractExecutorService;
@@ -37,6 +38,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class HttpRequestAdapterTest {
 
@@ -190,6 +192,55 @@ class HttpRequestAdapterTest {
         assertEquals(ImErrorCode.BAD_REQUEST.getCode(), body.get("code"));
         assertEquals("请求参数不正确", body.get("msg"));
         assertNull(body.get("detail"));
+    }
+
+    @Test
+    void nonJsonControlBodyIsRejectedBeforeDispatch() {
+        ApiDispatcher dispatcher = new ApiDispatcher();
+        ExecutorService directExecutor = new DirectExecutorService();
+        dispatcher.registerHandler(com.im.api.Operation.FILE_UPLOAD_SIGN,
+                request -> { throw new AssertionError("non-JSON body must not reach dispatcher"); });
+        EmbeddedChannel channel = new EmbeddedChannel(new HttpRequestAdapter(dispatcher, directExecutor));
+        DefaultFullHttpRequest request = new DefaultFullHttpRequest(
+                HttpVersion.HTTP_1_1,
+                HttpMethod.POST,
+                "/api/file/upload/sign",
+                Unpooled.copiedBuffer("not-json", StandardCharsets.UTF_8)
+        );
+        request.headers().set(HttpHeaderNames.CONTENT_TYPE, "application/octet-stream");
+
+        assertFalse(channel.writeInbound(request));
+
+        FullHttpResponse response = channel.readOutbound();
+        assertNotNull(response);
+        assertEquals(HttpResponseStatus.BAD_REQUEST, response.status());
+        assertEquals(ImErrorCode.BAD_REQUEST.getCode(), readBody(response).get("code"));
+    }
+
+    @Test
+    void legacyRawUploadBodyReachesMigrationHandler() {
+        ApiDispatcher dispatcher = new ApiDispatcher();
+        ExecutorService directExecutor = new DirectExecutorService();
+        AtomicBoolean handled = new AtomicBoolean();
+        dispatcher.registerHandler(com.im.api.Operation.FILE_UPLOAD, request -> {
+            handled.set(true);
+            throw new com.im.common.exception.ValidationException("POST upload migration");
+        });
+        EmbeddedChannel channel = new EmbeddedChannel(new HttpRequestAdapter(dispatcher, directExecutor));
+        DefaultFullHttpRequest request = new DefaultFullHttpRequest(
+                HttpVersion.HTTP_1_1,
+                HttpMethod.POST,
+                "/api/file/upload",
+                Unpooled.copiedBuffer("legacy-bytes", StandardCharsets.UTF_8)
+        );
+        request.headers().set(HttpHeaderNames.CONTENT_TYPE, "application/octet-stream");
+
+        assertFalse(channel.writeInbound(request));
+
+        FullHttpResponse response = channel.readOutbound();
+        assertNotNull(response);
+        assertTrue(handled.get());
+        assertEquals(HttpResponseStatus.BAD_REQUEST, response.status());
     }
 
     @Test

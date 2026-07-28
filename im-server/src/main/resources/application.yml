@@ -6,8 +6,8 @@
 # =============================================
 
 im:
-  file:
-    max-upload-bytes: 104857600 # Maximum declared upload size; im.minio.max-file-size is a deprecated fallback.
+  # file:
+  #   max-upload-bytes: 104857600 # Primary upload limit; im.minio.max-file-size is a deprecated fallback.
 
   # ── 服务器 ──
   server:

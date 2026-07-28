@@ -107,6 +107,37 @@ class DirectFileTransferUseCaseTest {
     }
 
     @Test
+    void completedUploadCanBeRetriedAfterResponseSigningFails() {
+        FakeStorage storage = new FakeStorage();
+        storage.failNextPresignGet = true;
+        InMemoryUploadSessionStore sessions = new InMemoryUploadSessionStore();
+        InMemoryFileObjectMetadataStore metadata = new InMemoryFileObjectMetadataStore();
+        DirectFileTransferUseCase useCase = new DirectFileTransferUseCase(storage, sessions, metadata, "im-system", 900);
+        PresignedUploadResult signed = useCase.signSingleUpload("u1", "a.txt", 3, "text/plain", "", "file");
+
+        assertThrows(RuntimeException.class, () -> useCase.completeSingleUpload("u1", signed.fileId()));
+        assertFalse(sessions.byFileId.containsKey(signed.fileId()));
+        assertNotNull(metadata.saved.get(signed.fileId()));
+
+        assertEquals(signed.fileId(), useCase.completeSingleUpload("u1", signed.fileId()).fileId());
+    }
+
+    @Test
+    void completedUploadRetryRequiresPersistedMetadataOwner() {
+        FakeStorage storage = new FakeStorage();
+        InMemoryUploadSessionStore sessions = new InMemoryUploadSessionStore();
+        InMemoryFileObjectMetadataStore metadata = new InMemoryFileObjectMetadataStore();
+        DirectFileTransferUseCase useCase = new DirectFileTransferUseCase(storage, sessions, metadata, "im-system", 900);
+        PresignedUploadResult signed = useCase.signSingleUpload("u1", "a.txt", 3, "text/plain", "", "file");
+        useCase.completeSingleUpload("u1", signed.fileId());
+
+        com.im.common.exception.ImException ex = assertThrows(com.im.common.exception.ImException.class,
+                () -> useCase.completeSingleUpload("u2", signed.fileId()));
+
+        assertEquals(com.im.common.enums.ImErrorCode.FORBIDDEN, ex.getErrorCode());
+    }
+
+    @Test
     void completionRequiresUploadOwner() {
         FakeStorage storage = new FakeStorage();
         InMemoryUploadSessionStore sessions = new InMemoryUploadSessionStore();
@@ -230,6 +261,7 @@ class DirectFileTransferUseCaseTest {
         String lastUploadId;
         int lastPartNumber;
         int lastGetExpiresSeconds;
+        boolean failNextPresignGet;
         long policyMaxBytes;
         FileObjectStat stat = new FileObjectStat(3, "text/plain");
         boolean deleteCalled;
@@ -258,6 +290,10 @@ class DirectFileTransferUseCaseTest {
 
         @Override
         public String presignGetObject(String bucket, String objectId, int expiresSeconds) {
+            if (failNextPresignGet) {
+                failNextPresignGet = false;
+                throw new IllegalStateException("temporary signing failure");
+            }
             lastGetExpiresSeconds = expiresSeconds;
             return "https://oss.test/" + bucket + "/" + objectId + "?expires=" + expiresSeconds;
         }
