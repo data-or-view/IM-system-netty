@@ -80,6 +80,9 @@ public class RedisMessageQueue implements IMessageQueue {
     private final Duration pendingMinIdle;
     private final int pendingClaimBatchSize;
 
+    /** Test-only lifecycle probe; production construction supplies a no-op. */
+    private final Runnable afterConsumerTaskRetired;
+
     /** topic → handler 列表 */
     private final ConcurrentHashMap<String, List<QueueMessageHandler>> subscribers = new ConcurrentHashMap<>();
 
@@ -96,7 +99,6 @@ public class RedisMessageQueue implements IMessageQueue {
 
     private final AtomicBoolean running = new AtomicBoolean(false);
     private boolean stopping;
-    private boolean consumerInitiatedShutdown;
 
     private RedisClusterAsyncCommands<String, String> async;
 
@@ -106,12 +108,19 @@ public class RedisMessageQueue implements IMessageQueue {
 
     RedisMessageQueue(RedisConfiguration redisConfig, String nodeId,
                       Duration pendingMinIdle, int pendingClaimBatchSize) {
+        this(redisConfig, nodeId, pendingMinIdle, pendingClaimBatchSize, () -> {});
+    }
+
+    RedisMessageQueue(RedisConfiguration redisConfig, String nodeId,
+                      Duration pendingMinIdle, int pendingClaimBatchSize,
+                      Runnable afterConsumerTaskRetired) {
         this.redisConfig = redisConfig;
         String uuid = UUID.randomUUID().toString().substring(0, 8);
         this.consumerId = nodeId + "_" + uuid;
         this.pendingMinIdle = pendingMinIdle != null && !pendingMinIdle.isZero() && !pendingMinIdle.isNegative()
                 ? pendingMinIdle : DEFAULT_PENDING_MIN_IDLE;
         this.pendingClaimBatchSize = pendingClaimBatchSize > 0 ? pendingClaimBatchSize : BATCH_SIZE;
+        this.afterConsumerTaskRetired = afterConsumerTaskRetired != null ? afterConsumerTaskRetired : () -> {};
     }
 
     @Override
@@ -135,14 +144,8 @@ public class RedisMessageQueue implements IMessageQueue {
         synchronized (lifecycleLock) {
             if (currentConsumerTaskLocked() != null) {
                 if (!stopping) {
-                    stopping = true;
-                    consumerInitiatedShutdown = true;
-                    running.set(false);
-                    tasks = new ArrayList<>(liveConsumerTasks);
-                    consumerTasks.clear();
-                    for (ConsumerTask task : tasks) {
-                        task.requestStopLocked();
-                    }
+                    tasks = beginShutdownLocked();
+                    startConsumerShutdownCoordinatorLocked(tasks);
                 }
                 throw new IllegalStateException("Redis message queue consumers cannot synchronously stop themselves");
             }
@@ -152,27 +155,43 @@ public class RedisMessageQueue implements IMessageQueue {
             }
             if (!running.get() && liveConsumerTasks.isEmpty()) return;
 
-            stopping = true;
-            running.set(false);
-            tasks = new ArrayList<>(liveConsumerTasks);
-            consumerTasks.clear();
-            for (ConsumerTask task : tasks) {
-                task.requestStopLocked();
-            }
+            tasks = beginShutdownLocked();
         }
-        try {
-            for (ConsumerTask task : tasks) {
-                task.awaitStopped();
-            }
-        } finally {
-            synchronized (lifecycleLock) {
-                stopping = false;
-                consumerInitiatedShutdown = false;
-                lifecycleLock.notifyAll();
-            }
-        }
+        awaitTasksStopped(tasks);
+        finishShutdown();
 
         log.info("RedisMessageQueue stopped: consumerId={}", consumerId);
+    }
+
+    private List<ConsumerTask> beginShutdownLocked() {
+        stopping = true;
+        running.set(false);
+        List<ConsumerTask> tasks = List.copyOf(liveConsumerTasks);
+        consumerTasks.clear();
+        for (ConsumerTask task : tasks) {
+            task.requestStopLocked();
+        }
+        return tasks;
+    }
+
+    private void startConsumerShutdownCoordinatorLocked(List<ConsumerTask> tasks) {
+        IMExecutors.startVirtualThread("redis-mq-shutdown", () -> {
+            awaitTasksStopped(tasks);
+            finishShutdown();
+        });
+    }
+
+    private void awaitTasksStopped(List<ConsumerTask> tasks) {
+        for (ConsumerTask task : tasks) {
+            task.awaitStopped();
+        }
+    }
+
+    private void finishShutdown() {
+        synchronized (lifecycleLock) {
+            stopping = false;
+            lifecycleLock.notifyAll();
+        }
     }
 
     @Override
@@ -392,12 +411,9 @@ public class RedisMessageQueue implements IMessageQueue {
                 synchronized (lifecycleLock) {
                     consumerTasks.remove(topic, this);
                     liveConsumerTasks.remove(this);
-                    if (stopping && consumerInitiatedShutdown && liveConsumerTasks.isEmpty()) {
-                        stopping = false;
-                        consumerInitiatedShutdown = false;
-                    }
                     lifecycleLock.notifyAll();
                 }
+                afterConsumerTaskRetired.run();
                 log.info("Consumer stopped for topic '{}'", topic);
             }
         }

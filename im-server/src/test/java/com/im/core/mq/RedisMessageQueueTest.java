@@ -40,14 +40,21 @@ class RedisMessageQueueTest {
         String topic = "test-handler-stop-" + UUID.randomUUID();
         String streamKey = RedisMessageQueue.STREAM_PREFIX + topic;
         String groupName = RedisMessageQueue.GROUP_PREFIX + topic;
-        RedisMessageQueue queue = new RedisMessageQueue(redis, "handler-stop-node");
         CountDownLatch handlerEntered = new CountDownLatch(1);
         CountDownLatch selfStopRejected = new CountDownLatch(1);
         CountDownLatch handlerExited = new CountDownLatch(1);
+        CountDownLatch consumerRetired = new CountDownLatch(1);
+        CountDownLatch allowConsumerTermination = new CountDownLatch(1);
         AtomicBoolean stopReturnedNormally = new AtomicBoolean();
+        AtomicReference<Thread> consumerThread = new AtomicReference<>();
         ExecutorService stopper = Executors.newSingleThreadExecutor();
+        RedisMessageQueue queue = new RedisMessageQueue(redis, "handler-stop-node", Duration.ofSeconds(30), 10, () -> {
+            consumerRetired.countDown();
+            awaitUninterruptibly(allowConsumerTermination);
+        });
         try {
             queue.subscribe(topic, ignored -> {
+                consumerThread.set(Thread.currentThread());
                 handlerEntered.countDown();
                 try {
                     queue.stop();
@@ -65,13 +72,19 @@ class RedisMessageQueueTest {
             assertTrue(selfStopRejected.await(5, TimeUnit.SECONDS), "handler stop did not reject self-completion");
             assertTrue(handlerExited.await(5, TimeUnit.SECONDS), "handler remained blocked by self-stop");
             assertFalse(stopReturnedNormally.get(), "handler-initiated stop must not return normally");
-            stopper.submit(queue::stop).get(5, TimeUnit.SECONDS);
+            assertTrue(consumerRetired.await(5, TimeUnit.SECONDS), "consumer did not enter its retirement tail");
+            Future<?> externalStop = stopper.submit(queue::stop);
+            assertFalse(externalStop.isDone(), "external stop returned before the consumer thread terminated");
+            allowConsumerTermination.countDown();
+            externalStop.get(5, TimeUnit.SECONDS);
+            assertFalse(consumerThread.get().isAlive(), "external stop returned before the consumer thread terminated");
 
             try (CloseableRedisCommands commands = redis.createSyncCommands()) {
                 assertEquals(1, commands.<RedisCommands<String, String>>sync().xpending(streamKey, groupName).getCount(),
                         "message handled during self-stop must remain pending");
             }
         } finally {
+            allowConsumerTermination.countDown();
             queue.stop();
             stopper.shutdownNow();
             try (CloseableRedisCommands commands = redis.createSyncCommands()) {
@@ -90,9 +103,11 @@ class RedisMessageQueueTest {
         RedisMessageQueue queue = new RedisMessageQueue(redis, "handler-stop-external-node");
         CountDownLatch handlerEntered = new CountDownLatch(1);
         CountDownLatch allowHandlerStop = new CountDownLatch(1);
+        CountDownLatch externalStopInterruptedHandler = new CountDownLatch(1);
         CountDownLatch selfStopRejected = new CountDownLatch(1);
         CountDownLatch allowHandlerExit = new CountDownLatch(1);
         CountDownLatch handlerExited = new CountDownLatch(1);
+        AtomicReference<Thread> consumerThread = new AtomicReference<>();
         ExecutorService stopper = Executors.newSingleThreadExecutor(runnable -> {
             Thread thread = new Thread(runnable, "redis-mq-external-stopper");
             thread.setDaemon(true);
@@ -101,22 +116,39 @@ class RedisMessageQueueTest {
         Future<?> stopFuture = null;
         try {
             queue.subscribe(topic, ignored -> {
+                consumerThread.set(Thread.currentThread());
                 handlerEntered.countDown();
-                awaitUninterruptibly(allowHandlerStop);
+                boolean interrupted = false;
                 try {
-                    queue.stop();
-                } catch (IllegalStateException expected) {
-                    selfStopRejected.countDown();
+                    while (true) {
+                        try {
+                            allowHandlerStop.await();
+                            break;
+                        } catch (InterruptedException expected) {
+                            interrupted = true;
+                            externalStopInterruptedHandler.countDown();
+                        }
+                    }
+                    try {
+                        queue.stop();
+                    } catch (IllegalStateException expected) {
+                        selfStopRejected.countDown();
+                    }
+                    awaitUninterruptibly(allowHandlerExit);
+                } finally {
+                    if (interrupted) {
+                        Thread.currentThread().interrupt();
+                    }
+                    handlerExited.countDown();
                 }
-                awaitUninterruptibly(allowHandlerExit);
-                handlerExited.countDown();
             });
             queue.start();
             queue.publish(topic, message("msg-handler-stop-external-drain-" + UUID.randomUUID()));
 
             assertTrue(handlerEntered.await(5, TimeUnit.SECONDS), "handler did not start");
             stopFuture = stopper.submit(queue::stop);
-            assertFalse(stopFuture.isDone(), "external stop should wait for the in-flight handler");
+            assertTrue(externalStopInterruptedHandler.await(5, TimeUnit.SECONDS),
+                    "external stop did not begin draining the in-flight handler");
 
             allowHandlerStop.countDown();
             assertTrue(selfStopRejected.await(5, TimeUnit.SECONDS),
@@ -126,12 +158,11 @@ class RedisMessageQueueTest {
             allowHandlerExit.countDown();
             assertTrue(handlerExited.await(5, TimeUnit.SECONDS), "handler did not exit");
             stopFuture.get(5, TimeUnit.SECONDS);
+            assertFalse(consumerThread.get().isAlive(), "external stop returned before the consumer thread terminated");
         } finally {
             allowHandlerStop.countDown();
             allowHandlerExit.countDown();
-            if (stopFuture != null && stopFuture.isDone()) {
-                queue.stop();
-            }
+            queue.stop();
             stopper.shutdownNow();
             try (CloseableRedisCommands commands = redis.createSyncCommands()) {
                 commands.<RedisCommands<String, String>>sync().del(streamKey);
