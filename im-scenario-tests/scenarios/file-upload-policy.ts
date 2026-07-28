@@ -48,12 +48,12 @@ try {
   const completionError = await expectRejection(() => alice.http.post("/api/file/upload/complete", {
     fileId: signed.fileId,
   }));
-  assertApiError(completionError, "upload completion");
+  assertNotFoundError(completionError, "upload completion");
 
   const downloadError = await expectRejection(() => alice.http.post("/api/file/download/sign", {
     fileId: signed.fileId,
   }));
-  assertApiError(downloadError, "download signing after rejected completion");
+  assertNotFoundError(downloadError, "download signing after rejected completion");
 
   reporter.metric("fileId", signed.fileId);
   reporter.finish();
@@ -101,6 +101,7 @@ async function expectRejection(operation: () => Promise<unknown>): Promise<Error
   throw new Error("expected operation to reject");
 }
 
-function assertApiError(error: Error, operation: string): void {
-  assertOk(/^API \d+:/.test(error.message), `${operation} did not return an API error code: ${error.message}`);
+function assertNotFoundError(error: Error, operation: string): void {
+  assertOk(/^(?:HTTP 404\b|API 404:)/.test(error.message),
+    `${operation} did not reject as missing upload metadata: ${error.message}`);
 }

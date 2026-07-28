@@ -153,6 +153,18 @@ try {
   await assertGroupPush(receiverPrimary, group.groupId, groupText, "primary group push");
   await assertGroupPush(receiverSecondary, group.groupId, groupText, "secondary group push");
 
+  reporter.step("closing one same-platform session while its node remains live");
+  receiverSecondary.close();
+  const survivorCursor = receiverPrimary.ws.markPushCursor();
+  const survivorText = `cluster-ha surviving-platform ${suffix}`;
+  await sender.ws.request<SendMessageAck>(SCENARIO_OP.CHAT_SEND, {
+    toUserId: receiverPrimary.userId,
+    clientMsgId: nextClientMsgId("cluster-surviving-platform"),
+    _ct: SCENARIO_CONTENT_TYPE.TEXT,
+    content: { text: survivorText },
+  });
+  await assertMessagePushAfter(receiverPrimary, survivorCursor, survivorText, "surviving same-platform push");
+
   reporter.step(`racing ${groupCallJoiners.length} group-call joins against cap ${groupCallMaxParticipants}`);
   const started = await sender.http.post<GroupCallSession>("/api/group/call/start", {
     groupId: group.groupId,
@@ -258,6 +270,18 @@ function createExistingUser(
 
 async function assertMessagePush(user: ScenarioUser, expectedText: string, description: string): Promise<void> {
   await user.ws.waitForPush((push) => {
+    const data = push.data as MessagePush | undefined;
+    return push.op === SCENARIO_PUSH_OP.MESSAGE && messageContains(data, expectedText);
+  }, description);
+}
+
+async function assertMessagePushAfter(
+  user: ScenarioUser,
+  cursor: number,
+  expectedText: string,
+  description: string,
+): Promise<void> {
+  await user.ws.waitForPushAfter(cursor, (push) => {
     const data = push.data as MessagePush | undefined;
     return push.op === SCENARIO_PUSH_OP.MESSAGE && messageContains(data, expectedText);
   }, description);
