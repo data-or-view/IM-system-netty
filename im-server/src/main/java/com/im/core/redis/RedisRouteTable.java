@@ -18,6 +18,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -90,9 +91,12 @@ public class RedisRouteTable implements IRouteTable {
             local platformId = ARGV[4]
             local now = tonumber(ARGV[5])
             local ttl = tonumber(ARGV[6])
+            local expectedGeneration = ARGV[7]
             local current = redis.call('hget', routeKey, field)
             local removed = 0
-            if current ~= false and string.sub(current, 1, string.len(expectedNode) + 1) == expectedNode .. '|' then
+            local currentGeneration = current and string.match(current, '|([^|]+)$') or ''
+            if current ~= false and string.sub(current, 1, string.len(expectedNode) + 1) == expectedNode .. '|'
+                and (expectedGeneration == '' or currentGeneration == expectedGeneration) then
               removed = redis.call('hdel', routeKey, field)
             end
             local hasLiveBinding = false
@@ -102,7 +106,9 @@ public class RedisRouteTable implements IRouteTable {
               local bindingValue = entries[index + 1]
               if string.sub(bindingField, 1, string.len(platformPrefix)) == platformPrefix then
                 local separator = string.find(bindingValue, '|', 1, true)
-                local expiresAt = separator and tonumber(string.sub(bindingValue, separator + 1)) or 0
+                local generationSeparator = separator and string.find(bindingValue, '|', separator + 1, true)
+                local expiresAt = separator and tonumber(string.sub(bindingValue, separator + 1,
+                    generationSeparator and generationSeparator - 1 or -1)) or 0
                 if expiresAt > now then
                   hasLiveBinding = true
                 else
@@ -194,10 +200,16 @@ public class RedisRouteTable implements IRouteTable {
         PersistenceExceptions.runRedis("route online", () -> {
             String key = routeKey(userId);
             String field = routeField(platformId, sessionId);
-            async.hset(key, field, routeValue(nodeId, routeExpireAt()))
+            String previous = async.hget(key, field).toCompletableFuture().join();
+            String generation = UUID.randomUUID().toString();
+            async.hset(key, field, routeValue(nodeId, routeExpireAt(), generation))
                     .toCompletableFuture().join();
             async.expire(key, ROUTE_TTL_SECONDS).toCompletableFuture().join();
-            addNodeRouteIndex(nodeId, userId, field);
+            if (previous != null) {
+                RouteValue old = parseRouteValue(previous);
+                if (nodeId.equals(old.nodeId())) removeNodeRouteIndex(nodeId, userId, field, old.generation());
+            }
+            addNodeRouteIndex(nodeId, userId, field, generation);
             log.info("Route online: userId={}, node={}, platform={}, session={}",
                     userId, nodeId, platformId, sessionId);
             return null;
@@ -209,8 +221,10 @@ public class RedisRouteTable implements IRouteTable {
         requireLayoutReady(userId);
         PersistenceExceptions.runRedis("route offline", () -> {
             String field = routeField(platformId, sessionId);
-            boolean removed = removeRoute(userId, nodeId, platformId, field);
-            removeNodeRouteIndex(nodeId, userId, field);
+            String current = async.hget(routeKey(userId), field).toCompletableFuture().join();
+            String generation = current != null ? parseRouteValue(current).generation() : "";
+            boolean removed = removeRoute(userId, nodeId, platformId, field, generation);
+            removeNodeRouteIndex(nodeId, userId, field, generation);
             log.info("Route offline: userId={}, node={}, platform={}, session={}, removed={}",
                     userId, nodeId, platformId, sessionId, removed);
             return null;
@@ -400,9 +414,11 @@ public class RedisRouteTable implements IRouteTable {
             if (entries != null) {
                 for (String entry : entries) {
                     int separator = entry.indexOf('|');
-                    if (separator <= 0 || separator == entry.length() - 1) continue;
+                    int generationSeparator = entry.lastIndexOf('|');
+                    if (separator <= 0 || generationSeparator <= separator || generationSeparator == entry.length() - 1) continue;
                     String userId = entry.substring(0, separator);
-                    String field = entry.substring(separator + 1);
+                    String field = entry.substring(separator + 1, generationSeparator);
+                    String generation = entry.substring(generationSeparator + 1);
                     int fieldSeparator = field.indexOf(':');
                     if (fieldSeparator <= 0 || fieldSeparator == field.length() - 1) continue;
                     int platformId;
@@ -411,8 +427,8 @@ public class RedisRouteTable implements IRouteTable {
                     } catch (NumberFormatException ignored) {
                         continue;
                     }
-                    if (removeRoute(userId, nodeId, platformId, field)) count++;
-                    removeNodeRouteIndex(nodeId, userId, field);
+                    if (removeRoute(userId, nodeId, platformId, field, generation)) count++;
+                    removeNodeRouteIndex(nodeId, userId, field, generation);
                 }
             }
             log.info("Node routes cleaned: nodeId={}, removed={}", nodeId, count);
@@ -425,8 +441,8 @@ public class RedisRouteTable implements IRouteTable {
         return platformId + ":" + sid;
     }
 
-    private static String routeValue(String nodeId, long expireAt) {
-        return nodeId + "|" + expireAt;
+    private static String routeValue(String nodeId, long expireAt, String generation) {
+        return nodeId + "|" + expireAt + "|" + generation;
     }
 
     private static long routeExpireAt() {
@@ -441,31 +457,33 @@ public class RedisRouteTable implements IRouteTable {
                 return;
             }
             RouteBinding current = toRouteBinding(userId, field, currentValue);
-            async.hset(routeKey, field, routeValue(current.nodeId(), routeExpireAt()))
+            String generation = parseRouteValue(currentValue).generation();
+            async.hset(routeKey, field, routeValue(current.nodeId(), routeExpireAt(), generation))
                     .thenCompose(ignored -> async.expire(routeKey, ROUTE_TTL_SECONDS))
                     .thenCompose(ignored -> async.sadd(nodeIndexKey(current.nodeId()),
-                            nodeIndexEntry(userId, field)))
+                            nodeIndexEntry(userId, field, generation)))
                     .thenCompose(ignored -> async.expire(nodeIndexKey(current.nodeId()),
                             ROUTE_NODE_INDEX_TTL_SECONDS));
         });
     }
 
-    private void addNodeRouteIndex(String nodeId, String userId, String routeField) {
+    private void addNodeRouteIndex(String nodeId, String userId, String routeField, String generation) {
         String key = nodeIndexKey(nodeId);
-        async.sadd(key, nodeIndexEntry(userId, routeField)).toCompletableFuture().join();
+        async.sadd(key, nodeIndexEntry(userId, routeField, generation)).toCompletableFuture().join();
         async.expire(key, ROUTE_NODE_INDEX_TTL_SECONDS).toCompletableFuture().join();
     }
 
-    private void removeNodeRouteIndex(String nodeId, String userId, String routeField) {
-        async.srem(nodeIndexKey(nodeId), nodeIndexEntry(userId, routeField))
+    private void removeNodeRouteIndex(String nodeId, String userId, String routeField, String generation) {
+        if (generation == null || generation.isBlank()) return;
+        async.srem(nodeIndexKey(nodeId), nodeIndexEntry(userId, routeField, generation))
                 .toCompletableFuture().join();
     }
 
-    private boolean removeRoute(String userId, String nodeId, int platformId, String field) {
+    private boolean removeRoute(String userId, String nodeId, int platformId, String field, String generation) {
         long now = System.currentTimeMillis();
         Number removed = (Number) async.eval(LUA_REMOVE_ROUTE, ScriptOutputType.INTEGER,
                 new String[]{routeKey(userId), onlineKey(userId)}, field, nodeId, platformId + ":",
-                String.valueOf(platformId), String.valueOf(now), String.valueOf(ONLINE_TTL_SECONDS))
+                String.valueOf(platformId), String.valueOf(now), String.valueOf(ONLINE_TTL_SECONDS), generation)
                 .toCompletableFuture().join();
         return removed != null && removed.longValue() > 0;
     }
@@ -482,8 +500,8 @@ public class RedisRouteTable implements IRouteTable {
         return KEY_ROUTE_NODE_PREFIX + nodeId;
     }
 
-    private static String nodeIndexEntry(String userId, String routeField) {
-        return userId + "|" + routeField;
+    private static String nodeIndexEntry(String userId, String routeField, String generation) {
+        return userId + "|" + routeField + "|" + generation;
     }
 
     private static RouteBinding toRouteBinding(String userId, String routeField, String routeValue) {
@@ -497,7 +515,14 @@ public class RedisRouteTable implements IRouteTable {
             }
         }
         String sessionId = parts.length > 1 ? parts[1] : "default";
-        String[] valueParts = routeValue.split("\\|", 2);
+        RouteValue value = parseRouteValue(routeValue);
+        String nodeId = value.nodeId();
+        long expireAt = value.expireAt();
+        return new RouteBinding(userId, nodeId, platformId, sessionId, expireAt);
+    }
+
+    private static RouteValue parseRouteValue(String routeValue) {
+        String[] valueParts = routeValue.split("\\|", 3);
         String nodeId = valueParts[0];
         long expireAt = 0;
         if (valueParts.length > 1) {
@@ -507,8 +532,11 @@ public class RedisRouteTable implements IRouteTable {
                 expireAt = 0;
             }
         }
-        return new RouteBinding(userId, nodeId, platformId, sessionId, expireAt);
+        String generation = valueParts.length > 2 ? valueParts[2] : "";
+        return new RouteValue(nodeId, expireAt, generation);
     }
+
+    private record RouteValue(String nodeId, long expireAt, String generation) { }
 
     private void ensureLayoutReady() {
         if (keyLayout != KeyLayout.TAGGED_V2) {

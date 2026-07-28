@@ -96,14 +96,42 @@ class RedisRouteTableE2ETest {
                 executor.shutdownNow();
             }
 
-            assertTrue(nodeIndexContains(bindingRedis, nodeId,
-                    newUserId + "|" + PlatformID.WEB + ":new-session"));
+            assertTrue(nodeIndexContainsPrefix(bindingRedis, nodeId,
+                    newUserId + "|" + PlatformID.WEB + ":new-session|"));
             assertTrue(bindingRoutes.lookupAllBindings(newUserId).stream()
                     .anyMatch(binding -> "new-session".equals(binding.sessionId())));
         } finally {
             bindingRoutes.offline(newUserId, nodeId, PlatformID.WEB, "new-session");
             cleanupRedis.close();
             bindingRedis.close();
+        }
+    }
+
+    @Test
+    void cleanupSnapshotCannotRemoveSameBindingReregisteredWithNewGeneration() {
+        RedisConfiguration redis = redisOrSkip();
+        String nodeId = "route-generation-node-" + UUID.randomUUID();
+        String userId = "route-generation-user-" + UUID.randomUUID();
+        String field = PlatformID.WEB + ":same-session";
+        RedisRouteTable routes = new RedisRouteTable(redis, new SessionManager(), "client", "tagged-v2");
+        try {
+            routes.online(userId, nodeId, PlatformID.WEB, "same-session");
+            String indexKey = "im:route-node:v2:" + nodeId;
+            String staleMember = nodeIndexMembers(redis, indexKey).stream().findFirst().orElseThrow();
+
+            routes.online(userId, nodeId, PlatformID.WEB, "same-session");
+            try (CloseableRedisCommands commands = redis.createSyncCommands()) {
+                var sync = commands.<io.lettuce.core.cluster.api.sync.RedisClusterCommands<String, String>>sync();
+                for (String current : nodeIndexMembers(redis, indexKey)) sync.srem(indexKey, current);
+                sync.sadd(indexKey, staleMember);
+            }
+
+            assertEquals(0, routes.cleanupNodeRoutes(nodeId));
+            assertTrue(routes.lookupAllBindings(userId).stream()
+                    .anyMatch(binding -> "same-session".equals(binding.sessionId())));
+        } finally {
+            routes.offline(userId, nodeId, PlatformID.WEB, "same-session");
+            redis.close();
         }
     }
 
@@ -207,11 +235,16 @@ class RedisRouteTableE2ETest {
         throw new AssertionError("route cleanup did not begin within 10 seconds");
     }
 
-    private static boolean nodeIndexContains(RedisConfiguration redis, String nodeId, String member) {
+    private static boolean nodeIndexContainsPrefix(RedisConfiguration redis, String nodeId, String prefix) {
         try (CloseableRedisCommands commands = redis.createSyncCommands()) {
-            return Boolean.TRUE.equals(commands
-                    .<io.lettuce.core.cluster.api.sync.RedisClusterCommands<String, String>>sync()
-                    .sismember("im:route-node:v2:" + nodeId, member));
+            return commands.<io.lettuce.core.cluster.api.sync.RedisClusterCommands<String, String>>sync()
+                    .smembers("im:route-node:v2:" + nodeId).stream().anyMatch(entry -> entry.startsWith(prefix));
+        }
+    }
+
+    private static java.util.Set<String> nodeIndexMembers(RedisConfiguration redis, String key) {
+        try (CloseableRedisCommands commands = redis.createSyncCommands()) {
+            return commands.<io.lettuce.core.cluster.api.sync.RedisClusterCommands<String, String>>sync().smembers(key);
         }
     }
 }
