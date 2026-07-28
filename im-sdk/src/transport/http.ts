@@ -52,30 +52,26 @@ export class HttpTransport {
   }
 
   uploadFile(fileName: string, fileData: UploadBody, mimeType: string): Promise<FileUploadResult> {
-    return this.postJson<PresignedUploadResponse>("/api/file/upload/sign", {
+    return this.postJson<PostPolicyUploadResponse>("/api/file/upload/sign", {
       fileName,
       fileSize: this.bodySize(fileData),
       mimeType,
     }).then(async (signed) => {
-      await this.putObject(signed.uploadUrl, fileData, signed.headers);
+      await this.postObjectForm(signed, fileData);
       return this.postJson<FileUploadResult>("/api/file/upload/complete", { fileId: signed.fileId });
     });
   }
 
   multipartInit(fileName: string, fileSize: number, mimeType: string): Promise<{ uploadId: string; fileId?: string; objectId?: string }> {
-    return this.postJson("/api/file/multipart/init", { fileName, fileSize, mimeType });
+    return Promise.reject(new IMProtocolError("Multipart uploads are disabled during POST upload migration"));
   }
 
   uploadPart(uploadId: string, partNumber: number, data: UploadBody): Promise<string> {
-    return this.postJson<PresignedPartResponse>("/api/file/multipart/part-sign", { uploadId, partNumber })
-      .then(async (signed) => {
-        const response = await this.putObject(signed.uploadUrl, data, signed.headers);
-        return response.headers.get(HTTP_HEADER.ETAG) ?? response.headers.get(HTTP_HEADER.ETAG_LOWERCASE) ?? "";
-      });
+    return Promise.reject(new IMProtocolError("Multipart uploads are disabled during POST upload migration"));
   }
 
   multipartComplete(uploadId: string, parts: Array<{ partNumber: number; etag: string }>): Promise<FileUploadResult> {
-    return this.postJson("/api/file/multipart/complete", { uploadId, parts });
+    return Promise.reject(new IMProtocolError("Multipart uploads are disabled during POST upload migration"));
   }
 
   multipartAbort(uploadId: string): Promise<void> {
@@ -97,16 +93,16 @@ export class HttpTransport {
     });
   }
 
-  private async putObject(url: string, body: UploadBody, signedHeaders: Record<string, string> = {}): Promise<Response> {
-    const response = await this.fetchWithTimeout(url, {
-      method: "PUT",
-      headers: signedHeaders,
-      body: this.toRequestBody(body),
-    });
+  private async postObjectForm(signed: PostPolicyUploadResponse, body: UploadBody): Promise<void> {
+    const form = new FormData();
+    for (const [key, value] of Object.entries(signed.formFields)) {
+      form.append(key, value);
+    }
+    form.append(signed.fileField, this.toBlob(body), "upload");
+    const response = await this.fetchWithTimeout(signed.uploadUrl, { method: "POST", body: form });
     if (!response.ok) {
       throw new IMHttpError(response.status, `Object storage upload failed: HTTP ${response.status}`);
     }
-    return response;
   }
 
   private async request<T>(path: string, init: RequestInit): Promise<T> {
@@ -179,11 +175,8 @@ export class HttpTransport {
     return copy;
   }
 
-  private toRequestBody(body: UploadBody): BodyInit {
-    if (body instanceof Uint8Array) {
-      return this.toArrayBuffer(body);
-    }
-    return body;
+  private toBlob(body: UploadBody): Blob {
+    return body instanceof Uint8Array ? new Blob([this.toArrayBuffer(body)]) : body;
   }
 
   private bodySize(body: UploadBody): number {
@@ -204,15 +197,12 @@ export class HttpTransport {
 
 type UploadBody = Uint8Array | Blob;
 
-interface PresignedUploadResponse {
+export interface PostPolicyUploadResponse {
   fileId: string;
   uploadUrl: string;
-  headers?: Record<string, string>;
-}
-
-interface PresignedPartResponse {
-  uploadUrl: string;
-  headers?: Record<string, string>;
+  method: "POST";
+  formFields: Record<string, string>;
+  fileField: string;
 }
 
 function defaultRequestId(): string {

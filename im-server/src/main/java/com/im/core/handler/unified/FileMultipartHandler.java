@@ -4,39 +4,31 @@ import com.im.api.ApiRequest;
 import com.im.api.Operation;
 import com.im.api.RequestHandler;
 import com.im.common.exception.NotFoundException;
+import com.im.common.exception.ValidationException;
 import com.im.core.file.DirectFileTransferUseCase;
 
-import java.util.Map;
+import java.util.Objects;
 
 /**
- * Server-proxy multipart upload handler for {@code file.multipart.upload}.
+ * Legacy server-proxy multipart upload handler.
  *
- * <p>The multipart session itself is owned by {@link DirectFileTransferUseCase}
- * and persisted through {@code UploadSessionStore}, so upload can hit any node
- * after init in a cluster.</p>
+ * <p>The endpoint remains registered only to tell clients to migrate to the
+ * exact-size object-storage POST upload flow.</p>
  */
 public class FileMultipartHandler implements RequestHandler {
 
-    private final DirectFileTransferUseCase useCase;
-
     public FileMultipartHandler(DirectFileTransferUseCase useCase) {
-        this.useCase = useCase;
+        Objects.requireNonNull(useCase, "useCase");
     }
 
     @Override
     public Object handle(ApiRequest req) {
         Operation operation = Operation.fromOpName(req.operation());
         if (operation == null) throw new NotFoundException("unsupported: " + req.operation());
-        return switch (operation) {
-            case FILE_MULTIPART_UPLOAD -> handleUpload(req);
-            default -> throw new NotFoundException("unsupported: " + req.operation());
-        };
+        if (operation != Operation.FILE_MULTIPART_UPLOAD) {
+            throw new NotFoundException("unsupported: " + req.operation());
+        }
+        throw new ValidationException("multipart upload is disabled during POST upload migration");
     }
 
-    private Map<String, String> handleUpload(ApiRequest req) {
-        String uploadId = req.getString("uploadId");
-        int partNumber = req.getInt("partNumber", -1);
-        String etag = useCase.uploadMultipartPart(req.currentUserId(), uploadId, partNumber, req.bodyRaw());
-        return Map.of("etag", etag);
-    }
 }

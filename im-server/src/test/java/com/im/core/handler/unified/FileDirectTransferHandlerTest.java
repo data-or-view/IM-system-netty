@@ -1,14 +1,15 @@
 package com.im.core.handler.unified;
 
 import com.im.api.ApiRequest;
+import com.im.api.FileObjectStat;
 import com.im.api.IFileStorageService;
 import com.im.api.Operation;
 import com.im.api.PartInfo;
+import com.im.api.PresignedPostPolicy;
 import com.im.common.exception.ValidationException;
 import com.im.core.file.DirectFileTransferUseCase;
 import com.im.core.file.FileObjectMetadata;
 import com.im.core.file.FileObjectMetadataStore;
-import com.im.core.file.MultipartSignResult;
 import com.im.core.file.UploadSession;
 import com.im.core.file.UploadSessionStore;
 import org.junit.jupiter.api.Test;
@@ -18,32 +19,30 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class FileDirectTransferHandlerTest {
 
     @Test
-    void multipartCompleteRejectsMissingEtag() {
+    void multipartInitReturnsPostMigrationValidationError() {
         Fixture fixture = new Fixture();
-        MultipartSignResult init = fixture.useCase.initiateMultipartUpload(
-                "u1", "a.txt", 3, "text/plain", "", "file");
-        ApiRequest request = completeRequest(init.uploadId(), List.of(Map.of("partNumber", 1)));
+        ApiRequest request = request(Operation.FILE_MULTIPART_INIT, Map.of());
 
-        assertThrows(ValidationException.class, () -> fixture.handler.handle(request));
+        ValidationException ex = assertThrows(ValidationException.class, () -> fixture.handler.handle(request));
+        assertTrue(ex.getMessage().contains("POST upload migration"));
     }
 
     @Test
-    void multipartCompleteRejectsNonMapPart() {
+    void multipartCompleteReturnsPostMigrationValidationBeforePartParsing() {
         Fixture fixture = new Fixture();
-        MultipartSignResult init = fixture.useCase.initiateMultipartUpload(
-                "u1", "a.txt", 3, "text/plain", "", "file");
-        ApiRequest request = completeRequest(init.uploadId(), List.of("bad-part"));
+        ApiRequest request = request(Operation.FILE_MULTIPART_COMPLETE, Map.of("parts", List.of("bad-part")));
 
-        assertThrows(ValidationException.class, () -> fixture.handler.handle(request));
+        ValidationException ex = assertThrows(ValidationException.class, () -> fixture.handler.handle(request));
+        assertTrue(ex.getMessage().contains("POST upload migration"));
     }
 
-    private static ApiRequest completeRequest(String uploadId, List<?> parts) {
-        ApiRequest request = new ApiRequest(Operation.FILE_MULTIPART_COMPLETE,
-                Map.of("uploadId", uploadId, "parts", parts), Map.of(), null, null);
+    private static ApiRequest request(Operation operation, Map<String, Object> params) {
+        ApiRequest request = new ApiRequest(operation, params, Map.of(), null, null);
         request.setAttribute(ApiRequest.ATTR_USER_ID, "u1");
         return request;
     }
@@ -64,6 +63,10 @@ class FileDirectTransferHandlerTest {
         @Override public void delete(String bucket, String objectId) {}
         @Override public String getUrl(String bucket, String objectId) { return "https://oss.test/" + bucket + "/" + objectId; }
         @Override public boolean exists(String bucket, String objectId) { return true; }
+        @Override public PresignedPostPolicy presignPostPolicy(String bucket, String objectKey, String contentType, long exactSizeBytes, int expiresSeconds) {
+            return new PresignedPostPolicy("https://oss.test/" + bucket, Map.of(), "file");
+        }
+        @Override public FileObjectStat statObject(String bucket, String objectKey) { return new FileObjectStat(3, "text/plain"); }
         @Override public String initiateMultipartUpload(String bucket, String objectId) { return "upload-1"; }
         @Override public void completeMultipartUpload(String bucket, String objectId, String uploadId, List<PartInfo> parts) {}
     }

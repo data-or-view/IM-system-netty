@@ -3,48 +3,24 @@ package com.im.core.handler.unified;
 import com.im.api.ApiRequest;
 import com.im.api.RequestHandler;
 import com.im.common.exception.ValidationException;
-import com.im.common.validation.Preconditions;
 import com.im.core.file.DirectFileTransferUseCase;
-import com.im.core.file.FileUploadCompleteResult;
 
-import java.util.Map;
+import java.util.Objects;
 
 /**
- * 文件上传 handler：{@code file.upload}。
+ * Legacy proxy upload handler.
  *
- * <p>WS 场景：fileName/mimeType 从 params 读取，文件 bytes 从 bodyRaw 读取。</p>
- * <p>HTTP 场景：由 {@code HttpRequestAdapter} 解析 multipart 并设置 params + bodyRaw。</p>
+ * <p>New uploads use the authenticated POST-policy sign and complete endpoints. This
+ * legacy route is retained only to return a deterministic migration error.</p>
  */
 public class FileUploadHandler implements RequestHandler {
 
-    private final DirectFileTransferUseCase fileUploadUseCase;
-
     public FileUploadHandler(DirectFileTransferUseCase fileUploadUseCase) {
-        this.fileUploadUseCase = fileUploadUseCase;
+        Objects.requireNonNull(fileUploadUseCase, "fileUploadUseCase");
     }
 
     @Override
     public Object handle(ApiRequest req) {
-        String fileName = req.getString("fileName");
-        String mimeType = req.getString("mimeType");
-        byte[] body = req.bodyRaw();
-
-        if (body == null || body.length == 0) {
-            throw new ValidationException("file body is empty");
-        }
-        // fileName/mimeType 缺失会存脏数据到对象存储，必须校验
-        fileName = Preconditions.requireText(fileName, "fileName");
-        mimeType = Preconditions.requireText(mimeType, "mimeType");
-
-        FileUploadCompleteResult result = fileUploadUseCase.uploadSingleFile(
-                req.currentUserId(), fileName, mimeType, body,
-                req.getString("hash", ""), req.getString("fileGroup", "file"));
-
-        return Map.of("status", "OK",
-                "fileUrl", result.fileUrl(),
-                "fileId", result.fileId(),
-                "fileName", result.fileName(),
-                "mimeType", result.mimeType(),
-                "fileSize", String.valueOf(result.fileSize()));
+        throw new ValidationException("proxy file upload is disabled; use POST upload migration");
     }
 }

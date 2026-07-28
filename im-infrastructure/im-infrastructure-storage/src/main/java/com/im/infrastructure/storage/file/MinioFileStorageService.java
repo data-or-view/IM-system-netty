@@ -1,7 +1,9 @@
 package com.im.infrastructure.storage.file;
 
+import com.im.api.FileObjectStat;
 import com.im.api.IFileStorageService;
 import com.im.api.PartInfo;
+import com.im.api.PresignedPostPolicy;
 import com.im.common.exception.FileStorageException;
 import io.minio.*;
 import io.minio.errors.*;
@@ -13,6 +15,9 @@ import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -146,6 +151,44 @@ public class MinioFileStorageService implements IFileStorageService {
                     .build());
         } catch (Exception e) {
             throw new FileStorageException("MinIO presign PUT failed: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public PresignedPostPolicy presignPostPolicy(String bucket, String objectKey, String contentType,
+                                                  long exactSizeBytes, int expiresSeconds) {
+        try {
+            ensureBucket(bucket);
+            PostPolicy policy = new PostPolicy(bucket,
+                    ZonedDateTime.now(ZoneOffset.UTC).plusSeconds(expiresSeconds));
+            policy.addEqualsCondition("key", objectKey);
+            policy.addEqualsCondition("Content-Type", contentType);
+            policy.addContentLengthRangeCondition(exactSizeBytes, exactSizeBytes);
+            Map<String, String> formFields = new HashMap<>(client.getPresignedPostFormData(policy));
+            formFields.put("key", objectKey);
+            formFields.put("Content-Type", contentType);
+            return new PresignedPostPolicy(endpoint + "/" + bucket,
+                    formFields, "file");
+        } catch (Exception e) {
+            throw new FileStorageException("MinIO presign POST failed: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public FileObjectStat statObject(String bucket, String objectKey) {
+        try {
+            StatObjectResponse stat = client.statObject(StatObjectArgs.builder()
+                    .bucket(bucket)
+                    .object(objectKey)
+                    .build());
+            return new FileObjectStat(stat.size(), stat.contentType());
+        } catch (ErrorResponseException e) {
+            if ("NoSuchKey".equals(e.errorResponse().code()) || "NoSuchObject".equals(e.errorResponse().code())) {
+                return null;
+            }
+            throw new FileStorageException("MinIO stat failed: " + e.getMessage(), e);
+        } catch (Exception e) {
+            throw new FileStorageException("MinIO stat failed: " + e.getMessage(), e);
         }
     }
 

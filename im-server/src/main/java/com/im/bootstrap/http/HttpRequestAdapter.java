@@ -166,32 +166,27 @@ public class HttpRequestAdapter extends SimpleChannelInboundHandler<FullHttpRequ
             byte[] bytes = new byte[buf.readableBytes()];
             buf.getBytes(buf.readerIndex(), bytes);
 
-            if (operation == Operation.FILE_UPLOAD || operation == Operation.FILE_MULTIPART_UPLOAD) {
-                // 文件上传：body 是文件二进制数据，不当作 JSON 解析。
-                // fileName/mimeType 等元信息通过 query string 传入，已在上一步合并到 params。
-                bodyRaw = bytes;
-            } else {
-                // JSON body → 合并到 params
-                String contentType = req.headers().get(ImHeaders.CONTENT_TYPE, "");
-                if (contentType.contains(ImHeaders.APPLICATION_JSON)) {
-                    try {
-                        Map<String, Object> bodyMap = MAPPER.readValue(bytes, MAP_TYPE);
-                        params.putAll(bodyMap);
-                    } catch (Exception e) {
-                        log.warn(StructuredLog.event(LogEvents.REQUEST_REJECTED,
-                                LogFields.NODE_ID, nodeId,
-                                LogFields.REQUEST_ID, requestId,
-                                LogFields.TRACE_ID, traceId,
-                                LogFields.OPERATION, operation.opName(),
-                                LogFields.PROTOCOL, "http",
-                                LogFields.CLIENT_IP, clientIp,
-                                LogFields.HTTP_METHOD, method,
-                                LogFields.HTTP_PATH, path,
-                                LogFields.ERROR_CODE, ImErrorCode.BAD_REQUEST.getCode(),
-                                LogFields.REASON, "invalid_json"));
-                        JsonResponse.imError(ctx, ImErrorCode.BAD_REQUEST, "invalid json body", requestId, requestOrigin);
-                        return;
-                    }
+            // Binary upload bodies are no longer accepted by the API gateway. Object storage
+            // receives bytes directly through the exact-size POST policy returned by file.upload.sign.
+            String contentType = req.headers().get(ImHeaders.CONTENT_TYPE, "");
+            if (contentType.contains(ImHeaders.APPLICATION_JSON)) {
+                try {
+                    Map<String, Object> bodyMap = MAPPER.readValue(bytes, MAP_TYPE);
+                    params.putAll(bodyMap);
+                } catch (Exception e) {
+                    log.warn(StructuredLog.event(LogEvents.REQUEST_REJECTED,
+                            LogFields.NODE_ID, nodeId,
+                            LogFields.REQUEST_ID, requestId,
+                            LogFields.TRACE_ID, traceId,
+                            LogFields.OPERATION, operation.opName(),
+                            LogFields.PROTOCOL, "http",
+                            LogFields.CLIENT_IP, clientIp,
+                            LogFields.HTTP_METHOD, method,
+                            LogFields.HTTP_PATH, path,
+                            LogFields.ERROR_CODE, ImErrorCode.BAD_REQUEST.getCode(),
+                            LogFields.REASON, "invalid_json"));
+                    JsonResponse.imError(ctx, ImErrorCode.BAD_REQUEST, "invalid json body", requestId, requestOrigin);
+                    return;
                 }
             }
         }

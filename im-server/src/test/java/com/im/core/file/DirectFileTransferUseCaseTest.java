@@ -1,7 +1,9 @@
 package com.im.core.file;
 
+import com.im.api.FileObjectStat;
 import com.im.api.IFileStorageService;
 import com.im.api.PartInfo;
+import com.im.api.PresignedPostPolicy;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
@@ -21,8 +23,10 @@ class DirectFileTransferUseCaseTest {
 
         PresignedUploadResult signed = useCase.signSingleUpload("u1", "a.txt", 3, "text/plain", "h1", "file");
 
-        assertEquals("PUT", signed.method());
-        assertTrue(signed.uploadUrl().contains("/im-system/"));
+        assertEquals("POST", signed.method());
+        assertEquals("file", signed.fileField());
+        assertEquals(3, storage.policyMaxBytes);
+        assertEquals("https://oss.test/im-system", signed.uploadUrl());
         assertTrue(sessions.byFileId.containsKey(signed.fileId()));
         assertArrayEquals(new byte[0], storage.lastUploadedBytes);
 
@@ -37,46 +41,133 @@ class DirectFileTransferUseCaseTest {
     }
 
     @Test
-    void multipartPartSignReturnsOssUrlAndCompletePersistsMetadata() {
+    void completionDeletesObjectWhenActualSizeDiffers() {
+        FakeStorage storage = new FakeStorage();
+        InMemoryUploadSessionStore sessions = new InMemoryUploadSessionStore();
+        InMemoryFileObjectMetadataStore metadata = new InMemoryFileObjectMetadataStore();
+        DirectFileTransferUseCase useCase = new DirectFileTransferUseCase(storage, sessions, metadata, "im-system", 900);
+        PresignedUploadResult signed = useCase.signSingleUpload("u1", "a.txt", 3, "text/plain", "", "file");
+        storage.stat = new FileObjectStat(4, "text/plain");
+
+        assertThrows(com.im.common.exception.ImException.class,
+                () -> useCase.completeSingleUpload("u1", signed.fileId()));
+
+        assertTrue(storage.deleteCalled);
+        assertFalse(sessions.byFileId.containsKey(signed.fileId()));
+        assertNull(metadata.saved.get(signed.fileId()));
+    }
+
+    @Test
+    void completionDeletesObjectWhenContentTypeDiffers() {
+        FakeStorage storage = new FakeStorage();
+        InMemoryUploadSessionStore sessions = new InMemoryUploadSessionStore();
+        DirectFileTransferUseCase useCase = new DirectFileTransferUseCase(
+                storage, sessions, new InMemoryFileObjectMetadataStore(), "im-system", 900);
+        PresignedUploadResult signed = useCase.signSingleUpload("u1", "a.txt", 3, "text/plain", "", "file");
+        storage.stat = new FileObjectStat(3, "application/octet-stream");
+
+        assertThrows(com.im.common.exception.ImException.class,
+                () -> useCase.completeSingleUpload("u1", signed.fileId()));
+
+        assertTrue(storage.deleteCalled);
+        assertFalse(sessions.byFileId.containsKey(signed.fileId()));
+    }
+
+    @Test
+    void missingObjectDoesNotPersistMetadataOrConsumeSession() {
+        FakeStorage storage = new FakeStorage();
+        InMemoryUploadSessionStore sessions = new InMemoryUploadSessionStore();
+        InMemoryFileObjectMetadataStore metadata = new InMemoryFileObjectMetadataStore();
+        DirectFileTransferUseCase useCase = new DirectFileTransferUseCase(storage, sessions, metadata, "im-system", 900);
+        PresignedUploadResult signed = useCase.signSingleUpload("u1", "a.txt", 3, "text/plain", "", "file");
+        storage.stat = null;
+
+        assertThrows(com.im.common.exception.ImException.class,
+                () -> useCase.completeSingleUpload("u1", signed.fileId()));
+
+        assertFalse(storage.deleteCalled);
+        assertTrue(sessions.byFileId.containsKey(signed.fileId()));
+        assertNull(metadata.saved.get(signed.fileId()));
+    }
+
+    @Test
+    void failedMetadataPersistenceLeavesSessionForCompletionRetry() {
+        FakeStorage storage = new FakeStorage();
+        InMemoryUploadSessionStore sessions = new InMemoryUploadSessionStore();
+        InMemoryFileObjectMetadataStore metadata = new InMemoryFileObjectMetadataStore();
+        metadata.failNextSave = true;
+        DirectFileTransferUseCase useCase = new DirectFileTransferUseCase(storage, sessions, metadata, "im-system", 900);
+        PresignedUploadResult signed = useCase.signSingleUpload("u1", "a.txt", 3, "text/plain", "", "file");
+
+        assertThrows(RuntimeException.class, () -> useCase.completeSingleUpload("u1", signed.fileId()));
+        assertTrue(sessions.byFileId.containsKey(signed.fileId()));
+
+        assertEquals(signed.fileId(), useCase.completeSingleUpload("u1", signed.fileId()).fileId());
+        assertFalse(sessions.byFileId.containsKey(signed.fileId()));
+    }
+
+    @Test
+    void completionRequiresUploadOwner() {
+        FakeStorage storage = new FakeStorage();
+        InMemoryUploadSessionStore sessions = new InMemoryUploadSessionStore();
+        DirectFileTransferUseCase useCase = new DirectFileTransferUseCase(
+                storage, sessions, new InMemoryFileObjectMetadataStore(), "im-system", 900);
+        PresignedUploadResult signed = useCase.signSingleUpload("u1", "a.txt", 3, "text/plain", "", "file");
+
+        com.im.common.exception.ImException ex = assertThrows(com.im.common.exception.ImException.class,
+                () -> useCase.completeSingleUpload("u2", signed.fileId()));
+
+        assertEquals(com.im.common.enums.ImErrorCode.FORBIDDEN, ex.getErrorCode());
+        assertTrue(sessions.byFileId.containsKey(signed.fileId()));
+    }
+
+    @Test
+    void multipartInitIsDisabledDuringPostUploadMigration() {
         FakeStorage storage = new FakeStorage();
         InMemoryUploadSessionStore sessions = new InMemoryUploadSessionStore();
         InMemoryFileObjectMetadataStore metadata = new InMemoryFileObjectMetadataStore();
         DirectFileTransferUseCase useCase = new DirectFileTransferUseCase(storage, sessions, metadata, "im-system", 900);
 
-        MultipartSignResult init = useCase.initiateMultipartUpload("u1", "video.mp4", 9, "video/mp4", "", "video");
-        PresignedPartResult part = useCase.signMultipartPart("u1", init.uploadId(), 2);
+        com.im.common.exception.ImException ex = assertThrows(com.im.common.exception.ImException.class,
+                () -> useCase.initiateMultipartUpload("u1", "video.mp4", 9, "video/mp4", "", "video"));
 
-        assertEquals(2, part.partNumber());
-        assertTrue(part.uploadUrl().contains("partNumber=2"));
-        assertTrue(part.uploadUrl().contains("uploadId=" + init.uploadId()));
-
-        FileUploadCompleteResult completed = useCase.completeMultipartUpload("u1", init.uploadId(),
-                List.of(new PartInfo(2, "\"etag-2\"")));
-
-        assertEquals(init.fileId(), completed.fileId());
-        assertEquals("video.mp4", completed.fileName());
-        assertNotNull(metadata.saved.get(init.fileId()));
-        assertFalse(sessions.byUploadId.containsKey(init.uploadId()));
+        assertTrue(ex.getMessage().contains("POST upload migration"));
     }
 
     @Test
-    void proxyMultipartPartUploadUsesPersistedSession() {
+    void multipartPartProxyUploadIsDisabledDuringPostUploadMigration() {
         FakeStorage storage = new FakeStorage();
         InMemoryUploadSessionStore sessions = new InMemoryUploadSessionStore();
         InMemoryFileObjectMetadataStore metadata = new InMemoryFileObjectMetadataStore();
         DirectFileTransferUseCase useCase = new DirectFileTransferUseCase(storage, sessions, metadata, "im-system", 900);
-        MultipartSignResult init = useCase.initiateMultipartUpload("u1", "video.mp4", 9, "video/mp4", "", "video");
+        com.im.common.exception.ImException ex = assertThrows(com.im.common.exception.ImException.class,
+                () -> useCase.uploadMultipartPart("u1", "upload-1", 3, new byte[]{1, 2, 3}));
 
-        String etag = useCase.uploadMultipartPart("u1", init.uploadId(), 3, new byte[]{1, 2, 3});
-
-        assertEquals("\"etag-3\"", etag);
-        assertEquals(init.uploadId(), storage.lastUploadId);
-        assertEquals(3, storage.lastPartNumber);
-        assertArrayEquals(new byte[]{1, 2, 3}, storage.lastUploadedBytes);
+        assertTrue(ex.getMessage().contains("POST upload migration"));
     }
 
     @Test
-    void multipartInitRejectsFileLargerThanConfiguredLimit() {
+    void multipartAbortRetainsOwnerCheckForExistingSessions() {
+        FakeStorage storage = new FakeStorage();
+        InMemoryUploadSessionStore sessions = new InMemoryUploadSessionStore();
+        DirectFileTransferUseCase useCase = new DirectFileTransferUseCase(
+                storage, sessions, new InMemoryFileObjectMetadataStore(), "im-system", 900);
+        UploadSession session = new UploadSession("file-1", "upload-1", "im-system", "uploads/file-1.txt",
+                "u1", "a.txt", 3, "text/plain", "", "file", true);
+        sessions.save(session);
+
+        com.im.common.exception.ImException ex = assertThrows(com.im.common.exception.ImException.class,
+                () -> useCase.abortMultipartUpload("u2", "upload-1"));
+        assertEquals(com.im.common.enums.ImErrorCode.FORBIDDEN, ex.getErrorCode());
+        assertFalse(storage.abortCalled);
+
+        useCase.abortMultipartUpload("u1", "upload-1");
+        assertTrue(storage.abortCalled);
+        assertNull(sessions.getByUploadId("upload-1"));
+    }
+
+    @Test
+    void postUploadSigningRejectsFileLargerThanConfiguredLimit() {
         DirectFileTransferUseCase useCase = new DirectFileTransferUseCase(
                 new FakeStorage(),
                 new InMemoryUploadSessionStore(),
@@ -86,49 +177,22 @@ class DirectFileTransferUseCaseTest {
                 2);
 
         com.im.common.exception.ImException ex = assertThrows(com.im.common.exception.ImException.class,
-                () -> useCase.initiateMultipartUpload("u1", "video.mp4", 3, "video/mp4", "", "video"));
+                () -> useCase.signSingleUpload("u1", "video.mp4", 3, "video/mp4", "", "video"));
 
         assertEquals(com.im.common.enums.ImErrorCode.BAD_REQUEST, ex.getErrorCode());
     }
 
     @Test
-    void proxyMultipartPartUploadRejectsPartLargerThanDeclaredFileSize() {
-        FakeStorage storage = new FakeStorage();
-        DirectFileTransferUseCase useCase = new DirectFileTransferUseCase(
-                storage,
-                new InMemoryUploadSessionStore(),
-                new InMemoryFileObjectMetadataStore(),
-                "im-system",
-                900,
-                10);
-        MultipartSignResult init = useCase.initiateMultipartUpload("u1", "video.mp4", 2, "video/mp4", "", "video");
-
-        com.im.common.exception.ImException ex = assertThrows(com.im.common.exception.ImException.class,
-                () -> useCase.uploadMultipartPart("u1", init.uploadId(), 1, new byte[]{1, 2, 3}));
-
-        assertEquals(com.im.common.enums.ImErrorCode.BAD_REQUEST, ex.getErrorCode());
-        assertEquals(null, storage.lastUploadId);
-    }
-
-    @Test
-    void proxySingleUploadPersistsMetadataForDownloadSign() {
+    void proxySingleUploadIsDisabled() {
         FakeStorage storage = new FakeStorage();
         InMemoryUploadSessionStore sessions = new InMemoryUploadSessionStore();
         InMemoryFileObjectMetadataStore metadata = new InMemoryFileObjectMetadataStore();
         DirectFileTransferUseCase useCase = new DirectFileTransferUseCase(storage, sessions, metadata, "im-system", 900);
 
-        FileUploadCompleteResult uploaded = useCase.uploadSingleFile(
-                "u1", "a.txt", "text/plain", new byte[]{1, 2, 3}, "", "file");
-        FileDownloadSignResult download = useCase.signDownload("u1", uploaded.fileId());
+        com.im.common.exception.ImException ex = assertThrows(com.im.common.exception.ImException.class,
+                () -> useCase.uploadSingleFile("u1", "a.txt", "text/plain", new byte[]{1, 2, 3}, "", "file"));
 
-        assertEquals(uploaded.fileId(), download.fileId());
-        assertEquals("a.txt", download.fileName());
-        assertEquals("text/plain", download.mimeType());
-        assertEquals(3, download.fileSize());
-        assertEquals(uploaded.fileUrl(), download.fileUrl());
-        assertEquals(900, storage.lastGetExpiresSeconds);
-        assertArrayEquals(new byte[]{1, 2, 3}, storage.lastUploadedBytes);
-        assertNotNull(metadata.saved.get(uploaded.fileId()));
+        assertTrue(ex.getMessage().contains("POST upload migration"));
     }
 
     @Test
@@ -166,6 +230,10 @@ class DirectFileTransferUseCaseTest {
         String lastUploadId;
         int lastPartNumber;
         int lastGetExpiresSeconds;
+        long policyMaxBytes;
+        FileObjectStat stat = new FileObjectStat(3, "text/plain");
+        boolean deleteCalled;
+        boolean abortCalled;
 
         @Override
         public String upload(String bucket, String objectId, byte[] data, String mimeType) {
@@ -180,6 +248,7 @@ class DirectFileTransferUseCaseTest {
 
         @Override
         public void delete(String bucket, String objectId) {
+            deleteCalled = true;
         }
 
         @Override
@@ -196,6 +265,24 @@ class DirectFileTransferUseCaseTest {
         @Override
         public boolean exists(String bucket, String objectId) {
             return true;
+        }
+
+        @Override
+        public PresignedPostPolicy presignPostPolicy(String bucket, String objectKey, String contentType,
+                                                      long exactSizeBytes, int expiresSeconds) {
+            policyMaxBytes = exactSizeBytes;
+            return new PresignedPostPolicy("https://oss.test/" + bucket,
+                    Map.of("key", objectKey, "Content-Type", contentType), "file");
+        }
+
+        @Override
+        public FileObjectStat statObject(String bucket, String objectKey) {
+            return stat;
+        }
+
+        @Override
+        public void abortMultipartUpload(String bucket, String objectId, String uploadId) {
+            abortCalled = true;
         }
 
         @Override
@@ -259,9 +346,14 @@ class DirectFileTransferUseCaseTest {
 
     private static final class InMemoryFileObjectMetadataStore implements FileObjectMetadataStore {
         final Map<String, FileObjectMetadata> saved = new HashMap<>();
+        boolean failNextSave;
 
         @Override
         public void save(FileObjectMetadata metadata) {
+            if (failNextSave) {
+                failNextSave = false;
+                throw new IllegalStateException("metadata store unavailable");
+            }
             saved.put(metadata.fileId(), metadata);
         }
 

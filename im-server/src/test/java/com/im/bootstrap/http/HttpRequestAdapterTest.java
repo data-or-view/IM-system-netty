@@ -3,6 +3,7 @@ package com.im.bootstrap.http;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.im.api.ApiRequest;
+import com.im.bootstrap.HttpServerBootstrap;
 import com.im.core.dispatcher.ApiDispatcher;
 import com.im.bootstrap.RequestAdmission;
 import com.im.bootstrap.RequestScope;
@@ -13,12 +14,15 @@ import com.im.core.serialization.jackson.ObjectMapperProvider;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.handler.codec.http.DefaultFullHttpRequest;
+import io.netty.handler.codec.http.DefaultHttpRequest;
+import io.netty.handler.codec.http.DefaultLastHttpContent;
 import io.netty.handler.codec.http.FullHttpResponse;
 import io.netty.handler.codec.http.HttpHeaderNames;
 import io.netty.handler.codec.http.HttpHeaderValues;
 import io.netty.handler.codec.http.HttpMethod;
 import io.netty.handler.codec.http.HttpResponseStatus;
 import io.netty.handler.codec.http.HttpVersion;
+import io.netty.handler.codec.http.HttpObjectAggregator;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
@@ -38,6 +42,28 @@ class HttpRequestAdapterTest {
 
     private static final ObjectMapper MAPPER = ObjectMapperProvider.get();
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {};
+
+    @Test
+    void bodyOverOneMiBReturnsPayloadTooLargeBeforeDispatch() {
+        ApiDispatcher dispatcher = new ApiDispatcher();
+        EmbeddedChannel channel = new EmbeddedChannel(
+                new HttpObjectAggregator(HttpServerBootstrap.MAX_HTTP_CONTENT_LENGTH),
+                new HttpRequestAdapter(dispatcher, new DirectExecutorService()));
+        DefaultHttpRequest request = new DefaultHttpRequest(
+                HttpVersion.HTTP_1_1,
+                HttpMethod.POST,
+                "/api/user/register");
+        request.headers().setInt(HttpHeaderNames.CONTENT_LENGTH, HttpServerBootstrap.MAX_HTTP_CONTENT_LENGTH + 1);
+        request.headers().set(HttpHeaderNames.EXPECT, HttpHeaderValues.CONTINUE);
+
+        assertFalse(channel.writeInbound(request));
+        assertFalse(channel.writeInbound(new DefaultLastHttpContent(
+                Unpooled.wrappedBuffer(new byte[HttpServerBootstrap.MAX_HTTP_CONTENT_LENGTH + 1]))));
+
+        FullHttpResponse response = channel.readOutbound();
+        assertNotNull(response);
+        assertEquals(HttpResponseStatus.REQUEST_ENTITY_TOO_LARGE, response.status());
+    }
 
     @Test
     void requestIdHeaderIsExposedAsRequestAttribute() {

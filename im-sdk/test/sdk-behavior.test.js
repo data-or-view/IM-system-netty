@@ -1146,7 +1146,9 @@ test("file.upload signs, uploads to object storage, then completes through HTTP 
           data: {
             fileId: "f1",
             uploadUrl: "https://oss.test/upload-a",
-            headers: { "Content-Type": "text/plain" },
+            method: "POST",
+            formFields: { key: "uploads/f1/a.txt", "Content-Type": "text/plain" },
+            fileField: "file",
           },
         }), { status: 200, headers: { "Content-Type": "application/json" } });
       }
@@ -1176,14 +1178,15 @@ test("file.upload signs, uploads to object storage, then completes through HTTP 
     mimeType: "text/plain",
   });
   assert.equal(calls[1].url, "https://oss.test/upload-a");
-  assert.equal(calls[1].init.method, "PUT");
-  assert.equal(calls[1].init.headers["Content-Type"], "text/plain");
-  assert.deepEqual(Array.from(new Uint8Array(calls[1].init.body)), [1, 2, 3]);
+  assert.equal(calls[1].init.method, "POST");
+  assert.ok(calls[1].init.body instanceof FormData);
+  assert.equal(calls[1].init.body.get("key"), "uploads/f1/a.txt");
+  assert.ok(calls[1].init.body.get("file") instanceof Blob);
   assert.equal(calls[2].url, "http://127.0.0.1:8084/api/file/upload/complete");
   assert.deepEqual(JSON.parse(calls[2].init.body), { fileId: "f1" });
 });
 
-test("file.multipartUpload signs part and uploads bytes to object storage", async () => {
+test("file.multipartUpload rejects during the POST upload migration", async () => {
   const calls = [];
   const http = new HttpTransport({
     baseUrl: "http://127.0.0.1:8084/",
@@ -1200,15 +1203,11 @@ test("file.multipartUpload signs part and uploads bytes to object storage", asyn
     },
   });
 
-  const etag = await http.uploadPart("upload-1", 2, new Uint8Array([9, 8]));
-
-  assert.equal(etag, "etag-1");
-  assert.equal(calls[0].url, "http://127.0.0.1:8084/api/file/multipart/part-sign");
-  assert.equal(calls[0].init.method, "POST");
-  assert.deepEqual(JSON.parse(calls[0].init.body), { uploadId: "upload-1", partNumber: 2 });
-  assert.equal(calls[1].url, "https://oss.test/part-2");
-  assert.equal(calls[1].init.method, "PUT");
-  assert.deepEqual(Array.from(new Uint8Array(calls[1].init.body)), [9, 8]);
+  await assert.rejects(
+    () => http.uploadPart("upload-1", 2, new Uint8Array([9, 8])),
+    /POST upload migration/,
+  );
+  assert.equal(calls.length, 0);
 });
 
 test("sdk file api requires httpUrl instead of falling back to websocket", async () => {

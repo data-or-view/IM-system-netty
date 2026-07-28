@@ -30,30 +30,17 @@ export class FileAPI {
 
   /** 初始化分片上传 */
   multipartInit(fileName: string, fileSize: number, mimeType?: string): Promise<MultipartInitResult> {
-    const http = this.transport;
-    if (!http) return this.missingHttp();
-    return http.multipartInit(fileName, fileSize, mimeType ?? "application/octet-stream")
-      .then((r) => ({
-        uploadId: r.uploadId,
-        objectId: r.objectId ?? r.fileId ?? "",
-      }));
+    return this.multipartMigrationRequired();
   }
 
   /** 上传分片 */
   multipartUpload(uploadId: string, partNumber: number, data: Uint8Array): Promise<string> {
-    const http = this.transport;
-    return http ? http.uploadPart(uploadId, partNumber, data) : this.missingHttp();
+    return this.multipartMigrationRequired();
   }
 
   /** 完成分片上传 */
   multipartComplete(uploadId: string, parts: Array<{ partNumber: number; etag: string }>): Promise<MultipartUploadResult> {
-    const http = this.transport;
-    if (!http) return this.missingHttp();
-    return http.multipartComplete(uploadId, parts)
-      .then((r) => ({
-        objectId: r.fileId,
-        fileUrl: r.fileUrl,
-      }));
+    return this.multipartMigrationRequired();
   }
 
   /** 取消分片上传 */
@@ -64,5 +51,9 @@ export class FileAPI {
 
   private missingHttp<T>(): Promise<T> {
     return Promise.reject(new IMConfigError("File API requires httpUrl"));
+  }
+
+  private multipartMigrationRequired<T>(): Promise<T> {
+    return Promise.reject(new IMConfigError("Multipart uploads are disabled during POST upload migration"));
   }
 }

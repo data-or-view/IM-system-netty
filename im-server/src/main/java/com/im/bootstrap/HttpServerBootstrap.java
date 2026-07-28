@@ -22,7 +22,7 @@ import org.slf4j.LoggerFactory;
 public class HttpServerBootstrap {
 
     private static final Logger log = LoggerFactory.getLogger(HttpServerBootstrap.class);
-    private static final int MAX_HTTP_CONTENT_LENGTH = 100 * 1024 * 1024;
+    public static final int MAX_HTTP_CONTENT_LENGTH = 1024 * 1024;
 
     private HttpServerBootstrap() {}
 

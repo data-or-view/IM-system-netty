@@ -6,6 +6,7 @@ public record PresignedUploadResult(String fileId,
                                     String objectKey,
                                     String uploadUrl,
                                     String method,
-                                    Map<String, String> headers,
+                                    Map<String, String> formFields,
+                                    String fileField,
                                     int expiresIn) {
 }

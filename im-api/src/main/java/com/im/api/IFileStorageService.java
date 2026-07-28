@@ -54,9 +54,23 @@ public interface IFileStorageService {
     /**
      * 生成客户端直传对象的预签名 PUT URL。
      */
+    @Deprecated(since = "1.0", forRemoval = false)
     default String presignPutObject(String bucket, String objectId, String mimeType, int expiresSeconds) {
         throw new UnsupportedOperationException("presignPutObject not implemented");
     }
+
+    /**
+     * Generates an exact-size browser POST policy for a direct upload.
+     */
+    PresignedPostPolicy presignPostPolicy(String bucket, String objectKey, String contentType,
+                                          long exactSizeBytes, int expiresSeconds);
+
+    /**
+     * Reads the stored object metadata after a direct upload completes.
+     *
+     * @return object metadata, or {@code null} when the object does not exist
+     */
+    FileObjectStat statObject(String bucket, String objectKey);
 
     /**
      * 生成客户端直传分片的预签名 PUT URL。
