@@ -132,7 +132,6 @@ public class ConnectionEventHandler extends ChannelInboundHandlerAdapter {
             String userId = session.getUserId();
             int platformId = session.getPlatformId();
             routeTable.offline(userId, localNodeId, platformId, session.getSessionId());
-            routeTable.setOffline(userId, platformId);
             log.info(StructuredLog.event(LogEvents.SESSION_CLEANED,
                     LogFields.NODE_ID, localNodeId,
                     LogFields.USER_ID, userId,

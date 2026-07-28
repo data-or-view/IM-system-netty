@@ -217,7 +217,9 @@ final class ServerComponentsFactory {
 
         CallStateManager callStateManager = callManager != null
                 ? new CallStateManager(messageQueue, new RedisSingleCallStateStore(redisConfig),
-                config.getLong("im.call.timeout-seconds", 30))
+                config.getLong("im.call.timeout-seconds", 30),
+                config.getLong("im.call.timeout-scan-interval-ms", 1_000),
+                config.getInt("im.call.timeout-scan-batch-size", 100))
                 : null;
         GroupCallManager groupCallManager = callManager != null
                 ? new GroupCallManager(groupManager, callManager, new RedisGroupCallStateStore(redisConfig,

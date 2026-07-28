@@ -195,6 +195,8 @@ im:
     api-secret: "im-system-livekit-secret-2024"
     sfu-endpoint: "ws://localhost:7880"
     timeout-seconds: 30          # 通话超时秒数（超时未接听自动 TIMEOUT）
+    timeout-scan-interval-ms: 1000
+    timeout-scan-batch-size: 100
     group:
       max-participants: 16
       # Cluster-safe default. Migrating legacy calls requires a full-stop maintenance window;

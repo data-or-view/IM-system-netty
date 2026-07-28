@@ -14,6 +14,7 @@ import org.slf4j.LoggerFactory;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -57,21 +58,41 @@ public class RedisRouteTable implements IRouteTable {
     /** 节点反向路由索引 TTL（秒），略长于 route TTL 便于节点过期清理 */
     private static final long ROUTE_NODE_INDEX_TTL_SECONDS = ROUTE_TTL_SECONDS + 30;
 
-    /** Redis Lua 脚本：清理某个节点遗留的 route hash 字段和反向索引 */
-    private static final String LUA_CLEANUP_NODE_ROUTES = """
-            local indexKey = KEYS[1]
-            local routePrefix = ARGV[1]
-            local entries = redis.call("SMEMBERS", indexKey)
+    /** Deletes one route and only removes the platform when no live binding remains. */
+    private static final String LUA_REMOVE_ROUTE = """
+            local routeKey = KEYS[1]
+            local onlineKey = KEYS[2]
+            local field = ARGV[1]
+            local expectedNode = ARGV[2]
+            local platformPrefix = ARGV[3]
+            local platformId = ARGV[4]
+            local now = tonumber(ARGV[5])
+            local ttl = tonumber(ARGV[6])
+            local current = redis.call('hget', routeKey, field)
             local removed = 0
-            for _, entry in ipairs(entries) do
-                local sep = string.find(entry, "|", 1, true)
-                if sep ~= nil then
-                    local userId = string.sub(entry, 1, sep - 1)
-                    local field = string.sub(entry, sep + 1)
-                    removed = removed + redis.call("HDEL", routePrefix .. userId, field)
-                end
+            if current ~= false and string.sub(current, 1, string.len(expectedNode) + 1) == expectedNode .. '|' then
+              removed = redis.call('hdel', routeKey, field)
             end
-            redis.call("DEL", indexKey)
+            local hasLiveBinding = false
+            local entries = redis.call('hgetall', routeKey)
+            for index = 1, #entries, 2 do
+              local bindingField = entries[index]
+              local bindingValue = entries[index + 1]
+              if string.sub(bindingField, 1, string.len(platformPrefix)) == platformPrefix then
+                local separator = string.find(bindingValue, '|', 1, true)
+                local expiresAt = separator and tonumber(string.sub(bindingValue, separator + 1)) or 0
+                if expiresAt > now then
+                  hasLiveBinding = true
+                else
+                  redis.call('hdel', routeKey, bindingField)
+                end
+              end
+            end
+            if not hasLiveBinding then
+              redis.call('zremrangebyscore', onlineKey, '-inf', now)
+              redis.call('zrem', onlineKey, platformId)
+              if redis.call('zcard', onlineKey) > 0 then redis.call('expire', onlineKey, ttl) end
+            end
             return removed
             """;
 
@@ -119,7 +140,6 @@ public class RedisRouteTable implements IRouteTable {
     /** Lua SHA 缓存 */
     private volatile String shaSetOnline;
     private volatile String shaSetOffline;
-    private volatile String shaCleanupNodeRoutes;
 
     public RedisRouteTable(RedisConfiguration redisConfig, ISessionManager sessionManager, String localNodeId) {
         this.async = redisConfig.async();
@@ -141,7 +161,7 @@ public class RedisRouteTable implements IRouteTable {
     @Override
     public void online(String userId, String nodeId, int platformId, String sessionId) {
         PersistenceExceptions.runRedis("route online", () -> {
-            String key = KEY_ROUTE_PREFIX + userId;
+            String key = routeKey(userId);
             String field = routeField(platformId, sessionId);
             async.hset(key, field, routeValue(nodeId, routeExpireAt()))
                     .toCompletableFuture().join();
@@ -156,12 +176,11 @@ public class RedisRouteTable implements IRouteTable {
     @Override
     public void offline(String userId, String nodeId, int platformId, String sessionId) {
         PersistenceExceptions.runRedis("route offline", () -> {
-            String key = KEY_ROUTE_PREFIX + userId;
             String field = routeField(platformId, sessionId);
-            async.hdel(key, field).toCompletableFuture().join();
+            boolean removed = removeRoute(userId, nodeId, platformId, field);
             removeNodeRouteIndex(nodeId, userId, field);
-            log.info("Route offline: userId={}, node={}, platform={}, session={}",
-                    userId, nodeId, platformId, sessionId);
+            log.info("Route offline: userId={}, node={}, platform={}, session={}, removed={}",
+                    userId, nodeId, platformId, sessionId, removed);
             return null;
         });
     }
@@ -202,7 +221,7 @@ public class RedisRouteTable implements IRouteTable {
     public List<RouteBinding> lookupAllBindings(String userId) {
         return PersistenceExceptions.runRedis("lookup route bindings", () -> {
             long now = System.currentTimeMillis();
-            Map<String, String> routes = async.hgetall(KEY_ROUTE_PREFIX + userId)
+            Map<String, String> routes = async.hgetall(routeKey(userId))
                     .toCompletableFuture()
                     .join();
             if (routes == null || routes.isEmpty()) {
@@ -220,7 +239,7 @@ public class RedisRouteTable implements IRouteTable {
     @Override
     public void setOnline(String userId, int platformId) {
         PersistenceExceptions.runRedis("set online platform", () -> {
-            String key = KEY_ONLINE_PREFIX + userId;
+            String key = onlineKey(userId);
             long now = System.currentTimeMillis();
             long expireAt = now + ONLINE_TTL_SECONDS * 1000L;
 
@@ -244,7 +263,7 @@ public class RedisRouteTable implements IRouteTable {
     @Override
     public void setOffline(String userId, int platformId) {
         PersistenceExceptions.runRedis("set offline platform", () -> {
-            String key = KEY_ONLINE_PREFIX + userId;
+            String key = onlineKey(userId);
             long now = System.currentTimeMillis();
 
             if (shaSetOffline == null) {
@@ -265,7 +284,7 @@ public class RedisRouteTable implements IRouteTable {
     @Override
     public List<Integer> getOnlinePlatforms(String userId) {
         return PersistenceExceptions.runRedis("get online platforms", () -> {
-            String key = KEY_ONLINE_PREFIX + userId;
+            String key = onlineKey(userId);
             long now = System.currentTimeMillis();
 
             @SuppressWarnings("unchecked")
@@ -292,7 +311,7 @@ public class RedisRouteTable implements IRouteTable {
 
             java.util.List<CompletableFuture<Void>> futures = userIds.stream()
                     .map(userId -> {
-                        String key = KEY_ONLINE_PREFIX + userId;
+                        String key = onlineKey(userId);
                         return async.zrangebyscore(key, String.valueOf(now), "+inf")
                                 .thenAccept(platforms -> {
                                     if (platforms != null && !platforms.isEmpty()) {
@@ -318,7 +337,7 @@ public class RedisRouteTable implements IRouteTable {
     @Override
     public void renewOnline(String userId, int platformId, String sessionId) {
         PersistenceExceptions.runRedis("renew online platform", () -> {
-            String key = KEY_ONLINE_PREFIX + userId;
+            String key = onlineKey(userId);
             long expireAt = System.currentTimeMillis() + ONLINE_TTL_SECONDS * 1000L;
 
             async.zadd(key, expireAt, String.valueOf(platformId)).toCompletableFuture().join();
@@ -332,14 +351,28 @@ public class RedisRouteTable implements IRouteTable {
     @Override
     public int cleanupNodeRoutes(String nodeId) {
         return PersistenceExceptions.runRedis("cleanup node routes", () -> {
-            if (shaCleanupNodeRoutes == null) {
-                shaCleanupNodeRoutes = async.scriptLoad(LUA_CLEANUP_NODE_ROUTES).toCompletableFuture().join();
+            String nodeIndexKey = nodeIndexKey(nodeId);
+            Set<String> entries = async.smembers(nodeIndexKey).toCompletableFuture().join();
+            int count = 0;
+            if (entries != null) {
+                for (String entry : entries) {
+                    int separator = entry.indexOf('|');
+                    if (separator <= 0 || separator == entry.length() - 1) continue;
+                    String userId = entry.substring(0, separator);
+                    String field = entry.substring(separator + 1);
+                    int fieldSeparator = field.indexOf(':');
+                    if (fieldSeparator <= 0 || fieldSeparator == field.length() - 1) continue;
+                    int platformId;
+                    try {
+                        platformId = Integer.parseInt(field.substring(0, fieldSeparator));
+                    } catch (NumberFormatException ignored) {
+                        continue;
+                    }
+                    if (removeRoute(userId, nodeId, platformId, field)) count++;
+                    removeNodeRouteIndex(nodeId, userId, field);
+                }
             }
-            Number removed = (Number) async.evalsha(shaCleanupNodeRoutes, ScriptOutputType.INTEGER,
-                    new String[]{KEY_ROUTE_NODE_PREFIX + nodeId},
-                    KEY_ROUTE_PREFIX
-            ).toCompletableFuture().join();
-            int count = removed == null ? 0 : removed.intValue();
+            async.del(nodeIndexKey).toCompletableFuture().join();
             log.info("Node routes cleaned: nodeId={}, removed={}", nodeId, count);
             return count;
         });
@@ -359,7 +392,7 @@ public class RedisRouteTable implements IRouteTable {
     }
 
     private void renewRouteBinding(String userId, int platformId, String sessionId) {
-        String routeKey = KEY_ROUTE_PREFIX + userId;
+        String routeKey = routeKey(userId);
         String field = routeField(platformId, sessionId);
         async.hget(routeKey, field).thenAccept(currentValue -> {
             if (currentValue == null || currentValue.isBlank()) {
@@ -368,22 +401,43 @@ public class RedisRouteTable implements IRouteTable {
             RouteBinding current = toRouteBinding(userId, field, currentValue);
             async.hset(routeKey, field, routeValue(current.nodeId(), routeExpireAt()))
                     .thenCompose(ignored -> async.expire(routeKey, ROUTE_TTL_SECONDS))
-                    .thenCompose(ignored -> async.sadd(KEY_ROUTE_NODE_PREFIX + current.nodeId(),
+                    .thenCompose(ignored -> async.sadd(nodeIndexKey(current.nodeId()),
                             nodeIndexEntry(userId, field)))
-                    .thenCompose(ignored -> async.expire(KEY_ROUTE_NODE_PREFIX + current.nodeId(),
+                    .thenCompose(ignored -> async.expire(nodeIndexKey(current.nodeId()),
                             ROUTE_NODE_INDEX_TTL_SECONDS));
         });
     }
 
     private void addNodeRouteIndex(String nodeId, String userId, String routeField) {
-        String key = KEY_ROUTE_NODE_PREFIX + nodeId;
+        String key = nodeIndexKey(nodeId);
         async.sadd(key, nodeIndexEntry(userId, routeField)).toCompletableFuture().join();
         async.expire(key, ROUTE_NODE_INDEX_TTL_SECONDS).toCompletableFuture().join();
     }
 
     private void removeNodeRouteIndex(String nodeId, String userId, String routeField) {
-        async.srem(KEY_ROUTE_NODE_PREFIX + nodeId, nodeIndexEntry(userId, routeField))
+        async.srem(nodeIndexKey(nodeId), nodeIndexEntry(userId, routeField))
                 .toCompletableFuture().join();
+    }
+
+    private boolean removeRoute(String userId, String nodeId, int platformId, String field) {
+        long now = System.currentTimeMillis();
+        Number removed = (Number) async.eval(LUA_REMOVE_ROUTE, ScriptOutputType.INTEGER,
+                new String[]{routeKey(userId), onlineKey(userId)}, field, nodeId, platformId + ":",
+                String.valueOf(platformId), String.valueOf(now), String.valueOf(ONLINE_TTL_SECONDS))
+                .toCompletableFuture().join();
+        return removed != null && removed.longValue() > 0;
+    }
+
+    private static String routeKey(String userId) {
+        return KEY_ROUTE_PREFIX + "{" + userId + "}";
+    }
+
+    private static String onlineKey(String userId) {
+        return KEY_ONLINE_PREFIX + "{" + userId + "}";
+    }
+
+    private static String nodeIndexKey(String nodeId) {
+        return KEY_ROUTE_NODE_PREFIX + nodeId;
     }
 
     private static String nodeIndexEntry(String userId, String routeField) {

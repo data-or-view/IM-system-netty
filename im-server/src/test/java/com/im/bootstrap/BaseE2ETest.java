@@ -275,8 +275,8 @@ public abstract class BaseE2ETest {
             RedisClient client = RedisClient.create(E2ETestConfig.redisUri());
             try (StatefulRedisConnection<String, String> conn = client.connect()) {
                 for (String uid : userIds) {
-                    conn.sync().del("route:" + uid, "online:" + uid);
-                    log.info("Redis cleanup: removed route:{} and online:{}", uid, uid);
+                    conn.sync().del("route:{" + uid + "}", "online:{" + uid + "}");
+                    log.info("Redis cleanup: removed tagged route and online keys for userId={}", uid);
                 }
             }
             client.shutdown();

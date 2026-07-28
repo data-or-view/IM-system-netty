@@ -1,5 +1,7 @@
 package com.im.core.call;
 
+import java.util.List;
+
 public interface SingleCallStateStore {
 
     SingleCallSession getByRoom(String roomId);
@@ -19,6 +21,8 @@ public interface SingleCallStateStore {
     }
 
     SingleCallSession timeoutIfRinging(String roomId);
+
+    List<SingleCallSession> claimExpiredRinging(long nowEpochMillis, int limit);
 
     SingleCallSession end(String roomId);
 

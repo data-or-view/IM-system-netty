@@ -138,7 +138,7 @@ class IMServerE2ETest {
             RedisClient client = RedisClient.create(E2ETestConfig.redisUri());
             try (StatefulRedisConnection<String, String> conn = client.connect()) {
                 for (String uid : userIds) {
-                    conn.sync().del("route:" + uid, "online:" + uid);
+                    conn.sync().del("route:{" + uid + "}", "online:{" + uid + "}");
                 }
             }
             client.shutdown();

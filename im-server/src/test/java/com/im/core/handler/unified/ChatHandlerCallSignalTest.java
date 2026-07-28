@@ -125,6 +125,7 @@ class ChatHandlerCallSignalTest {
             return SingleCallStateStore.super.acceptBy(roomId, actorId);
         }
         @Override public SingleCallSession timeoutIfRinging(String roomId) { return null; }
+        @Override public List<SingleCallSession> claimExpiredRinging(long nowEpochMillis, int limit) { return List.of(); }
         @Override public SingleCallSession end(String roomId) { endCalls++; return session.end(); }
         @Override public SingleCallSession endBy(String roomId, String actorId) {
             endActorId = actorId;
