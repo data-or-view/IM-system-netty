@@ -10,6 +10,33 @@ export interface HttpClientOptions {
   requestTimeoutMs: number;
 }
 
+interface ApiEnvelope<T = unknown> {
+  code?: number;
+  msg?: string;
+  data?: T;
+  detail?: string;
+  requestId?: string;
+}
+
+export class ScenarioHttpError extends Error {
+  readonly name = "ScenarioHttpError";
+
+  constructor(
+    readonly path: string,
+    readonly httpStatus: number,
+    readonly code: number | undefined,
+    readonly msg: string | undefined,
+    readonly detail: string | undefined,
+    readonly requestId: string | undefined,
+    readonly responseBody: string,
+  ) {
+    const status = `HTTP ${httpStatus}`;
+    const business = code !== undefined ? ` API ${code}` : "";
+    const description = detail ?? msg ?? (responseBody || "unknown error");
+    super(`${status}${business} ${path}: ${description}`);
+  }
+}
+
 export class ScenarioHttpClient {
   constructor(private readonly options: HttpClientOptions) {}
 
@@ -41,14 +68,30 @@ export class ScenarioHttpClient {
 
       const response = await fetch(url, { ...init, headers, signal: controller.signal });
       const text = await response.text();
-      const parsed = text ? JSON.parse(text) as { code?: number; msg?: string; data?: T } | T : undefined;
+      const parsed = parseResponseBody<T>(text);
+      const envelope = isApiEnvelope<T>(parsed) ? parsed : undefined;
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status} ${url.pathname}: ${text}`);
+        throw new ScenarioHttpError(
+          url.pathname,
+          response.status,
+          envelope?.code,
+          envelope?.msg,
+          envelope?.detail,
+          envelope?.requestId,
+          text,
+        );
       }
-      if (parsed && typeof parsed === "object" && "code" in parsed) {
-        const envelope = parsed as { code?: number; msg?: string; data?: T };
+      if (envelope) {
         if (envelope.code !== undefined && envelope.code !== SCENARIO_SUCCESS_CODE) {
-          throw new Error(`API ${envelope.code}: ${envelope.msg ?? "unknown error"}`);
+          throw new ScenarioHttpError(
+            url.pathname,
+            response.status,
+            envelope.code,
+            envelope.msg,
+            envelope.detail,
+            envelope.requestId,
+            text,
+          );
         }
         return envelope.data as T;
       }
@@ -57,6 +100,19 @@ export class ScenarioHttpClient {
       clearTimeout(timeout);
     }
   }
+}
+
+function parseResponseBody<T>(text: string): ApiEnvelope<T> | T | undefined {
+  if (!text) return undefined;
+  try {
+    return JSON.parse(text) as ApiEnvelope<T> | T;
+  } catch {
+    return text as T;
+  }
+}
+
+function isApiEnvelope<T>(value: ApiEnvelope<T> | T | undefined): value is ApiEnvelope<T> {
+  return typeof value === "object" && value !== null && "code" in value;
 }
 
 function requestId(): string {

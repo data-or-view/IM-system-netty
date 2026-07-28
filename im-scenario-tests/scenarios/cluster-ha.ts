@@ -37,7 +37,12 @@ const node2WsUrl = process.env.IM_SCENARIO_NODE2_WS_URL ?? CLUSTER_NODE_DEFAULTS
 const holdMs = readNumberArg("hold-ms", 0);
 const groupCallMaxParticipants = readPositiveEnv("IM_SCENARIO_GROUP_CALL_MAX_PARTICIPANTS", 16);
 const callTimeoutSeconds = readPositiveEnv("IM_SCENARIO_CALL_TIMEOUT_SECONDS", 30);
+const node1ExitTimeoutSeconds = readPositiveEnv("IM_SCENARIO_NODE1_EXIT_TIMEOUT_SECONDS", 20);
 const node1StopControl = loadNode1StopControl();
+
+assertOk(callTimeoutSeconds > node1ExitTimeoutSeconds,
+  "IM_SCENARIO_CALL_TIMEOUT_SECONDS must exceed IM_SCENARIO_NODE1_EXIT_TIMEOUT_SECONDS " +
+  "so node-1 must exit before the call deadline");
 
 const users: ScenarioUser[] = [];
 
@@ -153,8 +158,12 @@ try {
   await assertGroupPush(receiverPrimary, group.groupId, groupText, "primary group push");
   await assertGroupPush(receiverSecondary, group.groupId, groupText, "secondary group push");
 
-  reporter.step("closing one same-platform session while its node remains live");
+  reporter.step("closing one same-platform session and waiting for server-side cleanup");
+  const cleanupLogCursor = readFileSync(node1StopControl.logFile, "utf8").length;
   receiverSecondary.close();
+  await waitForSessionCleanup(node1StopControl.logFile, cleanupLogCursor, receiverPrimary.userId);
+
+  reporter.step("checking the surviving same-platform session remains routable after cleanup");
   const survivorCursor = receiverPrimary.ws.markPushCursor();
   const survivorText = `cluster-ha surviving-platform ${suffix}`;
   await sender.ws.request<SendMessageAck>(SCENARIO_OP.CHAT_SEND, {
@@ -209,21 +218,22 @@ try {
   const roomId = call.data.roomId;
   await assertSignalPushAfter(receiverPrimary, callingCursor, roomId, "CALLING", "single-call invite");
 
-  const timeoutCursor = receiverPrimary.ws.markPushCursor();
+  const shutdownCursor = receiverPrimary.ws.markPushCursor();
+  const shutdownStartedAt = Date.now();
   reporter.step("validating the explicit node-1 stop control and sending SIGTERM");
-  await stopNode1(node1StopControl);
+  await stopNode1(node1StopControl, node1ExitTimeoutSeconds * 1_000);
+  assertOk(Date.now() - shutdownStartedAt < callTimeoutSeconds * 1_000,
+    `node-1 did not exit before the configured ${callTimeoutSeconds}s call deadline`);
+  assertOk(!findTimeoutPush(receiverPrimary, shutdownCursor, roomId),
+    `single-call timeout arrived before node-1 PID ${node1StopControl.pid} exited`);
+  const timeoutCursor = receiverPrimary.ws.markPushCursor();
 
   reporter.step("checking node-2 remains live after node-1 stops");
   const node2Health = await fetchHealth(node2HttpUrl);
   assertOk(node2Health.nodeId === "node-2", `expected live node-2 health, got ${JSON.stringify(node2Health)}`);
 
   reporter.step("checking the surviving same-platform session remains routable for timeout delivery");
-  await waitFor(() => receiverPrimary.ws.pushesAfter(timeoutCursor).find((push) => {
-    const data = push.data as MessagePush | undefined;
-    return push.op === SCENARIO_PUSH_OP.MESSAGE &&
-      data?.contentType === SCENARIO_CONTENT_TYPE.SIGNAL &&
-      isSignalingContent(data.content, { roomId, action: "TIMEOUT" });
-  }), {
+  await waitFor(() => findTimeoutPush(receiverPrimary, timeoutCursor, roomId), {
     timeoutMs: callTimeoutSeconds * 1_000 + config.requestTimeoutMs,
     intervalMs: config.pollIntervalMs,
     description: `node-2 timeout delivery for room ${roomId}`,
@@ -323,6 +333,7 @@ function messageContains(message: MessagePush | undefined, expectedText: string)
 
 interface NodeStopControl {
   pidFile: string;
+  logFile: string;
   pid: number;
   wsPort: number;
   httpPort: number;
@@ -338,7 +349,8 @@ function loadNode1StopControl(): NodeStopControl {
   if (!configured) {
     throw new Error(
       "[PREREQUISITE] cluster-ha shutdown coverage requires explicit opt-in: " +
-      "set IM_SCENARIO_NODE1_PID_FILE to the node-1 PID file (for bin/start-cluster.sh: bin/pids/node-1.pid)",
+      "set IM_SCENARIO_NODE1_PID_FILE to the node-1 PID file " +
+      "(for pnpm --dir im-scenario-tests with bin/start-cluster.sh: ../bin/pids/node-1.pid)",
     );
   }
   const node1Http = new URL(node1HttpUrl);
@@ -355,6 +367,7 @@ function loadNode1StopControl(): NodeStopControl {
   assertOk(stat.isFile() && !stat.isSymbolicLink(),
     `node-1 PID path must be a regular, non-symlink file: ${configuredPath}`);
   const pidFile = realpathSync(configuredPath);
+  const logFile = loadNode1LogFile();
   const rawPid = readFileSync(pidFile, "utf8").trim();
   assertOk(/^[1-9]\d*$/.test(rawPid), `node-1 PID file must contain one positive integer: ${pidFile}`);
   const pid = Number(rawPid);
@@ -362,10 +375,24 @@ function loadNode1StopControl(): NodeStopControl {
   const wsPort = urlPort(node1Ws);
   const httpPort = urlPort(node1Http);
   validateControlledProcess(pid, wsPort, httpPort);
-  return { pidFile, pid, wsPort, httpPort };
+  return { pidFile, logFile, pid, wsPort, httpPort };
 }
 
-async function stopNode1(control: NodeStopControl): Promise<void> {
+function loadNode1LogFile(): string {
+  const configured = process.env.IM_SCENARIO_NODE1_LOG_FILE ?? "../logs/node-1.log";
+  const configuredPath = resolve(configured);
+  let stat;
+  try {
+    stat = lstatSync(configuredPath);
+  } catch (error) {
+    throw new Error(`[PREREQUISITE] node-1 log file is unavailable: ${configuredPath}: ${errorMessage(error)}`);
+  }
+  assertOk(stat.isFile() && !stat.isSymbolicLink(),
+    `node-1 log path must be a regular, non-symlink file: ${configuredPath}`);
+  return realpathSync(configuredPath);
+}
+
+async function stopNode1(control: NodeStopControl, exitTimeoutMs: number): Promise<void> {
   const currentPid = readFileSync(control.pidFile, "utf8").trim();
   assertOk(currentPid === String(control.pid),
     `node-1 PID file changed after validation: expected ${control.pid}, got ${currentPid}`);
@@ -375,9 +402,31 @@ async function stopNode1(control: NodeStopControl): Promise<void> {
 
   process.kill(control.pid, "SIGTERM");
   await waitForAsync(async () => isProcessAlive(control.pid) ? undefined : true, {
-    timeoutMs: Math.max(30_000, config.requestTimeoutMs * 6),
+    timeoutMs: exitTimeoutMs,
     intervalMs: config.pollIntervalMs,
     description: `node-1 PID ${control.pid} to exit after SIGTERM`,
+  });
+}
+
+async function waitForSessionCleanup(logFile: string, cursor: number, userId: string): Promise<void> {
+  const expected = `event=im.session.cleaned nodeId=node-1 userId=${userId}`;
+  await waitFor(() => {
+    const appended = readFileSync(logFile, "utf8").slice(cursor);
+    return appended.includes(expected) ? true : undefined;
+  }, {
+    timeoutMs: config.requestTimeoutMs,
+    intervalMs: config.pollIntervalMs,
+    description: `node-1 session cleanup for ${userId}`,
+    onTimeout: () => `logFile=${logFile}`,
+  });
+}
+
+function findTimeoutPush(user: ScenarioUser, cursor: number, roomId: string) {
+  return user.ws.pushesAfter(cursor).find((push) => {
+    const data = push.data as MessagePush | undefined;
+    return push.op === SCENARIO_PUSH_OP.MESSAGE &&
+      data?.contentType === SCENARIO_CONTENT_TYPE.SIGNAL &&
+      isSignalingContent(data.content, { roomId, action: "TIMEOUT" });
   });
 }
 

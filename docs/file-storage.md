@@ -14,7 +14,7 @@ Client / im-sdk
   -> MySQL im_objects metadata is written
 ```
 
-Redis 上传会话绑定 `fileId`、用户、bucket、object key、声明的字节数和 MIME type。完成请求会读取 MinIO 对象信息；对象不存在，或实际大小/MIME type 与签名会话不一致时，服务端拒绝完成、删除不匹配对象和上传会话，并且不写文件元数据。
+Redis 上传会话绑定 `fileId`、用户、bucket、object key、声明的字节数和 MIME type。完成请求会读取 MinIO 对象信息：对象尚不存在时返回 `NOT_FOUND` 并保留上传会话，允许对象存储短暂不可见时重试；对象已存在但实际大小或 MIME type 与签名会话不一致时，服务端拒绝完成并删除不匹配对象和上传会话。两种失败都不会写文件元数据。
 
 ## API 合约
 
@@ -126,6 +126,6 @@ const result = await client.file.upload(
 pnpm --dir im-scenario-tests scenario:file-upload-policy
 ```
 
-场景声明 3 字节对象，实际通过返回的 MinIO URL POST 4 字节，验证 MinIO policy 拒绝；随后验证 `/api/file/upload/complete` 和 `/api/file/download/sign` 都返回业务错误，证明没有生成可下载元数据。
+场景先用独立 policy 成功 POST 并完成一个 3 字节对象，证明 MinIO 路径和签名有效；再用新的 3 字节 policy POST 4 字节对象，要求 MinIO 返回 HTTP 400 和 `EntityTooLarge` policy 错误。随后验证 `/api/file/upload/complete` 和 `/api/file/download/sign` 都返回精确的业务 `404` envelope，证明没有生成可下载元数据。
 
 基础设施级 POST policy E2E 需要显式提供 `IM_MINIO_ENDPOINT`、`IM_MINIO_ACCESS_KEY`、`IM_MINIO_SECRET_KEY` 和 `IM_MINIO_BUCKET` 后单独运行相应 Maven E2E。

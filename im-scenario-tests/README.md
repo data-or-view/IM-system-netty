@@ -49,10 +49,17 @@ pnpm --dir im-scenario-tests test
 | 冒烟 | `pnpm --dir im-scenario-tests scenario:smoke` | 后端单节点启动后快速确认 HTTP/WS 基础链路。 |
 | 核心业务 | `pnpm --dir im-scenario-tests scenario:core` | 单节点或本地开发集群稳定后，覆盖群聊、群通话、离线同步、申请通知、系统消息和会话副作用。 |
 | 混沌/幂等 | `pnpm --dir im-scenario-tests scenario:chaos` | 改消息投递、幂等、重试逻辑后运行。 |
-| P0 本地门禁 | `pnpm --dir im-scenario-tests scenario:p0` | 本地双节点集群和依赖服务已启动后运行，包含 smoke、core、chaos、cluster-ha。单节点层默认打到 node-1。 |
-| 全量场景 | `pnpm --dir im-scenario-tests scenario:full` | 发布前或大重构后运行，包含所有场景和 cluster-ha。单节点层默认打到 node-1。 |
+| P0 本地门禁 | `IM_SCENARIO_NODE1_PID_FILE=../bin/pids/node-1.pid pnpm --dir im-scenario-tests scenario:p0` | 本地双节点集群和依赖服务已启动后运行，包含 smoke、core、chaos，最后执行会停止 node-1 的 cluster-ha。单节点层默认打到 node-1。 |
+| 全量场景 | `IM_SCENARIO_NODE1_PID_FILE=../bin/pids/node-1.pid pnpm --dir im-scenario-tests scenario:full` | 发布前或大重构后运行全部场景，最后执行会停止 node-1 的 cluster-ha。单节点层默认打到 node-1。 |
 
-`scenario:p0` 和 `scenario:full` 需要真实 Redis/MySQL/MQ/MinIO 依赖和本地双节点后端。默认会把非 cluster 场景的 `IM_SCENARIO_HTTP_URL` / `IM_SCENARIO_WS_URL` 指向 node-1 (`8088` / `8081`)；如果你改了集群端口，同时覆盖 `IM_SCENARIO_HTTP_URL`、`IM_SCENARIO_WS_URL` 和 `IM_SCENARIO_NODE*_URL`。CI 默认只运行 `scenario:ci`，避免把环境凭据问题误报成代码失败。
+`scenario:p0` 和 `scenario:full` 需要真实 Redis/MySQL/MQ/MinIO 依赖、本地双节点后端，以及显式的 `IM_SCENARIO_NODE1_PID_FILE` 停机授权。相对路径由 `im-scenario-tests` 目录解析，因此 `bin/start-cluster.sh` 生成的 PID 文件写作 `../bin/pids/node-1.pid`。默认会把非 cluster 场景的 `IM_SCENARIO_HTTP_URL` / `IM_SCENARIO_WS_URL` 指向 node-1 (`8088` / `8081`)；如果你改了集群端口，同时覆盖 `IM_SCENARIO_HTTP_URL`、`IM_SCENARIO_WS_URL` 和 `IM_SCENARIO_NODE*_URL`。CI 默认只运行 `scenario:ci`，避免把环境凭据问题误报成代码失败。
+
+两个组合场景都把破坏性的 `cluster-ha` 放在最后一步。成功运行后 node-1 会保持停止状态；继续使用本地集群前，先运行 `bin/stop-cluster.sh`，再运行 `bin/start-cluster.sh` 恢复双节点。
+
+```bash
+IM_SCENARIO_NODE1_PID_FILE=../bin/pids/node-1.pid pnpm --dir im-scenario-tests scenario:p0
+IM_SCENARIO_NODE1_PID_FILE=../bin/pids/node-1.pid pnpm --dir im-scenario-tests scenario:full
+```
 
 ```bash
 pnpm --dir im-scenario-tests scenario:smoke
@@ -115,10 +122,13 @@ pnpm --dir im-scenario-tests scenario:group-apply-notify
 验证加群申请实时推送、待处理列表、未处理数量、审批通过通知、成员列表，以及审批后的群系统消息。
 
 ```bash
+IM_SCENARIO_NODE1_PID_FILE=../bin/pids/node-1.pid \
 pnpm --dir im-scenario-tests scenario:cluster-ha
 ```
 
-验证两节点集群下跨节点单聊、群聊和同用户多端推送。默认端口与 `bin/start-cluster.sh` 对齐：node-1 为 `8081/ws` + `8088`，node-2 为 `8084/ws` + `8089`。
+验证两节点集群下跨节点单聊、群聊、同平台 session 清理、并发群通话容量上限，以及 node-1 退出后由 node-2 投递单聊超时。该场景会发送 `SIGTERM` 并让 node-1 保持停止，必须放在其它场景之后；运行后按上文说明重启双节点。默认端口与 `bin/start-cluster.sh` 对齐：node-1 为 `8081/ws` + `8088`，node-2 为 `8084/ws` + `8089`。
+
+场景默认从 `../logs/node-1.log` 等待服务端 `im.session.cleaned` 事件，确保断线清理完成后才验证存活 session。如果节点由其它方式启动，使用 `IM_SCENARIO_NODE1_LOG_FILE` 指向对应的 node-1 日志文件。`IM_SCENARIO_CALL_TIMEOUT_SECONDS` 必须与服务端 `im.call.timeout-seconds` 一致并大于 `IM_SCENARIO_NODE1_EXIT_TIMEOUT_SECONDS`（默认 20 秒），否则场景会在发起通话前拒绝运行。
 
 也可以显式覆盖集群节点：
 
@@ -127,6 +137,7 @@ IM_SCENARIO_NODE1_HTTP_URL=http://127.0.0.1:8088 \
 IM_SCENARIO_NODE1_WS_URL=ws://127.0.0.1:8081/ws \
 IM_SCENARIO_NODE2_HTTP_URL=http://127.0.0.1:8089 \
 IM_SCENARIO_NODE2_WS_URL=ws://127.0.0.1:8084/ws \
+IM_SCENARIO_NODE1_PID_FILE=../bin/pids/node-1.pid \
 pnpm --dir im-scenario-tests scenario:cluster-ha
 ```
 
