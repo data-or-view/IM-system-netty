@@ -14,9 +14,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.net.http.HttpClient;
 import java.net.http.WebSocket;
 import java.util.HashMap;
+import java.util.Base64;
 import java.util.Map;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -138,12 +140,18 @@ class IMServerE2ETest {
             RedisClient client = RedisClient.create(E2ETestConfig.redisUri());
             try (StatefulRedisConnection<String, String> conn = client.connect()) {
                 for (String uid : userIds) {
-                    conn.sync().del("route:{" + uid + "}", "online:{" + uid + "}");
+                    String hashTag = routeUserHashTag(uid);
+                    conn.sync().del("im:route:v2:" + hashTag, "im:online:v2:" + hashTag);
                 }
             }
             client.shutdown();
         } catch (Exception e) {
             log.warn("Redis cleanup failed: {}", e.getMessage());
         }
+    }
+
+    private static String routeUserHashTag(String userId) {
+        return "{u-" + Base64.getUrlEncoder().withoutPadding()
+                .encodeToString(userId.getBytes(StandardCharsets.UTF_8)) + "}";
     }
 }

@@ -62,6 +62,10 @@ im:
     cluster:
       nodes: ""                  # 集群节点 (逗号分隔, 如 "127.0.0.1:6379,127.0.0.1:6380")
 
+  route:
+    # Full-stop migration only; see docs/route-redis-key-layout-migration.md.
+    redis-key-layout: "tagged-v2"
+
   # ── Webhook ──
   webhook:
     url: ""                      # Webhook 回调 URL

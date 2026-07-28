@@ -9,6 +9,7 @@ import com.im.api.Message;
 import com.im.api.Operation;
 import com.im.api.QueueMessageHandler;
 import com.im.api.RoomInformation;
+import com.im.common.exception.ConflictException;
 import com.im.common.exception.ForbiddenException;
 import com.im.core.call.CallStateManager;
 import com.im.core.call.SingleCallSession;
@@ -61,7 +62,7 @@ class ChatHandlerCallSignalTest {
     }
 
     @Test
-    void acceptFromCalleePublishesSignalThenMarksCallAccepted() {
+    void acceptFromCalleeMarksCallAcceptedAndPublishesSignal() {
         ChatHandler handler = handler(new AllowPolicy());
         callStateStore.session = ringing();
         ApiRequest request = signalRequest("callee", "caller", "ACCEPT");
@@ -75,6 +76,31 @@ class ChatHandlerCallSignalTest {
         assertEquals(2, ((RecordingMessageQueue) queue).published.size());
     }
 
+    @Test
+    void doesNotPublishAcceptWhenTimeoutAlreadyWonRedisTransition() {
+        ChatHandler handler = handler(new AllowPolicy());
+        callStateStore.session = ringing();
+        callStateStore.acceptSucceeds = false;
+        ApiRequest request = signalRequest("callee", "caller", "ACCEPT");
+
+        assertThrows(ConflictException.class, () -> handler.handle(request));
+
+        assertEquals(0, ((RecordingMessageQueue) queue).published.size());
+    }
+
+    @Test
+    void doesNotPublishCancelWhenTimeoutAlreadyWonRedisTransition() {
+        ChatHandler handler = handler(new AllowPolicy());
+        callStateStore.session = ringing();
+        callStateStore.endSucceeds = false;
+        ApiRequest request = signalRequest("caller", "callee", "CANCEL");
+
+        assertThrows(ConflictException.class, () -> handler.handle(request));
+
+        assertEquals(0, ((RecordingMessageQueue) queue).published.size());
+        assertEquals(SingleCallSession.STATUS_RINGING, callStateStore.session.status());
+    }
+
     private final RecordingMessageQueue queue = new RecordingMessageQueue();
 
     private ChatHandler handler(IChatSendPolicy policy) {
@@ -85,7 +111,7 @@ class ChatHandlerCallSignalTest {
                 new IncrementingSequenceManager(),
                 new WebhookService(null),
                 policy);
-        return new ChatHandler(useCase, new NoopCallManager(), callStateManager);
+        return new ChatHandler(useCase, new NoopCallManager(), callStateManager, policy);
     }
 
     private ApiRequest signalRequest(String actorId, String toUserId, String action) {
@@ -113,6 +139,8 @@ class ChatHandlerCallSignalTest {
         SingleCallSession session;
         int acceptCalls;
         int endCalls;
+        boolean acceptSucceeds = true;
+        boolean endSucceeds = true;
         String acceptActorId;
         String endActorId;
 
@@ -122,6 +150,7 @@ class ChatHandlerCallSignalTest {
         @Override public SingleCallSession accept(String roomId) { acceptCalls++; return session.accept(System.currentTimeMillis()); }
         @Override public SingleCallSession acceptBy(String roomId, String actorId) {
             acceptActorId = actorId;
+            if (!acceptSucceeds) return null;
             return SingleCallStateStore.super.acceptBy(roomId, actorId);
         }
         @Override public SingleCallSession timeoutIfRinging(String roomId) { return null; }
@@ -129,6 +158,7 @@ class ChatHandlerCallSignalTest {
         @Override public SingleCallSession end(String roomId) { endCalls++; return session.end(); }
         @Override public SingleCallSession endBy(String roomId, String actorId) {
             endActorId = actorId;
+            if (!endSucceeds) return null;
             return SingleCallStateStore.super.endBy(roomId, actorId);
         }
     }

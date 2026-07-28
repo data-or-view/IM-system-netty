@@ -30,6 +30,17 @@ class ServerComponentsFactoryTest {
                         "im.call.group.redis-key-layout", "tagged-v3"))));
     }
 
+    @Test
+    void resolvesVersionedClusterSafeRouteLayoutFromConfiguration() {
+        assertEquals("tagged-v2", ServerComponentsFactory.routeRedisKeyLayout(new TestConfig(Map.of())));
+        assertEquals("legacy", ServerComponentsFactory.routeRedisKeyLayout(
+                new TestConfig(Map.of("im.route.redis.key.layout", "legacy"))));
+        assertEquals("tagged-v2", ServerComponentsFactory.routeRedisKeyLayout(
+                new TestConfig(Map.of(
+                        "im.route.redis.key.layout", "legacy",
+                        "im.route.redis-key-layout", "tagged-v2"))));
+    }
+
     private record TestConfig(Map<String, String> values) implements Config {
         @Override public Optional<String> getString(String key) { return Optional.ofNullable(values.get(key)); }
         @Override public Optional<Integer> getInt(String key) { return Optional.ofNullable(values.get(key)).map(Integer::parseInt); }

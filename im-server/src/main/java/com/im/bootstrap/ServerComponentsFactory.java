@@ -1,6 +1,7 @@
 package com.im.bootstrap;
 
 import com.im.api.IAuthenticator;
+import com.im.api.BusinessMessageDlqStore;
 import com.im.api.ICallManager;
 import com.im.api.IConversationManager;
 import com.im.api.IFileStorageService;
@@ -87,14 +88,16 @@ final class ServerComponentsFactory {
         // lifecycle and cluster guarantees, so hiding them behind broader abstractions
         // makes a single production dependency change harder to audit.
         RuntimeDependencies runtime = createRuntime(config, redisConfig, nodeId);
-        ClusterDependencies cluster = RedisComponentsFactory.createCluster(redisConfig, runtime.sessionManager(), nodeId);
+        ClusterDependencies cluster = RedisComponentsFactory.createCluster(
+                redisConfig, runtime.sessionManager(), nodeId, routeRedisKeyLayout(config));
         runtime.friendApplyNotifier().bindCluster(cluster.routeTable(), cluster.clusterMessageBus());
         runtime.groupApplyNotifier().bindCluster(cluster.routeTable(), cluster.clusterMessageBus());
         runtime.systemMessageNotifier().bindCluster(cluster.routeTable(), cluster.clusterMessageBus());
         runtime.messageRevokeNotifier().bindCluster(cluster.routeTable(), cluster.clusterMessageBus());
         BusinessDependencies business = createBusiness(config, redisConfig, cluster.routeTable());
         StorageDependencies storage = StorageComponentsFactory.createStorage(config, redisConfig, nodeId, business.retryExecutor());
-        CallDependencies call = createCall(config, storage.messageQueue(), business.groupManager(), redisConfig);
+        CallDependencies call = createCall(config, storage.messageQueue(), business.groupManager(), redisConfig,
+                business.retryExecutor(), storage.businessMessageDlqStore());
         ConsumerDependencies consumers = ConsumerComponentsFactory.createConsumers(config, nodeId, runtime, cluster, storage, business);
         ConnectionEventHandler connectionEventHandler = new ConnectionEventHandler(
                 runtime.sessionManager(), runtime.pendingAcknowledgementManager(), cluster.routeTable(), nodeId);
@@ -194,7 +197,9 @@ final class ServerComponentsFactory {
 
     private static CallDependencies createCall(Config config, IMessageQueue messageQueue,
                                                IGroupManager groupManager,
-                                               RedisConfiguration redisConfig) {
+                                               RedisConfiguration redisConfig,
+                                               RetryExecutor retryExecutor,
+                                               BusinessMessageDlqStore businessMessageDlqStore) {
         ICallManager callManager = null;
         if (config.getBoolean("im.call.enabled", false)) {
             String sfuEndpoint = config.getString("im.call.sfu-endpoint", BootstrapDefaults.LIVEKIT_SFU_ENDPOINT);
@@ -219,7 +224,8 @@ final class ServerComponentsFactory {
                 ? new CallStateManager(messageQueue, new RedisSingleCallStateStore(redisConfig),
                 config.getLong("im.call.timeout-seconds", 30),
                 config.getLong("im.call.timeout-scan-interval-ms", 1_000),
-                config.getInt("im.call.timeout-scan-batch-size", 100))
+                config.getInt("im.call.timeout-scan-batch-size", 100),
+                retryExecutor, businessMessageDlqStore)
                 : null;
         GroupCallManager groupCallManager = callManager != null
                 ? new GroupCallManager(groupManager, callManager, new RedisGroupCallStateStore(redisConfig,
@@ -232,6 +238,11 @@ final class ServerComponentsFactory {
     static String groupCallRedisKeyLayout(Config config) {
         return config.getString("im.call.group.redis-key-layout",
                 config.getString("im.call.group.redis.key.layout", "tagged-v3"));
+    }
+
+    static String routeRedisKeyLayout(Config config) {
+        return config.getString("im.route.redis-key-layout",
+                config.getString("im.route.redis.key.layout", "tagged-v2"));
     }
 
     static void requireCallCredentials(Config config) {

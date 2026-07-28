@@ -127,6 +127,7 @@ RocketMQ 真实 broker 测试见 [docs/rocketmq-integration-tests.md](docs/rocke
 | [AGENTS.md](AGENTS.md) | AI 写代码必须遵守的集群部署约束和工作入口。 |
 | [docs/logging-guide.md](docs/logging-guide.md) | requestId、trace、日志排查方法。 |
 | [docs/file-storage.md](docs/file-storage.md) | MinIO 文件上传/下载说明。 |
+| [docs/route-redis-key-layout-migration.md](docs/route-redis-key-layout-migration.md) | 路由 Redis `tagged-v2` 全停机迁移手册。 |
 | [im-scenario-tests/README.md](im-scenario-tests/README.md) | 多用户场景测试说明。 |
 
 ## 集群开发原则

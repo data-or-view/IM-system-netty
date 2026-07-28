@@ -18,6 +18,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -26,6 +27,7 @@ import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.HashSet;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
@@ -275,14 +277,20 @@ public abstract class BaseE2ETest {
             RedisClient client = RedisClient.create(E2ETestConfig.redisUri());
             try (StatefulRedisConnection<String, String> conn = client.connect()) {
                 for (String uid : userIds) {
-                    conn.sync().del("route:{" + uid + "}", "online:{" + uid + "}");
-                    log.info("Redis cleanup: removed tagged route and online keys for userId={}", uid);
+                    String hashTag = routeUserHashTag(uid);
+                    conn.sync().del("im:route:v2:" + hashTag, "im:online:v2:" + hashTag);
+                    log.info("Redis cleanup: removed tagged-v2 route and online keys for userId={}", uid);
                 }
             }
             client.shutdown();
         } catch (Exception e) {
             log.warn("Redis cleanup failed (non-fatal): {}:{} {}", host, port, e.getMessage());
         }
+    }
+
+    private static String routeUserHashTag(String userId) {
+        return "{u-" + Base64.getUrlEncoder().withoutPadding()
+                .encodeToString(userId.getBytes(StandardCharsets.UTF_8)) + "}";
     }
 
     /**

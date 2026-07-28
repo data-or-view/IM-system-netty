@@ -30,8 +30,9 @@ final class RedisComponentsFactory {
 
     static ClusterDependencies createCluster(RedisConfiguration redisConfig,
                                              SessionManager sessionManager,
-                                             String nodeId) {
-        IRouteTable routeTable = new RedisRouteTable(redisConfig, sessionManager, nodeId);
+                                             String nodeId,
+                                             String routeRedisKeyLayout) {
+        IRouteTable routeTable = new RedisRouteTable(redisConfig, sessionManager, nodeId, routeRedisKeyLayout);
         return new ClusterDependencies(
                 routeTable,
                 new RedisClusterMessageBus(redisConfig, nodeId),

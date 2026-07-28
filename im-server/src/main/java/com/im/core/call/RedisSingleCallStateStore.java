@@ -76,6 +76,10 @@ public class RedisSingleCallStateStore implements SingleCallStateStore {
             if ARGV[1] ~= caller and ARGV[1] ~= callee then
               return 0
             end
+            local status = redis.call('hget', KEYS[1], 'status')
+            if status ~= ARGV[3] and status ~= ARGV[4] then
+              return 0
+            end
             redis.call('zrem', KEYS[4], ARGV[2])
             redis.call('del', KEYS[1], KEYS[2], KEYS[3])
             return 1
@@ -86,24 +90,49 @@ public class RedisSingleCallStateStore implements SingleCallStateStore {
             if caller == false or callee == false then
               return 0
             end
+            local status = redis.call('hget', KEYS[1], 'status')
+            if status ~= ARGV[2] and status ~= ARGV[3] then
+              return 0
+            end
             redis.call('zrem', KEYS[4], ARGV[1])
             redis.call('del', KEYS[1], KEYS[2], KEYS[3])
             return 1
             """;
     private static final String CLAIM_EXPIRED_RINGING_SCRIPT = """
-            local roomIds = redis.call('zrangebyscore', KEYS[1], '-inf', ARGV[1], 'LIMIT', 0, ARGV[2])
             local claimed = {}
-            for _, roomId in ipairs(roomIds) do
-              local roomKey = ARGV[3] .. roomId
-              if redis.call('hget', roomKey, 'status') == ARGV[4] then
+            for candidate = 1, (#KEYS - 1) / 3 do
+              local keyIndex = 2 + (candidate - 1) * 3
+              local argIndex = 4 + (candidate - 1) * 3
+              local roomKey = KEYS[keyIndex]
+              local callerKey = KEYS[keyIndex + 1]
+              local calleeKey = KEYS[keyIndex + 2]
+              local roomId = ARGV[argIndex]
+              local expectedCaller = ARGV[argIndex + 1]
+              local expectedCallee = ARGV[argIndex + 2]
+              local caller = redis.call('hget', roomKey, 'callerId')
+              local callee = redis.call('hget', roomKey, 'calleeId')
+              if redis.call('hget', roomKey, 'status') == ARGV[1]
+                  and caller == expectedCaller and callee == expectedCallee then
+                local callType = redis.call('hget', roomKey, 'callType') or ''
+                local sfuEndpoint = redis.call('hget', roomKey, 'sfuEndpoint') or ''
+                local startedAt = redis.call('hget', roomKey, 'startedAt') or '0'
+                local acceptedAt = redis.call('hget', roomKey, 'acceptedAt') or '0'
+                local deadlineAt = redis.call('hget', roomKey, 'deadlineAt') or '0'
                 local caller = redis.call('hget', roomKey, 'callerId')
                 local callee = redis.call('hget', roomKey, 'calleeId')
                 redis.call('zrem', KEYS[1], roomId)
-                if caller ~= false then redis.call('del', ARGV[5] .. caller) end
-                if callee ~= false then redis.call('del', ARGV[5] .. callee) end
-                redis.call('hset', roomKey, 'status', ARGV[6])
-                redis.call('expire', roomKey, ARGV[7])
+                redis.call('del', callerKey, calleeKey)
+                redis.call('hset', roomKey, 'status', ARGV[2])
+                redis.call('expire', roomKey, ARGV[3])
                 table.insert(claimed, roomId)
+                table.insert(claimed, caller)
+                table.insert(claimed, callee)
+                table.insert(claimed, callType)
+                table.insert(claimed, ARGV[2])
+                table.insert(claimed, sfuEndpoint)
+                table.insert(claimed, startedAt)
+                table.insert(claimed, acceptedAt)
+                table.insert(claimed, deadlineAt)
               else
                 redis.call('zrem', KEYS[1], roomId)
               end
@@ -217,17 +246,38 @@ public class RedisSingleCallStateStore implements SingleCallStateStore {
         if (limit <= 0) return List.of();
         try (CloseableRedisCommands redis = redisConfig.createSyncCommands()) {
             RedisClusterCommands<String, String> sync = redis.sync();
-            List<Object> claimedRoomIds = sync.eval(CLAIM_EXPIRED_RINGING_SCRIPT, ScriptOutputType.MULTI,
-                    new String[]{deadlineKey()}, String.valueOf(nowEpochMillis), String.valueOf(limit),
-                    ROOM_KEY_PREFIX, SingleCallSession.STATUS_RINGING, USER_KEY_PREFIX,
-                    SingleCallSession.STATUS_TIMED_OUT, String.valueOf(ttlSeconds));
-            if (claimedRoomIds == null || claimedRoomIds.isEmpty()) return List.of();
-            List<SingleCallSession> claimed = new ArrayList<>(claimedRoomIds.size());
-            for (Object roomId : claimedRoomIds) {
-                SingleCallSession session = read(sync, String.valueOf(roomId));
-                if (session != null) claimed.add(session);
+            List<String> roomIds = sync.zrangebyscore(deadlineKey(), "-inf", String.valueOf(nowEpochMillis), 0, limit);
+            if (roomIds == null || roomIds.isEmpty()) return List.of();
+
+            List<ClaimCandidate> candidates = new ArrayList<>(roomIds.size());
+            for (String roomId : roomIds) {
+                Map<String, String> data = sync.hgetall(roomKey(roomId));
+                String callerId = data != null ? data.get("callerId") : null;
+                String calleeId = data != null ? data.get("calleeId") : null;
+                candidates.add(new ClaimCandidate(roomId, callerId, calleeId));
             }
-            return claimed;
+
+            String[] keys = new String[1 + candidates.size() * 3];
+            keys[0] = deadlineKey();
+            String[] args = new String[3 + candidates.size() * 3];
+            args[0] = SingleCallSession.STATUS_RINGING;
+            args[1] = SingleCallSession.STATUS_TIMED_OUT;
+            args[2] = String.valueOf(ttlSeconds);
+            for (int index = 0; index < candidates.size(); index++) {
+                ClaimCandidate candidate = candidates.get(index);
+                int keyIndex = 1 + index * 3;
+                int argIndex = 3 + index * 3;
+                keys[keyIndex] = roomKey(candidate.roomId());
+                keys[keyIndex + 1] = userKey(candidate.callerIdOrMissing());
+                keys[keyIndex + 2] = userKey(candidate.calleeIdOrMissing());
+                args[argIndex] = candidate.roomId();
+                args[argIndex + 1] = candidate.callerIdOrMissing();
+                args[argIndex + 2] = candidate.calleeIdOrMissing();
+            }
+
+            @SuppressWarnings("unchecked")
+            List<Object> rawSnapshots = sync.eval(CLAIM_EXPIRED_RINGING_SCRIPT, ScriptOutputType.MULTI, keys, args);
+            return toClaimedSessions(rawSnapshots);
         }
     }
 
@@ -238,7 +288,8 @@ public class RedisSingleCallStateStore implements SingleCallStateStore {
             RedisClusterCommands<String, String> sync = redis.sync();
             SingleCallSession session = read(sync, roomId);
             if (session == null) return null;
-            Long ended = sync.eval(END_SCRIPT, ScriptOutputType.INTEGER, callKeys(session), session.roomId());
+            Long ended = sync.eval(END_SCRIPT, ScriptOutputType.INTEGER, callKeys(session), session.roomId(),
+                    SingleCallSession.STATUS_RINGING, SingleCallSession.STATUS_ACCEPTED);
             return Long.valueOf(1L).equals(ended) ? session.end() : null;
         }
     }
@@ -251,7 +302,8 @@ public class RedisSingleCallStateStore implements SingleCallStateStore {
             SingleCallSession session = read(sync, roomId);
             if (session == null) return null;
             Long ended = sync.eval(END_BY_PARTICIPANT_SCRIPT, ScriptOutputType.INTEGER,
-                    callKeys(session), actorId, session.roomId());
+                    callKeys(session), actorId, session.roomId(), SingleCallSession.STATUS_RINGING,
+                    SingleCallSession.STATUS_ACCEPTED);
             return Long.valueOf(1L).equals(ended) ? session.end() : null;
         }
     }
@@ -302,5 +354,42 @@ public class RedisSingleCallStateStore implements SingleCallStateStore {
 
     private static String emptyToNull(String value) {
         return value == null || value.isEmpty() ? null : value;
+    }
+
+    private static List<SingleCallSession> toClaimedSessions(List<Object> rawSnapshots) {
+        if (rawSnapshots == null || rawSnapshots.isEmpty()) return List.of();
+        final int fieldsPerSession = 9;
+        if (rawSnapshots.size() % fieldsPerSession != 0) {
+            throw new IllegalStateException("invalid single-call timeout claim snapshot");
+        }
+        List<SingleCallSession> claimed = new ArrayList<>(rawSnapshots.size() / fieldsPerSession);
+        for (int index = 0; index < rawSnapshots.size(); index += fieldsPerSession) {
+            claimed.add(new SingleCallSession(
+                    valueAt(rawSnapshots, index),
+                    valueAt(rawSnapshots, index + 1),
+                    valueAt(rawSnapshots, index + 2),
+                    valueAt(rawSnapshots, index + 3),
+                    valueAt(rawSnapshots, index + 4),
+                    emptyToNull(valueAt(rawSnapshots, index + 5)),
+                    parseLong(valueAt(rawSnapshots, index + 6)),
+                    parseLong(valueAt(rawSnapshots, index + 7)),
+                    parseLong(valueAt(rawSnapshots, index + 8))));
+        }
+        return claimed;
+    }
+
+    private static String valueAt(List<Object> values, int index) {
+        Object value = values.get(index);
+        return value == null ? "" : String.valueOf(value);
+    }
+
+    private record ClaimCandidate(String roomId, String callerId, String calleeId) {
+        String callerIdOrMissing() {
+            return callerId == null ? "missing:" + roomId : callerId;
+        }
+
+        String calleeIdOrMissing() {
+            return calleeId == null ? "missing:" + roomId : calleeId;
+        }
     }
 }

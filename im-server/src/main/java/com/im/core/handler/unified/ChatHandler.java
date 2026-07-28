@@ -68,8 +68,6 @@ public class ChatHandler implements RequestHandler {
             throw new ValidationException("content type (_ct) is required");
         }
 
-        SignalingContent trackedSignal = null;
-
         // ── 音视频通话信令处理 ──
         if (content.getContentType() == ContentType.SIGNAL && callManager != null) {
             SignalingContent signal = (SignalingContent) content;
@@ -80,8 +78,10 @@ public class ChatHandler implements RequestHandler {
                 return handleInvite(req.params(), uid, toUserId, signal);
             }
             if (callStateManager != null) {
-                callStateManager.requireCanSendSignal(uid, toUserId, signal);
-                trackedSignal = signal;
+                if (sendPolicy != null) {
+                    sendPolicy.requireCanSendSingle(uid, toUserId);
+                }
+                callStateManager.transitionSignal(uid, toUserId, signal);
             }
         }
 
@@ -91,10 +91,6 @@ public class ChatHandler implements RequestHandler {
 
         if (result == null) {
             throw new ForbiddenException("message sending blocked");
-        }
-
-        if (trackedSignal != null) {
-            callStateManager.onSignalDelivered(uid, trackedSignal);
         }
 
         return Map.of("status", result.status(),

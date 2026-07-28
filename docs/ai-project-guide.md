@@ -305,9 +305,9 @@ DeliveryConsumer
 
 | Key | 说明 |
 |-----|------|
-| `route:{userId}` | 用户到节点/session 的路由 Hash；花括号内是真实 userId，用于与 online key 共用 Redis Cluster slot。 |
-| `online:{userId}` | 用户平台在线状态 ZSet；花括号内是真实 userId，用于与 route key 共用 Redis Cluster slot。 |
-| `route_node:{nodeId}` | 节点反向路由索引。 |
+| `im:route:v2:{u-encodedUserId}` | 用户到节点/session 的路由 Hash；编码后的 userId hash tag 与 online key 共用 Redis Cluster slot。 |
+| `im:online:v2:{u-encodedUserId}` | 用户平台在线状态 ZSet。 |
+| `im:route-node:v2:<nodeId>` | 节点反向路由索引。迁移要求见 [route-redis-key-layout-migration.md](route-redis-key-layout-migration.md)。 |
 | `im:node:{nodeId}` | 节点信息，30s TTL。 |
 | `im:nodes:alive` | 活跃节点集合。 |
 | `im:node:{nodeId}:msgs` | 节点专属 Pub/Sub 频道。 |

@@ -182,9 +182,9 @@ deliver topic
 
 | Key | 用途 |
 |-----|------|
-| `route:{userId}` | Hash，字段为 `platformId:sessionId`，值含 nodeId 和过期时间。 |
-| `online:{userId}` | ZSet，平台在线状态，score 是过期时间。 |
-| `route_node:{nodeId}` | Set，节点反向路由索引，用于节点下线清理。 |
+| `im:route:v2:{u-encodedUserId}` | Hash，字段为 `platformId:sessionId`，值含 nodeId 和过期时间。 |
+| `im:online:v2:{u-encodedUserId}` | ZSet，平台在线状态，score 是过期时间；与同一用户的 route key 同 slot。 |
+| `im:route-node:v2:<nodeId>` | Set，节点反向路由索引，用于节点下线清理。布局迁移见 [docs/route-redis-key-layout-migration.md](docs/route-redis-key-layout-migration.md)。 |
 | `im:node:{nodeId}` | 节点信息，TTL 30s。 |
 | `im:nodes:alive` | 当前活跃节点集合。 |
 | `im:node:{nodeId}:msgs` | Redis Pub/Sub 节点专属频道。 |

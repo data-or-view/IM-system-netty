@@ -8,9 +8,12 @@ import com.im.api.RouteNode;
 import com.im.common.exception.PersistenceExceptions;
 import io.lettuce.core.ScriptOutputType;
 import io.lettuce.core.cluster.api.async.RedisClusterAsyncCommands;
+import io.lettuce.core.cluster.api.sync.RedisClusterCommands;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -23,9 +26,9 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * 数据模型（Redis）：
  * <pre>
- *   route:{userId}     → {platformId:sessionId: nodeId|expireAt} (Hash, TTL=180s) ← 节点路由
- *   online:{userId}    → {platform: timestamp} (ZSet, TTL=180s) ← 在线状态
- *   route_node:{nodeId} → {userId|platformId:sessionId} (Set, TTL=210s) ← 节点反向索引
+ *   im:route:v2:{u-&lt;base64url-user-id&gt;}  → {platformId:sessionId: nodeId|expireAt} (Hash, TTL=180s)
+ *   im:online:v2:{u-&lt;base64url-user-id&gt;} → {platform: timestamp} (ZSet, TTL=180s)
+ *   im:route-node:v2:&lt;node-id&gt;           → {userId|platformId:sessionId} (Set, TTL=210s)
  * </pre>
  *
  * Lua 脚本（set_online）：
@@ -47,16 +50,35 @@ public class RedisRouteTable implements IRouteTable {
     private static final long ROUTE_TTL_SECONDS = 180;
 
     /** 在线状态 ZSet key 前缀 */
-    private static final String KEY_ONLINE_PREFIX = "online:";
+    private static final String KEY_ONLINE_PREFIX = "im:online:v2:";
 
     /** 路由 key 前缀 */
-    private static final String KEY_ROUTE_PREFIX = "route:";
+    private static final String KEY_ROUTE_PREFIX = "im:route:v2:";
 
     /** 节点反向路由索引 key 前缀 */
-    private static final String KEY_ROUTE_NODE_PREFIX = "route_node:";
+    private static final String KEY_ROUTE_NODE_PREFIX = "im:route-node:v2:";
+
+    private static final String LEGACY_ONLINE_PREFIX = "online:";
+    private static final String LEGACY_ROUTE_PREFIX = "route:";
+    private static final String LEGACY_ROUTE_NODE_PREFIX = "route_node:";
+    private static final String LAYOUT_MARKER_KEY = "im:route:key-layout";
+    private static final String LEGACY_LAYOUT = "legacy";
+    private static final String DRAINING_LAYOUT = "draining";
+    private static final String TAGGED_LAYOUT = "tagged-v2";
 
     /** 节点反向路由索引 TTL（秒），略长于 route TTL 便于节点过期清理 */
     private static final long ROUTE_NODE_INDEX_TTL_SECONDS = ROUTE_TTL_SECONDS + 30;
+
+    private static final String LAYOUT_CAS_SCRIPT = """
+            local current = redis.call('get', KEYS[1])
+            if ARGV[1] == '' then
+              if current then return 0 end
+            elseif current ~= ARGV[1] then
+              return 0
+            end
+            redis.call('set', KEYS[1], ARGV[2])
+            return 1
+            """;
 
     /** Deletes one route and only removes the platform when no live binding remains. */
     private static final String LUA_REMOVE_ROUTE = """
@@ -136,17 +158,25 @@ public class RedisRouteTable implements IRouteTable {
     private final RedisConfiguration redisConfig;
     private final ISessionManager sessionManager;
     private final String localNodeId;
+    private final KeyLayout keyLayout;
 
     /** Lua SHA 缓存 */
     private volatile String shaSetOnline;
     private volatile String shaSetOffline;
 
     public RedisRouteTable(RedisConfiguration redisConfig, ISessionManager sessionManager, String localNodeId) {
+        this(redisConfig, sessionManager, localNodeId, TAGGED_LAYOUT);
+    }
+
+    public RedisRouteTable(RedisConfiguration redisConfig, ISessionManager sessionManager,
+                           String localNodeId, String keyLayout) {
         this.async = redisConfig.async();
         this.redisConfig = redisConfig;
         this.sessionManager = sessionManager;
         this.localNodeId = localNodeId;
-        log.info("RedisRouteTable created: nodeId={}", localNodeId);
+        this.keyLayout = KeyLayout.parse(keyLayout);
+        ensureLayoutReady();
+        log.info("RedisRouteTable created: nodeId={}, keyLayout={}", localNodeId, this.keyLayout.value);
     }
 
     /**
@@ -160,6 +190,7 @@ public class RedisRouteTable implements IRouteTable {
 
     @Override
     public void online(String userId, String nodeId, int platformId, String sessionId) {
+        requireLayoutReady(userId);
         PersistenceExceptions.runRedis("route online", () -> {
             String key = routeKey(userId);
             String field = routeField(platformId, sessionId);
@@ -175,6 +206,7 @@ public class RedisRouteTable implements IRouteTable {
 
     @Override
     public void offline(String userId, String nodeId, int platformId, String sessionId) {
+        requireLayoutReady(userId);
         PersistenceExceptions.runRedis("route offline", () -> {
             String field = routeField(platformId, sessionId);
             boolean removed = removeRoute(userId, nodeId, platformId, field);
@@ -219,6 +251,7 @@ public class RedisRouteTable implements IRouteTable {
 
     @Override
     public List<RouteBinding> lookupAllBindings(String userId) {
+        requireLayoutReady(userId);
         return PersistenceExceptions.runRedis("lookup route bindings", () -> {
             long now = System.currentTimeMillis();
             Map<String, String> routes = async.hgetall(routeKey(userId))
@@ -238,6 +271,7 @@ public class RedisRouteTable implements IRouteTable {
 
     @Override
     public void setOnline(String userId, int platformId) {
+        requireLayoutReady(userId);
         PersistenceExceptions.runRedis("set online platform", () -> {
             String key = onlineKey(userId);
             long now = System.currentTimeMillis();
@@ -262,6 +296,7 @@ public class RedisRouteTable implements IRouteTable {
 
     @Override
     public void setOffline(String userId, int platformId) {
+        requireLayoutReady(userId);
         PersistenceExceptions.runRedis("set offline platform", () -> {
             String key = onlineKey(userId);
             long now = System.currentTimeMillis();
@@ -283,6 +318,7 @@ public class RedisRouteTable implements IRouteTable {
 
     @Override
     public List<Integer> getOnlinePlatforms(String userId) {
+        requireLayoutReady(userId);
         return PersistenceExceptions.runRedis("get online platforms", () -> {
             String key = onlineKey(userId);
             long now = System.currentTimeMillis();
@@ -305,6 +341,7 @@ public class RedisRouteTable implements IRouteTable {
 
     @Override
     public Map<String, List<Integer>> batchGetOnlinePlatforms(List<String> userIds) {
+        requireLayoutMarker();
         return PersistenceExceptions.runRedis("batch get online platforms", () -> {
             long now = System.currentTimeMillis();
             Map<String, List<Integer>> result = new ConcurrentHashMap<>();
@@ -336,6 +373,7 @@ public class RedisRouteTable implements IRouteTable {
 
     @Override
     public void renewOnline(String userId, int platformId, String sessionId) {
+        requireLayoutReady(userId);
         PersistenceExceptions.runRedis("renew online platform", () -> {
             String key = onlineKey(userId);
             long expireAt = System.currentTimeMillis() + ONLINE_TTL_SECONDS * 1000L;
@@ -350,6 +388,11 @@ public class RedisRouteTable implements IRouteTable {
 
     @Override
     public int cleanupNodeRoutes(String nodeId) {
+        requireLayoutMarker();
+        if (Long.valueOf(1L).equals(async.exists(LEGACY_ROUTE_NODE_PREFIX + nodeId).toCompletableFuture().join())) {
+            throw new IllegalStateException("legacy route-node index exists for node " + nodeId
+                    + "; tagged-v2 cleanup refused");
+        }
         return PersistenceExceptions.runRedis("cleanup node routes", () -> {
             String nodeIndexKey = nodeIndexKey(nodeId);
             Set<String> entries = async.smembers(nodeIndexKey).toCompletableFuture().join();
@@ -372,7 +415,6 @@ public class RedisRouteTable implements IRouteTable {
                     removeNodeRouteIndex(nodeId, userId, field);
                 }
             }
-            async.del(nodeIndexKey).toCompletableFuture().join();
             log.info("Node routes cleaned: nodeId={}, removed={}", nodeId, count);
             return count;
         });
@@ -429,11 +471,11 @@ public class RedisRouteTable implements IRouteTable {
     }
 
     private static String routeKey(String userId) {
-        return KEY_ROUTE_PREFIX + "{" + userId + "}";
+        return KEY_ROUTE_PREFIX + userHashTag(userId);
     }
 
     private static String onlineKey(String userId) {
-        return KEY_ONLINE_PREFIX + "{" + userId + "}";
+        return KEY_ONLINE_PREFIX + userHashTag(userId);
     }
 
     private static String nodeIndexKey(String nodeId) {
@@ -466,5 +508,86 @@ public class RedisRouteTable implements IRouteTable {
             }
         }
         return new RouteBinding(userId, nodeId, platformId, sessionId, expireAt);
+    }
+
+    private void ensureLayoutReady() {
+        if (keyLayout != KeyLayout.TAGGED_V2) {
+            throw new IllegalStateException("legacy route Redis key layout is unsafe; use tagged-v2");
+        }
+        try (CloseableRedisCommands redis = redisConfig.createSyncCommands()) {
+            RedisClusterCommands<String, String> commands = redis.sync();
+            for (int attempt = 0; attempt < 4; attempt++) {
+                String current = commands.get(LAYOUT_MARKER_KEY);
+                if (hasAnyLegacyState(commands)) {
+                    throw new IllegalStateException("legacy route/online keys must expire before tagged-v2 cutover");
+                }
+                if (TAGGED_LAYOUT.equals(current)) return;
+                if (current != null && !LEGACY_LAYOUT.equals(current) && !DRAINING_LAYOUT.equals(current)) {
+                    throw new IllegalStateException("unsupported route Redis key layout marker: " + current);
+                }
+                if (!DRAINING_LAYOUT.equals(current)) {
+                    if (!compareAndSetLayout(commands, current, DRAINING_LAYOUT)) continue;
+                }
+                if (hasAnyLegacyState(commands)) {
+                    throw new IllegalStateException("legacy route state appeared during tagged-v2 cutover; "
+                            + "old binaries must remain stopped");
+                }
+                if (compareAndSetLayout(commands, DRAINING_LAYOUT, TAGGED_LAYOUT)
+                        || TAGGED_LAYOUT.equals(commands.get(LAYOUT_MARKER_KEY))) {
+                    return;
+                }
+            }
+        }
+        throw new IllegalStateException("route Redis key layout cutover did not converge");
+    }
+
+    private void requireLayoutReady(String userId) {
+        requireLayoutMarker();
+        if (Long.valueOf(1L).equals(async.exists(LEGACY_ROUTE_PREFIX + userId).toCompletableFuture().join())
+                || Long.valueOf(1L).equals(async.exists(LEGACY_ONLINE_PREFIX + userId).toCompletableFuture().join())) {
+            throw new IllegalStateException("legacy route state exists for user " + userId
+                    + "; tagged-v2 operation refused");
+        }
+    }
+
+    private void requireLayoutMarker() {
+        String current = async.get(LAYOUT_MARKER_KEY).toCompletableFuture().join();
+        if (!TAGGED_LAYOUT.equals(current)) {
+            throw new IllegalStateException("route Redis key layout marker changed; tagged-v2 operation refused");
+        }
+    }
+
+    private static boolean compareAndSetLayout(RedisClusterCommands<String, String> commands,
+                                               String expected, String replacement) {
+        Long changed = commands.eval(LAYOUT_CAS_SCRIPT, ScriptOutputType.INTEGER,
+                new String[]{LAYOUT_MARKER_KEY}, expected != null ? expected : "", replacement);
+        return Long.valueOf(1L).equals(changed);
+    }
+
+    private static boolean hasAnyLegacyState(RedisClusterCommands<String, String> commands) {
+        return !commands.keys(LEGACY_ROUTE_PREFIX + "*").isEmpty()
+                || !commands.keys(LEGACY_ONLINE_PREFIX + "*").isEmpty()
+                || !commands.keys(LEGACY_ROUTE_NODE_PREFIX + "*").isEmpty();
+    }
+
+    private static String userHashTag(String userId) {
+        String encoded = Base64.getUrlEncoder().withoutPadding()
+                .encodeToString(userId.getBytes(StandardCharsets.UTF_8));
+        return "{u-" + encoded + "}";
+    }
+
+    private enum KeyLayout {
+        TAGGED_V2(TAGGED_LAYOUT);
+
+        private final String value;
+
+        KeyLayout(String value) {
+            this.value = value;
+        }
+
+        private static KeyLayout parse(String value) {
+            if (TAGGED_LAYOUT.equalsIgnoreCase(value)) return TAGGED_V2;
+            throw new IllegalArgumentException("unsupported route Redis key layout: " + value);
+        }
     }
 }
