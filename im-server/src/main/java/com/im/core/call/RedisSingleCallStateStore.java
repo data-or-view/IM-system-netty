@@ -296,7 +296,8 @@ public class RedisSingleCallStateStore implements SingleCallStateStore {
     public void acknowledgeTimeoutDelivery(String roomId) {
         if (!hasText(roomId)) return;
         try (CloseableRedisCommands redis = redisConfig.createSyncCommands()) {
-            redis.sync().zrem(deadlineKey(), roomId);
+            RedisClusterCommands<String, String> sync = redis.sync();
+            sync.zrem(deadlineKey(), roomId);
         }
     }
 
