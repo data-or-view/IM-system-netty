@@ -234,6 +234,7 @@ public class RedisGroupCallStateStore implements GroupCallStateStore {
 
     @Override
     public GroupCallSession getActiveByGroup(String groupId) {
+        requireWellFormedGroupId(groupId);
         try (CloseableRedisCommands redis = redisConfig.createSyncCommands()) {
             RedisClusterCommands<String, String> commands = redis.sync();
             ensureLayoutReady(commands, groupId);
@@ -245,6 +246,7 @@ public class RedisGroupCallStateStore implements GroupCallStateStore {
     @Override
     public GroupCallReservation reserve(String groupId, String roomId, String callType,
                                         String initiatorUserId, long now) {
+        requireWellFormedGroupId(groupId);
         try (CloseableRedisCommands redis = redisConfig.createSyncCommands()) {
             RedisClusterCommands<String, String> commands = redis.sync();
             ensureLayoutReady(commands, groupId);
@@ -259,6 +261,7 @@ public class RedisGroupCallStateStore implements GroupCallStateStore {
 
     @Override
     public boolean validateCreationOwner(String groupId, String roomId, long creationEpoch, long now) {
+        requireWellFormedGroupId(groupId);
         try (CloseableRedisCommands redis = redisConfig.createSyncCommands()) {
             RedisClusterCommands<String, String> commands = redis.sync();
             ensureLayoutReady(commands, groupId);
@@ -276,6 +279,7 @@ public class RedisGroupCallStateStore implements GroupCallStateStore {
     @Override
     public GroupCallSession activate(String groupId, String roomId, long creationEpoch,
                                      String sfuEndpoint, long now) {
+        requireWellFormedGroupId(groupId);
         try (CloseableRedisCommands redis = redisConfig.createSyncCommands()) {
             RedisClusterCommands<String, String> commands = redis.sync();
             ensureLayoutReady(commands, groupId);
@@ -290,6 +294,7 @@ public class RedisGroupCallStateStore implements GroupCallStateStore {
 
     @Override
     public GroupCallAdmission admit(String groupId, String userId, int maxParticipants, long now) {
+        requireWellFormedGroupId(groupId);
         try (CloseableRedisCommands redis = redisConfig.createSyncCommands()) {
             RedisClusterCommands<String, String> commands = redis.sync();
             ensureLayoutReady(commands, groupId);
@@ -303,6 +308,7 @@ public class RedisGroupCallStateStore implements GroupCallStateStore {
     @Override
     public GroupCallSession removeParticipant(String groupId, String userId,
                                               String expectedRoomId, long now) {
+        requireWellFormedGroupId(groupId);
         try (CloseableRedisCommands redis = redisConfig.createSyncCommands()) {
             RedisClusterCommands<String, String> commands = redis.sync();
             ensureLayoutReady(commands, groupId);
@@ -316,6 +322,7 @@ public class RedisGroupCallStateStore implements GroupCallStateStore {
 
     @Override
     public GroupCallSession end(String groupId, String expectedRoomId, long now) {
+        requireWellFormedGroupId(groupId);
         try (CloseableRedisCommands redis = redisConfig.createSyncCommands()) {
             RedisClusterCommands<String, String> commands = redis.sync();
             ensureLayoutReady(commands, groupId);
@@ -470,9 +477,25 @@ public class RedisGroupCallStateStore implements GroupCallStateStore {
     }
 
     private static String hashTag(String groupId) {
+        requireWellFormedGroupId(groupId);
         String encoded = Base64.getUrlEncoder().withoutPadding()
                 .encodeToString(groupId.getBytes(StandardCharsets.UTF_8));
         return "{g-" + encoded + "}";
+    }
+
+    private static void requireWellFormedGroupId(String groupId) {
+        if (groupId == null) throw new IllegalArgumentException("groupId is required");
+        for (int index = 0; index < groupId.length(); index++) {
+            char unit = groupId.charAt(index);
+            if (Character.isHighSurrogate(unit)) {
+                if (index + 1 >= groupId.length() || !Character.isLowSurrogate(groupId.charAt(index + 1))) {
+                    throw new IllegalArgumentException("groupId must be well-formed UTF-16");
+                }
+                index++;
+            } else if (Character.isLowSurrogate(unit)) {
+                throw new IllegalArgumentException("groupId must be well-formed UTF-16");
+            }
+        }
     }
 
     private static String oldHashTag(String groupId) {

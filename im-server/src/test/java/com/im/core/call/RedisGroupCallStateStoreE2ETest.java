@@ -234,6 +234,23 @@ class RedisGroupCallStateStoreE2ETest {
     }
 
     @Test
+    void rejectsMalformedUtf16GroupIdsBeforeRedisKeyEncoding() {
+        RedisConfiguration redis = redisOrSkip();
+        String malformedHighSurrogate = "group-\uD800";
+        String malformedLowSurrogate = "group-\uDC00";
+        try {
+            GroupCallStateStore store = taggedStore(redis);
+
+            assertThrows(IllegalArgumentException.class, () -> store.reserve(
+                    malformedHighSurrogate, "room-high", "video", "owner", 1L));
+            assertThrows(IllegalArgumentException.class, () -> store.reserve(
+                    malformedLowSurrogate, "room-low", "video", "owner", 1L));
+        } finally {
+            cleanupLayoutTest(redis, malformedHighSurrogate, malformedLowSurrogate);
+        }
+    }
+
+    @Test
     void usesInjectivePerGroupHashTaggedKeysAfterCutover() {
         RedisConfiguration redis = redisOrSkip();
         String groupId = "group-call-keys-" + UUID.randomUUID();

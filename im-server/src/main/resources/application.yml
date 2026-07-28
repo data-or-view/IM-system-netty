@@ -197,9 +197,9 @@ im:
     timeout-seconds: 30          # 通话超时秒数（超时未接听自动 TIMEOUT）
     group:
       max-participants: 16
-      # 滚动升级先保持 legacy；旧节点下线且旧通话清空后，显式切换到 tagged-v3。
-      # Redis Cluster 无法原子操作 legacy 跨槽键，因此在 legacy 模式下会拒绝启动群通话存储。
-      redis-key-layout: "legacy"
+      # Cluster-safe default. Migrating legacy calls requires a full-stop maintenance window;
+      # see docs/group-call-redis-key-layout-migration.md before selecting legacy or tagged-v3.
+      redis-key-layout: "tagged-v3"
 
   # ── MinIO 文件存储 ──
   minio:

@@ -7,6 +7,7 @@ import java.time.Duration;
 import java.util.Map;
 import java.util.Optional;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class ServerComponentsFactoryTest {
@@ -16,6 +17,17 @@ class ServerComponentsFactoryTest {
         Config config = new TestConfig(Map.of("im.db.enabled", "true"));
 
         assertThrows(IllegalStateException.class, () -> ServerComponentsFactory.create(config));
+    }
+
+    @Test
+    void resolvesClusterSafeGroupCallLayoutFromDefaultAndEnvironmentAlias() {
+        assertEquals("tagged-v3", ServerComponentsFactory.groupCallRedisKeyLayout(new TestConfig(Map.of())));
+        assertEquals("legacy", ServerComponentsFactory.groupCallRedisKeyLayout(
+                new TestConfig(Map.of("im.call.group.redis.key.layout", "legacy"))));
+        assertEquals("tagged-v3", ServerComponentsFactory.groupCallRedisKeyLayout(
+                new TestConfig(Map.of(
+                        "im.call.group.redis.key.layout", "legacy",
+                        "im.call.group.redis-key-layout", "tagged-v3"))));
     }
 
     private record TestConfig(Map<String, String> values) implements Config {

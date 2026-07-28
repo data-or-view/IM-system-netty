@@ -221,10 +221,15 @@ final class ServerComponentsFactory {
                 : null;
         GroupCallManager groupCallManager = callManager != null
                 ? new GroupCallManager(groupManager, callManager, new RedisGroupCallStateStore(redisConfig,
-                config.getString("im.call.group.redis-key-layout", "legacy")),
+                groupCallRedisKeyLayout(config)),
                 config.getInt("im.call.group.max-participants", 16))
                 : null;
         return new CallDependencies(callManager, callStateManager, groupCallManager);
+    }
+
+    static String groupCallRedisKeyLayout(Config config) {
+        return config.getString("im.call.group.redis-key-layout",
+                config.getString("im.call.group.redis.key.layout", "tagged-v3"));
     }
 
     static void requireCallCredentials(Config config) {
