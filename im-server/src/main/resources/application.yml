@@ -41,7 +41,7 @@ im:
   # ── 数据库（开启需要 Docker MySQL, 见 application-macbook-dev.yml） ──
   db:
     enabled: false               # 启用数据库持久化（设为 true 需要 MySQL 容器）
-    schema: auto                 # 自动建表: none(跳过) / auto(不存在时创建) / rebuild(先删后建)
+    schema: auto                 # none / auto(仅空库建V2) / migrate(显式升级v1.1) / rebuild(仅本地重建)
     jdbc-url: "jdbc:mysql://127.0.0.1:3306/im_system?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true"
     username: "root"
     password: "password"

@@ -47,6 +47,25 @@ class BootstrapSecurityChecksTest {
                 BootstrapSecurityChecks.DEFAULT_MINIO_SECRET_KEY));
     }
 
+    @Test
+    void rebuildSchemaIsRejectedOutsideLocalEnvironment() {
+        Config config = new TestConfig(Map.of(
+                "im.env", "prod",
+                "im.db.schema", "rebuild"));
+
+        assertThrows(IllegalStateException.class,
+                () -> DatabaseComponentsFactory.requireAllowedSchemaMode(config));
+    }
+
+    @Test
+    void rebuildSchemaIsAllowedInExplicitLocalEnvironment() {
+        Config config = new TestConfig(Map.of(
+                "im.env", "test",
+                "im.db.schema", "rebuild"));
+
+        assertDoesNotThrow(() -> DatabaseComponentsFactory.requireAllowedSchemaMode(config));
+    }
+
     private record TestConfig(Map<String, String> values) implements Config {
         @Override public Optional<String> getString(String key) { return Optional.ofNullable(values.get(key)); }
         @Override public Optional<Integer> getInt(String key) { return Optional.ofNullable(values.get(key)).map(Integer::parseInt); }

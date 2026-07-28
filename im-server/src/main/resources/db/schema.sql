@@ -11,6 +11,16 @@ CREATE DATABASE IF NOT EXISTS im_system
 USE im_system;
 
 -- ============================================================
+-- 0. Managed schema versions
+-- ============================================================
+CREATE TABLE IF NOT EXISTS im_schema_versions (
+    version       INT          NOT NULL PRIMARY KEY,
+    description   VARCHAR(255) NOT NULL,
+    checksum      CHAR(64)     NOT NULL,
+    installed_at  BIGINT       NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Managed IM schema versions';
+
+-- ============================================================
 -- 1. 用户表
 -- 对应 OpenIM: model.User
 -- ============================================================
@@ -258,6 +268,20 @@ CREATE TABLE IF NOT EXISTS im_messages (
     INDEX idx_send_time (conversation_id, sent_at DESC),
     INDEX idx_created (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='消息表';
+
+-- ============================================================
+-- 9. Inbound conversation projection events
+-- ============================================================
+CREATE TABLE IF NOT EXISTS im_conversation_projection_events (
+    owner_user_id   VARCHAR(64)  NOT NULL,
+    conversation_id VARCHAR(128) NOT NULL,
+    message_id      VARCHAR(128) NOT NULL,
+    message_seq     BIGINT       NOT NULL,
+    created_at      BIGINT       NOT NULL,
+    PRIMARY KEY (owner_user_id, conversation_id, message_id),
+    UNIQUE KEY uk_conversation_projection_message (owner_user_id, conversation_id, message_id),
+    KEY idx_projection_unread (owner_user_id, conversation_id, message_seq)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Inbound conversation projection events';
 
 -- ============================================================
 -- 10. 消息已读状态表（用户维度）

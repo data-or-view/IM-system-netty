@@ -57,6 +57,15 @@ class MessageStateSchemaTest {
         assertTrue(schema.contains("COMMENT='增量同步变更日志表'"));
     }
 
+    @Test
+    void v2ResourceDefinesVersionAndProjectionTables() throws Exception {
+        String schema = readSchema();
+
+        assertTrue(schema.contains("CREATE TABLE IF NOT EXISTS im_schema_versions"));
+        assertTrue(schema.contains("CREATE TABLE IF NOT EXISTS im_conversation_projection_events"));
+        assertTrue(schema.contains("uk_conversation_projection_message"));
+    }
+
     private static String readSchema() throws Exception {
         return Files.readString(Path.of("src/main/resources/db/schema.sql"));
     }

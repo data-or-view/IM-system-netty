@@ -28,6 +28,7 @@ final class DatabaseComponentsFactory {
     }
 
     static void initDatabase(Config config) {
+        requireAllowedSchemaMode(config);
         String jdbcUrl = config.getString("im.db.jdbc-url").orElse(null);
         DatabaseConfiguration dbConfig = jdbcUrl != null
                 ? new DatabaseConfiguration.Builder()
@@ -45,6 +46,14 @@ final class DatabaseComponentsFactory {
             log.error("Database initialization failed", e);
             databaseFailed = true;
             throw new IllegalStateException("Database initialization failed", e);
+        }
+    }
+
+    static void requireAllowedSchemaMode(Config config) {
+        String schemaMode = config.getString("im.db.schema").orElse("auto");
+        if ("rebuild".equalsIgnoreCase(schemaMode) && !BootstrapSecurityChecks.allowsDevDefaults(config)) {
+            throw new IllegalStateException(
+                    "im.db.schema=rebuild is restricted to explicit local development or testing");
         }
     }
 
