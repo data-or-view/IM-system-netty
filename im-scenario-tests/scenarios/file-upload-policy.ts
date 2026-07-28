@@ -17,6 +17,11 @@ interface UploadCompleteResult {
   fileSize: number;
 }
 
+interface DownloadSignResult {
+  fileId: string;
+  fileUrl: string;
+}
+
 interface MinioPostResult {
   status: number;
   body: string;
@@ -51,6 +56,13 @@ try {
   });
   assertOk(completed.fileId === exactPolicy.fileId && completed.fileSize === FILE_SIZE,
     `exact-size upload did not complete with expected metadata: ${JSON.stringify(completed)}`);
+
+  reporter.step("proving the completed exact-size object is downloadable");
+  const exactDownload = await alice.http.post<DownloadSignResult>("/api/file/download/sign", {
+    fileId: exactPolicy.fileId,
+  });
+  assertOk(exactDownload.fileId === exactPolicy.fileId && Boolean(exactDownload.fileUrl),
+    `exact-size upload did not produce a download URL: ${JSON.stringify(exactDownload)}`);
 
   reporter.step("requesting a separate policy for the oversized-object rejection");
   const oversizedPolicy = await signUpload(`oversized-${suffix}.txt`);

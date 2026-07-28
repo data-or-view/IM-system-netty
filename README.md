@@ -126,7 +126,7 @@ npm --prefix im-sdk test
 ```bash
 pnpm --dir im-scenario-tests scenario:smoke
 pnpm --dir im-scenario-tests scenario:file-upload-policy
-IM_SCENARIO_NODE1_PID_FILE=bin/pids/node-1.pid \
+IM_SCENARIO_NODE1_PID_FILE=../bin/pids/node-1.pid \
 pnpm --dir im-scenario-tests scenario:cluster-ha
 ```
 

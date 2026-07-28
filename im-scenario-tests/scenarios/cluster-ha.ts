@@ -6,6 +6,7 @@ import { waitFor, waitForAsync } from "../src/assertions.js";
 import { nextClientMsgId } from "../src/client-msg-id.js";
 import { readNumberArg } from "../src/cli.js";
 import { loadScenarioConfig } from "../src/config.js";
+import { ScenarioHttpError } from "../src/http-client.js";
 import { hasTextContent, isSignalingContent } from "../src/message-content.js";
 import {
   CLUSTER_NODE_DEFAULTS,
@@ -191,8 +192,11 @@ try {
   assertOk(joinedCount === groupCallMaxParticipants - 1,
     `expected ${groupCallMaxParticipants - 1} successful concurrent joins, got ${joinedCount}`);
   assertOk(rejectedCount === 1, `expected exactly one full-call rejection, got ${rejectedCount}`);
-  assertOk(rejectedResults.every((result) => errorMessage(result.reason).includes("group call is full")),
-    `concurrent join rejection was not caused by the configured cap: ${rejectedResults.map((result) => errorMessage(result.reason)).join("; ")}`);
+  assertOk(rejectedResults.every((result) =>
+    result.reason instanceof ScenarioHttpError &&
+    result.reason.httpStatus === 403 &&
+    result.reason.code === 403),
+  `concurrent join rejection did not return HTTP/business 403: ${rejectedResults.map((result) => errorMessage(result.reason)).join("; ")}`);
 
   const atCapacity = await sender.http.get<GroupCallSession>("/api/group/call/active", {
     groupId: group.groupId,

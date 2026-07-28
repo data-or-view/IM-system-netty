@@ -196,11 +196,13 @@ pnpm --dir im-scenario-tests scenario:ci
 本地集群和依赖服务都启动后，再跑真实协议场景：
 
 ```bash
+IM_SCENARIO_NODE1_PID_FILE=../bin/pids/node-1.pid \
 pnpm --dir im-scenario-tests scenario:p0
+IM_SCENARIO_NODE1_PID_FILE=../bin/pids/node-1.pid \
 pnpm --dir im-scenario-tests scenario:full
 ```
 
-这两个命令默认把非 cluster 场景指向本地集群 node-1 (`HTTP=8088`、`WS=8081`)，最后再跑 `cluster-ha`。
+这两个命令默认把非 cluster 场景指向本地集群 node-1 (`HTTP=8088`、`WS=8081`)，最后再跑 `cluster-ha`。`cluster-ha` 会停止 node-1；完成后 node-1 保持停止，继续使用集群前必须重启 node-1（可运行 `bin/stop-cluster.sh` 后再运行 `bin/start-cluster.sh` 恢复双节点）。
 
 `*E2ETest` 是本地依赖型 Maven E2E，`im-server` 的 Surefire 默认排除它；需要 MySQL/Redis 等依赖和正确凭据时用 `-Dtest='*E2ETest'` 单独运行。
 
@@ -417,7 +419,7 @@ node-2 WS=ws://127.0.0.1:8084/ws
 `cluster-ha` 包含 node-1 停机验证，因此必须显式授权一个本地 PID 文件：
 
 ```bash
-IM_SCENARIO_NODE1_PID_FILE=bin/pids/node-1.pid \
+IM_SCENARIO_NODE1_PID_FILE=../bin/pids/node-1.pid \
 pnpm --dir im-scenario-tests scenario:cluster-ha
 ```
 
