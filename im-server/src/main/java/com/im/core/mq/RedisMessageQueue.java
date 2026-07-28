@@ -75,9 +75,6 @@ public class RedisMessageQueue implements IMessageQueue {
     /** 连接失败重试间隔 */
     private static final Duration RETRY_INTERVAL = Duration.ofSeconds(1);
 
-    /** Shutdown keeps dependencies alive while an in-flight consumer exits. */
-    private static final Duration CONSUMER_STOP_TIMEOUT = Duration.ofSeconds(5);
-
     private final RedisConfiguration redisConfig;
     private final String consumerId;
     private final Duration pendingMinIdle;
@@ -89,10 +86,14 @@ public class RedisMessageQueue implements IMessageQueue {
     /** topic → 消费者任务 */
     private final ConcurrentHashMap<String, ConsumerTask> consumerTasks = new ConcurrentHashMap<>();
 
+    /** Includes retired tasks until their consumer loops have actually exited. */
+    private final Set<ConsumerTask> liveConsumerTasks = ConcurrentHashMap.newKeySet();
+
     /** Serializes lifecycle transitions with the final Redis Streams acknowledgement. */
     private final Object lifecycleLock = new Object();
 
     private final AtomicBoolean running = new AtomicBoolean(false);
+    private boolean stopping;
 
     private RedisClusterAsyncCommands<String, String> async;
 
@@ -112,12 +113,14 @@ public class RedisMessageQueue implements IMessageQueue {
 
     @Override
     public void start() {
-        if (!running.compareAndSet(false, true)) return;
-        this.async = redisConfig.async();
+        synchronized (lifecycleLock) {
+            if (!awaitCurrentShutdownLocked() || !running.compareAndSet(false, true)) return;
+            this.async = redisConfig.async();
 
-        // 启动已有订阅的消费者线程
-        for (String topic : subscribers.keySet()) {
-            startConsumer(topic);
+            // 启动已有订阅的消费者线程
+            for (String topic : subscribers.keySet()) {
+                startConsumerLocked(topic);
+            }
         }
 
         log.info("RedisMessageQueue started: consumerId={}", consumerId);
@@ -127,16 +130,29 @@ public class RedisMessageQueue implements IMessageQueue {
     public void stop() {
         List<ConsumerTask> tasks;
         synchronized (lifecycleLock) {
-            if (!running.compareAndSet(true, false)) return;
+            if (stopping) {
+                awaitCurrentShutdownLocked();
+                return;
+            }
+            if (!running.get() && liveConsumerTasks.isEmpty()) return;
 
-            tasks = new ArrayList<>(consumerTasks.values());
+            stopping = true;
+            running.set(false);
+            tasks = new ArrayList<>(liveConsumerTasks);
             consumerTasks.clear();
             for (ConsumerTask task : tasks) {
-                task.stop();
+                task.requestStopLocked();
             }
         }
-        for (ConsumerTask task : tasks) {
-            task.awaitStopped(CONSUMER_STOP_TIMEOUT);
+        try {
+            for (ConsumerTask task : tasks) {
+                task.awaitStopped();
+            }
+        } finally {
+            synchronized (lifecycleLock) {
+                stopping = false;
+                lifecycleLock.notifyAll();
+            }
         }
 
         log.info("RedisMessageQueue stopped: consumerId={}", consumerId);
@@ -189,23 +205,27 @@ public class RedisMessageQueue implements IMessageQueue {
 
     @Override
     public void subscribe(String topic, QueueMessageHandler handler) {
-        subscribers.computeIfAbsent(topic, k -> new CopyOnWriteArrayList<>()).add(handler);
-        if (running.get()) {
-            startConsumer(topic);
+        synchronized (lifecycleLock) {
+            subscribers.computeIfAbsent(topic, k -> new CopyOnWriteArrayList<>()).add(handler);
+            if (running.get()) {
+                startConsumerLocked(topic);
+            }
         }
         log.info("Handler subscribed to topic '{}'", topic);
     }
 
     @Override
     public void unsubscribe(String topic, QueueMessageHandler handler) {
-        List<QueueMessageHandler> handlers = subscribers.get(topic);
-        if (handlers != null) {
-            handlers.remove(handler);
-            if (handlers.isEmpty()) {
-                subscribers.remove(topic);
-                ConsumerTask task = consumerTasks.remove(topic);
-                if (task != null) {
-                    task.stop();
+        synchronized (lifecycleLock) {
+            List<QueueMessageHandler> handlers = subscribers.get(topic);
+            if (handlers != null) {
+                handlers.remove(handler);
+                if (handlers.isEmpty()) {
+                    subscribers.remove(topic, handlers);
+                    ConsumerTask task = consumerTasks.remove(topic);
+                    if (task != null) {
+                        task.requestStopLocked();
+                    }
                 }
             }
         }
@@ -224,13 +244,35 @@ public class RedisMessageQueue implements IMessageQueue {
      * 启动指定 topic 的消费者线程（虚拟线程）。
      * 每个 topic 只有一个消费者线程做 XREADGROUP BLOCK。
      */
-    private void startConsumer(String topic) {
-        consumerTasks.computeIfAbsent(topic, t -> {
-            ConsumerTask task = new ConsumerTask(t);
-            Thread thread = IMExecutors.startVirtualThread("redis-mq-" + t, task);
-            task.thread = thread;
-            return task;
-        });
+    private void startConsumerLocked(String topic) {
+        if (!running.get() || consumerTasks.containsKey(topic)) return;
+
+        ConsumerTask task = new ConsumerTask(topic);
+        consumerTasks.put(topic, task);
+        liveConsumerTasks.add(task);
+        try {
+            task.thread = IMExecutors.startVirtualThread("redis-mq-" + topic, task);
+        } catch (RuntimeException | Error startFailure) {
+            consumerTasks.remove(topic, task);
+            liveConsumerTasks.remove(task);
+            throw startFailure;
+        }
+    }
+
+    private boolean awaitCurrentShutdownLocked() {
+        boolean interrupted = false;
+        while (stopping) {
+            try {
+                lifecycleLock.wait();
+            } catch (InterruptedException ignored) {
+                interrupted = true;
+            }
+        }
+        if (interrupted) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+        return true;
     }
 
     /**
@@ -246,30 +288,28 @@ public class RedisMessageQueue implements IMessageQueue {
             this.topic = topic;
         }
 
-        void stop() {
-            synchronized (lifecycleLock) {
-                stopped = true;
-                if (thread != null) {
-                    thread.interrupt();
-                }
+        void requestStopLocked() {
+            stopped = true;
+            if (thread != null) {
+                thread.interrupt();
             }
         }
 
-        void awaitStopped(Duration timeout) {
+        void awaitStopped() {
             Thread current = thread;
             if (current == null || current == Thread.currentThread()) {
                 return;
             }
-            try {
-                current.join(timeout);
-            } catch (InterruptedException interrupted) {
-                Thread.currentThread().interrupt();
-                log.warn("Interrupted while waiting for Redis stream consumer shutdown: topic={}", topic);
-                return;
+            boolean interrupted = false;
+            while (current.isAlive()) {
+                try {
+                    current.join();
+                } catch (InterruptedException ignored) {
+                    interrupted = true;
+                }
             }
-            if (current.isAlive()) {
-                log.error("Redis stream consumer did not stop before drain timeout; leaving in-flight messages pending: topic={}, timeoutMs={}",
-                        topic, timeout.toMillis());
+            if (interrupted) {
+                Thread.currentThread().interrupt();
             }
         }
 
@@ -278,46 +318,53 @@ public class RedisMessageQueue implements IMessageQueue {
             String streamKey = streamKey(topic);
             String groupName = groupName(topic);
 
-            while (!stopped && running.get() && !Thread.currentThread().isInterrupted()) {
-                try (CloseableRedisCommands redis = redisConfig.createSyncCommands()) {
-                    RedisCommands<String, String> sync = redis.sync();
+            try {
+                while (!stopped && running.get() && !Thread.currentThread().isInterrupted()) {
+                    try (CloseableRedisCommands redis = redisConfig.createSyncCommands()) {
+                        RedisCommands<String, String> sync = redis.sync();
 
-                    // 确保 Consumer Group 存在（幂等）
-                    ensureGroup(sync, streamKey, groupName);
+                        // 确保 Consumer Group 存在（幂等）
+                        ensureGroup(sync, streamKey, groupName);
 
-                    while (!stopped && running.get() && !Thread.currentThread().isInterrupted()) {
-                        try {
-                            claimPending(sync, streamKey, groupName);
+                        while (!stopped && running.get() && !Thread.currentThread().isInterrupted()) {
+                            try {
+                                claimPending(sync, streamKey, groupName);
 
-                            List<io.lettuce.core.StreamMessage<String, String>> messages = sync.xreadgroup(
-                                    Consumer.from(groupName, consumerId),
-                                    XReadArgs.Builder.block(BLOCK_TIMEOUT).count(BATCH_SIZE),
-                                    XReadArgs.StreamOffset.lastConsumed(streamKey));
+                                List<io.lettuce.core.StreamMessage<String, String>> messages = sync.xreadgroup(
+                                        Consumer.from(groupName, consumerId),
+                                        XReadArgs.Builder.block(BLOCK_TIMEOUT).count(BATCH_SIZE),
+                                        XReadArgs.StreamOffset.lastConsumed(streamKey));
 
-                            if (messages == null || messages.isEmpty()) continue;
+                                if (messages == null || messages.isEmpty()) continue;
 
-                            for (io.lettuce.core.StreamMessage<String, String> msg : messages) {
-                                if (stopped || !running.get()) break;
+                                for (io.lettuce.core.StreamMessage<String, String> msg : messages) {
+                                    if (stopped || !running.get()) break;
 
-                                processMessage(sync, streamKey, groupName, msg);
-                            }
-                        } catch (Exception e) {
-                            if (running.get() && !stopped) {
-                                log.error("Consumer error on topic '{}': {}", topic, e.getMessage(), e);
-                                sleepOrBreak();
+                                    processMessage(sync, streamKey, groupName, msg);
+                                }
+                            } catch (Exception e) {
+                                if (running.get() && !stopped) {
+                                    log.error("Consumer error on topic '{}': {}", topic, e.getMessage(), e);
+                                    sleepOrBreak();
+                                }
                             }
                         }
-                    }
-                } catch (Exception e) {
-                    if (running.get() && !stopped) {
-                        log.error("Connection error for topic '{}', retrying in {}ms: {}",
-                                topic, RETRY_INTERVAL.toMillis(), e.getMessage());
-                        sleepOrBreak();
+                    } catch (Exception e) {
+                        if (running.get() && !stopped) {
+                            log.error("Connection error for topic '{}', retrying in {}ms: {}",
+                                    topic, RETRY_INTERVAL.toMillis(), e.getMessage());
+                            sleepOrBreak();
+                        }
                     }
                 }
+            } finally {
+                synchronized (lifecycleLock) {
+                    consumerTasks.remove(topic, this);
+                    liveConsumerTasks.remove(this);
+                    lifecycleLock.notifyAll();
+                }
+                log.info("Consumer stopped for topic '{}'", topic);
             }
-
-            log.info("Consumer stopped for topic '{}'", topic);
         }
 
         private void claimPending(RedisCommands<String, String> sync, String streamKey, String groupName) {

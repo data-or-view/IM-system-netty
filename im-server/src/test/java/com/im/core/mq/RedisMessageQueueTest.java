@@ -2,6 +2,7 @@ package com.im.core.mq;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.im.api.Message;
+import com.im.api.QueueMessageHandler;
 import com.im.core.redis.CloseableRedisCommands;
 import com.im.core.redis.RedisConfiguration;
 import com.im.core.serialization.jackson.ObjectMapperProvider;
@@ -31,6 +32,108 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class RedisMessageQueueTest {
 
     private static final ObjectMapper MAPPER = ObjectMapperProvider.get();
+
+    @Test
+    void unsubscribeThenStopWaitsForInFlightHandlerToExitBeforeReturning() throws Exception {
+        RedisConfiguration redis = redisOrSkip();
+        String topic = "test-unsubscribe-stop-waits-" + UUID.randomUUID();
+        String streamKey = RedisMessageQueue.STREAM_PREFIX + topic;
+        String groupName = RedisMessageQueue.GROUP_PREFIX + topic;
+        RedisMessageQueue queue = new RedisMessageQueue(redis, "unsubscribe-stop-waits-node");
+        CountDownLatch handlerEntered = new CountDownLatch(1);
+        CountDownLatch allowHandlerExit = new CountDownLatch(1);
+        CountDownLatch handlerExited = new CountDownLatch(1);
+        CountDownLatch stopReturned = new CountDownLatch(1);
+        ExecutorService stopper = Executors.newSingleThreadExecutor();
+        QueueMessageHandler handler = ignored -> {
+            handlerEntered.countDown();
+            awaitUninterruptibly(allowHandlerExit);
+            handlerExited.countDown();
+        };
+        try {
+            queue.subscribe(topic, handler);
+            queue.start();
+            queue.publish(topic, message("msg-unsubscribe-stop-waits-" + UUID.randomUUID()));
+
+            assertTrue(handlerEntered.await(5, TimeUnit.SECONDS), "handler did not start");
+            queue.unsubscribe(topic, handler);
+            stopper.submit(() -> {
+                queue.stop();
+                stopReturned.countDown();
+            });
+
+            assertFalse(stopReturned.await(5500, TimeUnit.MILLISECONDS),
+                    "queue stop must outwait the former drain timeout for a consumer removed by unsubscribe");
+
+            allowHandlerExit.countDown();
+            assertTrue(handlerExited.await(5, TimeUnit.SECONDS), "handler did not exit after release");
+            assertTrue(stopReturned.await(5, TimeUnit.SECONDS), "queue stop did not finish after handler exit");
+            try (CloseableRedisCommands commands = redis.createSyncCommands()) {
+                assertEquals(1, commands.<RedisCommands<String, String>>sync().xpending(streamKey, groupName).getCount(),
+                        "message completed after unsubscribe must remain reclaimable");
+            }
+        } finally {
+            allowHandlerExit.countDown();
+            queue.stop();
+            stopper.shutdownNow();
+            try (CloseableRedisCommands commands = redis.createSyncCommands()) {
+                commands.<RedisCommands<String, String>>sync().del(streamKey);
+            } finally {
+                redis.close();
+            }
+        }
+    }
+
+    @Test
+    void resubscribeStartsReplacementWithoutLosingItWhenRetiredConsumerExits() throws Exception {
+        RedisConfiguration redis = redisOrSkip();
+        String topic = "test-resubscribe-" + UUID.randomUUID();
+        String streamKey = RedisMessageQueue.STREAM_PREFIX + topic;
+        RedisMessageQueue queue = new RedisMessageQueue(redis, "resubscribe-node");
+        CountDownLatch retiredHandlerEntered = new CountDownLatch(1);
+        CountDownLatch allowRetiredHandlerExit = new CountDownLatch(1);
+        CountDownLatch retiredHandlerExited = new CountDownLatch(1);
+        CountDownLatch replacementReceived = new CountDownLatch(2);
+        CopyOnWriteArrayList<String> replacementMessageIds = new CopyOnWriteArrayList<>();
+        QueueMessageHandler retiredHandler = ignored -> {
+            retiredHandlerEntered.countDown();
+            awaitUninterruptibly(allowRetiredHandlerExit);
+            retiredHandlerExited.countDown();
+        };
+        QueueMessageHandler replacementHandler = message -> {
+            replacementMessageIds.add(message.getMessageId());
+            replacementReceived.countDown();
+        };
+        try {
+            queue.subscribe(topic, retiredHandler);
+            queue.start();
+            queue.publish(topic, message("msg-retired-" + UUID.randomUUID()));
+            assertTrue(retiredHandlerEntered.await(5, TimeUnit.SECONDS), "retired handler did not start");
+
+            queue.unsubscribe(topic, retiredHandler);
+            queue.subscribe(topic, replacementHandler);
+            String firstReplacementId = "msg-replacement-first-" + UUID.randomUUID();
+            queue.publish(topic, message(firstReplacementId));
+            waitUntilSize(replacementMessageIds, 1);
+
+            allowRetiredHandlerExit.countDown();
+            assertTrue(retiredHandlerExited.await(5, TimeUnit.SECONDS), "retired handler did not exit");
+
+            String secondReplacementId = "msg-replacement-second-" + UUID.randomUUID();
+            queue.publish(topic, message(secondReplacementId));
+            assertTrue(replacementReceived.await(5, TimeUnit.SECONDS),
+                    "replacement consumer stopped when the retired consumer exited");
+            assertEquals(List.of(firstReplacementId, secondReplacementId), replacementMessageIds);
+        } finally {
+            allowRetiredHandlerExit.countDown();
+            queue.stop();
+            try (CloseableRedisCommands commands = redis.createSyncCommands()) {
+                commands.<RedisCommands<String, String>>sync().del(streamKey);
+            } finally {
+                redis.close();
+            }
+        }
+    }
 
     @Test
     void stopWaitsForInFlightHandlerToExitBeforeReturning() throws Exception {
@@ -292,6 +395,17 @@ class RedisMessageQueueTest {
             Thread.sleep(50);
         }
         assertEquals(0, pending != null ? pending.getCount() : -1, "pending messages should be acked after recovery");
+    }
+
+    private static void waitUntilSize(List<?> values, int expectedSize) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (System.nanoTime() <= deadline) {
+            if (values.size() >= expectedSize) {
+                return;
+            }
+            Thread.sleep(25);
+        }
+        assertEquals(expectedSize, values.size(), "list did not reach expected size");
     }
 
     private static void awaitUninterruptibly(CountDownLatch latch) {
