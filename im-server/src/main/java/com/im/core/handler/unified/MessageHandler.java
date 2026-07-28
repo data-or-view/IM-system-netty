@@ -123,6 +123,9 @@ public class MessageHandler implements RequestHandler {
             requireReadable(userId, convId);
             long lastSeq = entry.getValue() instanceof Number
                     ? ((Number) entry.getValue()).longValue() : 0;
+            if (lastSeq == Long.MAX_VALUE) {
+                throw new ValidationException("lastSeq must be less than Long.MAX_VALUE");
+            }
 
             var messages = messageStore.pullBySequence(convId, lastSeq + 1, Long.MAX_VALUE, limit);
             long maxSeq = sequenceManager.getMaximumSequence(convId);

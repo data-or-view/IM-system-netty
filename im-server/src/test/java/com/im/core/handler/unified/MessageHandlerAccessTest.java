@@ -143,6 +143,18 @@ class MessageHandlerAccessTest {
     }
 
     @Test
+    void syncRejectsMaximumSequenceWatermarkWithoutPullingFromBeginning() {
+        RecordingMessageStore store = new RecordingMessageStore();
+        MessageHandler handler = new MessageHandler(store, new FixedSequenceManager());
+
+        assertThrows(ValidationException.class,
+                () -> handler.handle(request(Operation.CHAT_SYNC,
+                        Map.of("seqs", Map.of("single_alice_bob", Long.MAX_VALUE)), "alice")));
+
+        assertEquals(0, store.pullCalls);
+    }
+
+    @Test
     void sequenceRangeMapperHasDatabaseLimitParameter() throws NoSuchMethodException {
         Select select = MessageMapper.class
                 .getMethod("selectBySeqRange", String.class, long.class, long.class, int.class)
