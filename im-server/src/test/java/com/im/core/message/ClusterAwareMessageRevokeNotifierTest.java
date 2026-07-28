@@ -63,7 +63,8 @@ class ClusterAwareMessageRevokeNotifierTest {
     @Test
     void forwardsRevokeToRemoteNodeWithTargetBinding() {
         TestRouteTable routeTable = new TestRouteTable("node-a");
-        routeTable.bindings.put("bob", List.of(new RouteBinding("bob", "node-b", PlatformID.IOS, "s1", 0)));
+        routeTable.bindings.put("bob", List.of(new RouteBinding(
+                "bob", "node-b", PlatformID.IOS, "s1", 0, "lease-b", "generation-b")));
         RecordingClusterMessageBus bus = new RecordingClusterMessageBus();
         ClusterAwareMessageRevokeNotifier notifier = new ClusterAwareMessageRevokeNotifier(
                 "node-a", new SessionManager(), routeTable, bus);
@@ -76,6 +77,27 @@ class ClusterAwareMessageRevokeNotifierTest {
         assertEquals("msg_revoke", command.payload().get(ProtocolFields.OP));
         assertEquals(PlatformID.IOS, command.platformId());
         assertEquals("s1", command.sessionId());
+        assertEquals("lease-b", command.nodeIncarnation());
+        assertEquals("generation-b", command.generation());
+    }
+
+    @Test
+    void staleLocalSnapshotCannotRemoveRenewedBindingOrOnlinePlatform() {
+        TestRouteTable routeTable = new TestRouteTable("node-a");
+        RouteBinding observed = new RouteBinding(
+                "bob", "node-a", PlatformID.IOS, "s1", 0, "lease-a", "generation-1");
+        RouteBinding renewed = new RouteBinding(
+                "bob", "node-a", PlatformID.IOS, "s1", 0, "lease-a", "generation-2");
+        routeTable.bindings.put("bob", List.of(observed));
+        routeTable.onlinePlatforms.add(PlatformID.IOS);
+        routeTable.afterLookup = () -> routeTable.bindings.put("bob", List.of(renewed));
+        ClusterAwareMessageRevokeNotifier notifier = new ClusterAwareMessageRevokeNotifier(
+                "node-a", new SessionManager(), routeTable, new RecordingClusterMessageBus());
+
+        notifier.notify(result("alice", "bob"));
+
+        assertEquals(List.of(renewed), routeTable.lookupAllBindings("bob"));
+        assertTrue(routeTable.getOnlinePlatforms("bob").contains(PlatformID.IOS));
     }
 
     @Test
@@ -106,6 +128,30 @@ class ClusterAwareMessageRevokeNotifierTest {
         assertTrue(frame.text().contains("\"revokerId\":\"alice\""));
     }
 
+    @Test
+    void staleRemoteCommandCannotRemoveRenewedBindingOrOnlinePlatform() {
+        TestRouteTable routeTable = new TestRouteTable("node-b");
+        RouteBinding renewed = new RouteBinding(
+                "bob", "node-b", PlatformID.IOS, "s1", 0, "lease-b", "generation-2");
+        routeTable.bindings.put("bob", List.of(renewed));
+        routeTable.onlinePlatforms.add(PlatformID.IOS);
+        ClusterAwareMessageRevokeNotifier notifier = new ClusterAwareMessageRevokeNotifier(
+                "node-b", new SessionManager(), routeTable, new RecordingClusterMessageBus());
+
+        notifier.handleClusterPush(ClusterMessage.fromCommand("node-a", new ClusterCommand(
+                ClusterCommandType.PUSH_EVENT,
+                "bob",
+                PlatformID.IOS,
+                "s1",
+                "lease-b",
+                "generation-1",
+                "PUSH_EVENT",
+                revokePayload())));
+
+        assertEquals(List.of(renewed), routeTable.lookupAllBindings("bob"));
+        assertTrue(routeTable.getOnlinePlatforms("bob").contains(PlatformID.IOS));
+    }
+
     private static RevokeResult result(String revokerId, String targetUserId) {
         return new RevokeResult("single_alice_bob", 7, revokerId, Set.of(targetUserId));
     }
@@ -133,24 +179,53 @@ class ClusterAwareMessageRevokeNotifierTest {
     private static final class TestRouteTable implements IRouteTable {
         private final String localNodeId;
         private final Map<String, List<RouteBinding>> bindings = new ConcurrentHashMap<>();
+        private final Set<Integer> onlinePlatforms = ConcurrentHashMap.newKeySet();
+        private Runnable afterLookup;
 
         private TestRouteTable(String localNodeId) {
             this.localNodeId = localNodeId;
         }
 
         @Override public void online(String userId, String nodeId, int platformId, String sessionId) {}
-        @Override public void offline(String userId, String nodeId, int platformId, String sessionId) {}
+        @Override public void offline(String userId, String nodeId, int platformId, String sessionId) {
+            remove(userId, binding -> nodeId.equals(binding.nodeId())
+                    && platformId == binding.platformId()
+                    && sessionId.equals(binding.sessionId()));
+        }
+        @Override public boolean offlineIfCurrent(RouteBinding candidate) {
+            return remove(candidate.userId(), candidate::sameIdentity);
+        }
         @Override public RouteNode lookup(String userId) { return null; }
         @Override public List<RouteNode> lookupAll(String userId) {
             return lookupAllBindings(userId).stream().map(binding -> binding.toRouteNode(localNodeId)).toList();
         }
         @Override public List<RouteBinding> lookupAllBindings(String userId) {
-            return bindings.getOrDefault(userId, List.of());
+            List<RouteBinding> snapshot = bindings.getOrDefault(userId, List.of());
+            if (afterLookup != null) {
+                Runnable hook = afterLookup;
+                afterLookup = null;
+                hook.run();
+            }
+            return snapshot;
         }
         @Override public void setOnline(String userId, int platformId) {}
         @Override public void setOffline(String userId, int platformId) {}
-        @Override public List<Integer> getOnlinePlatforms(String userId) { return List.of(); }
+        @Override public List<Integer> getOnlinePlatforms(String userId) { return List.copyOf(onlinePlatforms); }
         @Override public void renewOnline(String userId, int platformId) {}
+
+        private boolean remove(String userId, java.util.function.Predicate<RouteBinding> predicate) {
+            List<RouteBinding> current = bindings.getOrDefault(userId, List.of());
+            List<RouteBinding> remaining = current.stream().filter(predicate.negate()).toList();
+            if (remaining.size() == current.size()) return false;
+            bindings.put(userId, remaining);
+            for (RouteBinding removed : current) {
+                if (predicate.test(removed) && remaining.stream()
+                        .noneMatch(binding -> binding.platformId() == removed.platformId())) {
+                    onlinePlatforms.remove(removed.platformId());
+                }
+            }
+            return true;
+        }
     }
 
     private static final class RecordingClusterMessageBus implements IClusterMessageBus {

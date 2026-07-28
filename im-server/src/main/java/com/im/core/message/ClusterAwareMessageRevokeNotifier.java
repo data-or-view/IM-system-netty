@@ -58,7 +58,10 @@ public class ClusterAwareMessageRevokeNotifier {
         Object op = command.payload().get(ProtocolFields.OP);
         Object data = command.payload().get(ProtocolFields.DATA);
         if (ProtocolFields.OP_MESSAGE_REVOKED.equals(op)) {
-            pushLocal(command.userId(), command.platformId(), command.sessionId(),
+            RouteBinding binding = new RouteBinding(command.userId(), localNodeId,
+                    command.platformId(), command.sessionId(), 0,
+                    command.nodeIncarnation(), command.generation());
+            pushLocal(binding,
                     new PushEvent(ProtocolFields.OP_MESSAGE_REVOKED, data));
         }
     }
@@ -66,7 +69,7 @@ public class ClusterAwareMessageRevokeNotifier {
     private void push(String userId, PushEvent event) {
         List<RouteBinding> bindings = routeTable != null ? routeTable.lookupAllBindings(userId) : List.of();
         if (bindings.isEmpty()) {
-            pushLocal(userId, -1, null, event);
+            pushAllLocal(userId, event);
             return;
         }
 
@@ -77,25 +80,33 @@ public class ClusterAwareMessageRevokeNotifier {
                 continue;
             }
             if (localNodeId.equals(binding.nodeId())) {
-                pushLocal(userId, binding.platformId(), binding.sessionId(), event);
+                pushLocal(binding, event);
             } else {
                 forward(userId, binding, event);
             }
         }
     }
 
-    private void pushLocal(String userId, int platformId, String sessionId, PushEvent event) {
-        int delivered = 0;
+    private void pushAllLocal(String userId, PushEvent event) {
         for (IConnectionSession session : sessionManager.getSessionsByUserId(userId)) {
-            if (matches(session, platformId, sessionId) && session.getConnection().isActive()) {
+            if (session.getConnection().isActive()) {
+                session.getConnection().write(event);
+            }
+        }
+    }
+
+    private void pushLocal(RouteBinding binding, PushEvent event) {
+        int delivered = 0;
+        for (IConnectionSession session : sessionManager.getSessionsByUserId(binding.userId())) {
+            if (matches(session, binding.platformId(), binding.sessionId())
+                    && session.getConnection().isActive()) {
                 session.getConnection().write(event);
                 delivered++;
             }
         }
-        if (delivered == 0 && routeTable != null && platformId >= 0 && sessionId != null && !sessionId.isBlank()) {
-            routeTable.offline(userId, localNodeId, platformId, sessionId);
+        if (delivered == 0 && routeTable != null && routeTable.offlineIfCurrent(binding)) {
             log.warn("Removed stale revoke push route: userId={}, node={}, platform={}, session={}",
-                    userId, localNodeId, platformId, sessionId);
+                    binding.userId(), binding.nodeId(), binding.platformId(), binding.sessionId());
         }
     }
 
@@ -120,6 +131,8 @@ public class ClusterAwareMessageRevokeNotifier {
                 userId,
                 binding.platformId(),
                 binding.sessionId(),
+                binding.nodeIncarnation(),
+                binding.generation(),
                 "PUSH_EVENT",
                 payload);
         clusterMessageBus.sendToNode(ClusterMessage.fromCommand(localNodeId, command), binding.nodeId());

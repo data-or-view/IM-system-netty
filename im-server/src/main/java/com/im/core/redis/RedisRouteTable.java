@@ -10,6 +10,7 @@ import io.lettuce.core.KeyScanCursor;
 import io.lettuce.core.ScanArgs;
 import io.lettuce.core.ScanCursor;
 import io.lettuce.core.ScriptOutputType;
+import io.lettuce.core.ScoredValue;
 import io.lettuce.core.cluster.api.async.RedisClusterAsyncCommands;
 import io.lettuce.core.cluster.api.sync.RedisClusterCommands;
 import org.slf4j.Logger;
@@ -741,14 +742,30 @@ public class RedisRouteTable implements IRouteTable {
     }
 
     private static String userIdFromRouteKey(String key) {
-        if (key == null || !key.startsWith(KEY_ROUTE_PREFIX + "{u-") || !key.endsWith("}")) {
-            throw new IllegalStateException("invalid tagged-v4 route key: " + key);
+        return userIdFromTaggedKey(key, KEY_ROUTE_PREFIX, "route");
+    }
+
+    private static String userIdFromOnlineKey(String key) {
+        return userIdFromTaggedKey(key, KEY_ONLINE_PREFIX, "online");
+    }
+
+    private static String userIdFromTaggedKey(String key, String prefix, String stateName) {
+        String taggedPrefix = prefix + "{u-";
+        if (key == null || !key.startsWith(taggedPrefix) || !key.endsWith("}")) {
+            throw new IllegalStateException("invalid tagged-v4 " + stateName + " key: " + key);
         }
-        String encoded = key.substring((KEY_ROUTE_PREFIX + "{u-").length(), key.length() - 1);
+        String encoded = key.substring(taggedPrefix.length(), key.length() - 1);
         try {
-            return new String(Base64.getUrlDecoder().decode(encoded), StandardCharsets.UTF_8);
+            byte[] decoded = Base64.getUrlDecoder().decode(encoded);
+            String userId = new String(decoded, StandardCharsets.UTF_8);
+            String canonical = Base64.getUrlEncoder().withoutPadding()
+                    .encodeToString(userId.getBytes(StandardCharsets.UTF_8));
+            if (userId.isBlank() || !encoded.equals(canonical)) {
+                throw new IllegalStateException("invalid tagged-v4 " + stateName + " user hash tag: " + key);
+            }
+            return userId;
         } catch (IllegalArgumentException e) {
-            throw new IllegalStateException("invalid tagged-v4 route user hash tag: " + key, e);
+            throw new IllegalStateException("invalid tagged-v4 " + stateName + " user hash tag: " + key, e);
         }
     }
 
@@ -840,6 +857,29 @@ public class RedisRouteTable implements IRouteTable {
             for (String member : commands.smembers(key)) {
                 parseNodeIndexEntry(member);
             }
+        }
+        for (String key : scanKeys(commands, KEY_ONLINE_PREFIX + "*")) {
+            userIdFromOnlineKey(key);
+            if (!"zset".equals(commands.type(key))) {
+                throw new IllegalStateException("tagged-v4 online key must be a ZSet: " + key);
+            }
+            for (ScoredValue<String> entry : commands.zrangeWithScores(key, 0, -1)) {
+                validateOnlineEntry(key, entry);
+            }
+        }
+    }
+
+    private static void validateOnlineEntry(String key, ScoredValue<String> entry) {
+        try {
+            Integer.parseInt(entry.getValue());
+        } catch (NumberFormatException e) {
+            throw new IllegalStateException(
+                    "tagged-v4 online platform must be numeric: " + entry.getValue() + " in " + key, e);
+        }
+        double score = entry.getScore();
+        if (!Double.isFinite(score) || score <= 0 || score > Long.MAX_VALUE || score != Math.rint(score)) {
+            throw new IllegalStateException(
+                    "tagged-v4 online expiry must be a positive epoch millisecond: " + score + " in " + key);
         }
     }
 

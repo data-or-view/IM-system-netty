@@ -357,6 +357,74 @@ class RedisRouteTableE2ETest {
         }
     }
 
+    @Test
+    void taggedV4ReadinessRejectsOnlineKeyWithWrongRedisType() {
+        RedisConfiguration redis = redisOrSkip();
+        String key = onlineKey("route-online-type-user-" + UUID.randomUUID());
+        try (CloseableRedisCommands commands = redis.createSyncCommands()) {
+            var sync = commands.<io.lettuce.core.cluster.api.sync.RedisClusterCommands<String, String>>sync();
+            sync.del("im:route:key-layout");
+            sync.set(key, "not-a-zset");
+
+            assertThrows(IllegalStateException.class, () ->
+                    new RedisRouteTable(redis, new SessionManager(), "node-a", "tagged-v4"));
+        } finally {
+            deleteReadinessFixture(redis, key);
+            redis.close();
+        }
+    }
+
+    @Test
+    void taggedV4ReadinessRejectsMalformedOnlineKey() {
+        RedisConfiguration redis = redisOrSkip();
+        String key = "im:online:v4:not-tagged-" + UUID.randomUUID();
+        try (CloseableRedisCommands commands = redis.createSyncCommands()) {
+            var sync = commands.<io.lettuce.core.cluster.api.sync.RedisClusterCommands<String, String>>sync();
+            sync.del("im:route:key-layout");
+            sync.zadd(key, System.currentTimeMillis() + 60_000D, String.valueOf(PlatformID.WEB));
+
+            assertThrows(IllegalStateException.class, () ->
+                    new RedisRouteTable(redis, new SessionManager(), "node-a", "tagged-v4"));
+        } finally {
+            deleteReadinessFixture(redis, key);
+            redis.close();
+        }
+    }
+
+    @Test
+    void taggedV4ReadinessRejectsNonnumericOnlinePlatform() {
+        RedisConfiguration redis = redisOrSkip();
+        String key = onlineKey("route-online-member-user-" + UUID.randomUUID());
+        try (CloseableRedisCommands commands = redis.createSyncCommands()) {
+            var sync = commands.<io.lettuce.core.cluster.api.sync.RedisClusterCommands<String, String>>sync();
+            sync.del("im:route:key-layout");
+            sync.zadd(key, System.currentTimeMillis() + 60_000D, "not-a-platform");
+
+            assertThrows(IllegalStateException.class, () ->
+                    new RedisRouteTable(redis, new SessionManager(), "node-a", "tagged-v4"));
+        } finally {
+            deleteReadinessFixture(redis, key);
+            redis.close();
+        }
+    }
+
+    @Test
+    void taggedV4ReadinessRejectsInvalidOnlineExpiryScore() {
+        RedisConfiguration redis = redisOrSkip();
+        String key = onlineKey("route-online-score-user-" + UUID.randomUUID());
+        try (CloseableRedisCommands commands = redis.createSyncCommands()) {
+            var sync = commands.<io.lettuce.core.cluster.api.sync.RedisClusterCommands<String, String>>sync();
+            sync.del("im:route:key-layout");
+            sync.zadd(key, -1D, String.valueOf(PlatformID.WEB));
+
+            assertThrows(IllegalStateException.class, () ->
+                    new RedisRouteTable(redis, new SessionManager(), "node-a", "tagged-v4"));
+        } finally {
+            deleteReadinessFixture(redis, key);
+            redis.close();
+        }
+    }
+
     private static void concurrently(List<Runnable> actions) throws Exception {
         ExecutorService executor = Executors.newFixedThreadPool(actions.size());
         CountDownLatch ready = new CountDownLatch(actions.size());
@@ -487,6 +555,19 @@ class RedisRouteTableE2ETest {
     private static String routeKey(String userId) {
         return "im:route:v4:{u-" + Base64.getUrlEncoder().withoutPadding()
                 .encodeToString(userId.getBytes(StandardCharsets.UTF_8)) + "}";
+    }
+
+    private static String onlineKey(String userId) {
+        return "im:online:v4:{u-" + Base64.getUrlEncoder().withoutPadding()
+                .encodeToString(userId.getBytes(StandardCharsets.UTF_8)) + "}";
+    }
+
+    private static void deleteReadinessFixture(RedisConfiguration redis, String key) {
+        try (CloseableRedisCommands commands = redis.createSyncCommands()) {
+            var sync = commands.<io.lettuce.core.cluster.api.sync.RedisClusterCommands<String, String>>sync();
+            sync.del(key);
+            sync.del("im:route:key-layout");
+        }
     }
 
     private static void removeNodeIndexMembersWithPrefix(RedisConfiguration redis, String nodeId, String prefix) {
