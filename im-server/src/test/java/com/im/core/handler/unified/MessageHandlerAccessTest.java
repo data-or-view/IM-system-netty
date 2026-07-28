@@ -169,6 +169,29 @@ class MessageHandlerAccessTest {
     }
 
     @Test
+    void syncRejectsNonNumericWatermarkBeforePulling() {
+        RecordingMessageStore store = new RecordingMessageStore();
+        MessageHandler handler = new MessageHandler(store, new FixedSequenceManager());
+
+        assertThrows(ValidationException.class,
+                () -> handler.handle(request(Operation.CHAT_SYNC,
+                        Map.of("seqs", Map.of("single_alice_bob", "12")), "alice")));
+
+        assertEquals(0, store.pullCalls);
+    }
+
+    @Test
+    void syncRejectsNonObjectSequenceMapBeforePulling() {
+        RecordingMessageStore store = new RecordingMessageStore();
+        MessageHandler handler = new MessageHandler(store, new FixedSequenceManager());
+
+        assertThrows(ValidationException.class,
+                () -> handler.handle(request(Operation.CHAT_SYNC, Map.of("seqs", List.of(0L)), "alice")));
+
+        assertEquals(0, store.pullCalls);
+    }
+
+    @Test
     void sequenceRangeMapperHasDatabaseLimitParameter() throws NoSuchMethodException {
         Select select = MessageMapper.class
                 .getMethod("selectBySeqRange", String.class, long.class, long.class, int.class)

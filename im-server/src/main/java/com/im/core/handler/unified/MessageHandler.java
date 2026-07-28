@@ -105,14 +105,19 @@ public class MessageHandler implements RequestHandler {
      *
      * <p>典型使用场景：用户上线后拉取离线期间的消息。</p>
      */
-    @SuppressWarnings("unchecked")
     private Object handleSync(ApiRequest req) {
         String userId = RequestPreconditions.requireUser(req);
-        Map<String, Object> seqsRaw = (Map<String, Object>) req.params().get("seqs");
+        Object rawSeqs = req.params().get("seqs");
         int limit = queryLimits.clampPullLimit(req.getInt("limit", 50));
 
         // 客户端没有上报会话水位时不主动展开所有会话，避免一次上线同步退化成全量扫描。
-        if (seqsRaw == null || seqsRaw.isEmpty()) {
+        if (rawSeqs == null) {
+            return Map.of("syncs", List.of());
+        }
+        if (!(rawSeqs instanceof Map<?, ?> seqsRaw)) {
+            throw new ValidationException("seqs must be an object");
+        }
+        if (seqsRaw.isEmpty()) {
             return Map.of("syncs", List.of());
         }
         if (seqsRaw.size() > queryLimits.maxSyncConversations()) {
@@ -120,8 +125,10 @@ public class MessageHandler implements RequestHandler {
         }
 
         List<Map<String, Object>> syncs = new ArrayList<>(seqsRaw.size());
-        for (Map.Entry<String, Object> entry : seqsRaw.entrySet()) {
-            String convId = entry.getKey();
+        for (Map.Entry<?, ?> entry : seqsRaw.entrySet()) {
+            if (!(entry.getKey() instanceof String convId)) {
+                throw new ValidationException("seqs keys must be conversation IDs");
+            }
             // seqs 完全来自客户端，逐个会话做可读校验，防止用户伪造 conversationId 批量探测消息。
             requireReadable(userId, convId);
             long lastSeq = parseSyncWatermark(entry.getValue());
@@ -140,7 +147,7 @@ public class MessageHandler implements RequestHandler {
 
     private long parseSyncWatermark(Object rawValue) {
         if (!(rawValue instanceof Number number)) {
-            return 0;
+            throw new ValidationException("lastSeq must be a non-negative integral long");
         }
         try {
             BigInteger watermark = toExactInteger(number);
