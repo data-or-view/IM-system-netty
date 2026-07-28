@@ -45,3 +45,4 @@ node_modules/
 dist/
 *.log
 *.gstack
+.worktrees/
