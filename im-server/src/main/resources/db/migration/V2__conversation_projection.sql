@@ -47,7 +47,11 @@ SELECT c.owner_user_id,
        GREATEST(m.sent_at, m.created_at)
 FROM im_conversations c
 JOIN im_messages m ON m.conversation_id = c.conversation_id
-WHERE m.send_id <> c.owner_user_id;
+LEFT JOIN im_seq_users s
+       ON s.user_id = c.owner_user_id AND s.conversation_id = c.conversation_id
+WHERE m.send_id <> c.owner_user_id
+  AND m.seq <= c.max_seq
+  AND (s.min_seq IS NULL OR s.min_seq <= 0 OR m.seq >= s.min_seq);
 
 -- migration-step: create-schema-versions
 CREATE TABLE IF NOT EXISTS im_schema_versions (

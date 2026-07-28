@@ -18,6 +18,11 @@ public interface MessageReadStateMapper extends BaseMapper<MessageReadStateEntit
     MessageReadStateEntity selectByUserConversation(@Param("userId") String userId,
                                                     @Param("conversationId") String conversationId);
 
+    @Select("SELECT * FROM im_message_read_states WHERE user_id = #{userId} "
+            + "AND conversation_id = #{conversationId} FOR UPDATE")
+    MessageReadStateEntity selectByUserConversationForUpdate(@Param("userId") String userId,
+                                                             @Param("conversationId") String conversationId);
+
     @Update("""
             INSERT INTO im_message_read_states
                 (user_id, conversation_id, read_seq, delivered_seq, unread_count, updated_at)
@@ -41,36 +46,51 @@ public interface MessageReadStateMapper extends BaseMapper<MessageReadStateEntit
                 (user_id, conversation_id, read_seq, pending_read_seq, delivered_seq, unread_count, updated_at)
             VALUES
                 (#{userId}, #{conversationId}, LEAST(#{requestedReadSeq}, #{observedMaxSeq}),
-                 CASE WHEN #{requestedReadSeq} > #{observedMaxSeq} THEN #{requestedReadSeq} ELSE 0 END,
-                 0, 0, #{updatedAt})
+                 CASE
+                     WHEN LEAST(#{requestedReadSeq}, #{authorizedMaxSeq}) > #{observedMaxSeq}
+                     THEN LEAST(#{requestedReadSeq}, #{authorizedMaxSeq})
+                     ELSE 0
+                 END,
+                 #{authorizedMaxSeq}, 0, #{updatedAt})
             ON DUPLICATE KEY UPDATE
                 read_seq = GREATEST(read_seq,
-                    LEAST(GREATEST(pending_read_seq, #{requestedReadSeq}), #{observedMaxSeq})),
+                    LEAST(
+                        LEAST(GREATEST(pending_read_seq, #{requestedReadSeq}), #{authorizedMaxSeq}),
+                        #{observedMaxSeq}
+                    )),
                 pending_read_seq = CASE
-                    WHEN GREATEST(pending_read_seq, #{requestedReadSeq}) > #{observedMaxSeq}
-                    THEN GREATEST(pending_read_seq, #{requestedReadSeq})
+                    WHEN LEAST(GREATEST(pending_read_seq, #{requestedReadSeq}), #{authorizedMaxSeq})
+                         > #{observedMaxSeq}
+                    THEN LEAST(GREATEST(pending_read_seq, #{requestedReadSeq}), #{authorizedMaxSeq})
                     ELSE 0
                 END,
+                delivered_seq = GREATEST(delivered_seq, #{authorizedMaxSeq}),
                 updated_at = #{updatedAt}
             """)
     int recordReadIntent(@Param("userId") String userId,
                          @Param("conversationId") String conversationId,
                          @Param("requestedReadSeq") long requestedReadSeq,
                          @Param("observedMaxSeq") long observedMaxSeq,
+                         @Param("authorizedMaxSeq") long authorizedMaxSeq,
                          @Param("updatedAt") long updatedAt);
 
-    @Update("""
-            UPDATE im_message_read_states
-            SET read_seq = GREATEST(read_seq, LEAST(pending_read_seq, #{observedMaxSeq})),
+    @Insert("""
+            INSERT INTO im_message_read_states
+                (user_id, conversation_id, read_seq, pending_read_seq, delivered_seq, unread_count, updated_at)
+            VALUES
+                (#{userId}, #{conversationId}, 0, 0, #{observedMaxSeq}, 0, #{updatedAt})
+            ON DUPLICATE KEY UPDATE
+                read_seq = GREATEST(read_seq,
+                    LEAST(pending_read_seq, delivered_seq, #{observedMaxSeq})),
                 pending_read_seq = CASE
-                    WHEN pending_read_seq <= #{observedMaxSeq} THEN 0
-                    ELSE pending_read_seq
+                    WHEN LEAST(pending_read_seq, delivered_seq) <= #{observedMaxSeq} THEN 0
+                    ELSE LEAST(pending_read_seq, delivered_seq)
                 END,
-                updated_at = CASE WHEN pending_read_seq > 0 THEN #{updatedAt} ELSE updated_at END
-            WHERE user_id = #{userId} AND conversation_id = #{conversationId}
+                delivered_seq = GREATEST(delivered_seq, #{observedMaxSeq}),
+                updated_at = #{updatedAt}
             """)
-    int advanceReadIntentToObservedMaximum(@Param("userId") String userId,
-                                           @Param("conversationId") String conversationId,
-                                           @Param("observedMaxSeq") long observedMaxSeq,
-                                           @Param("updatedAt") long updatedAt);
+    int recordProjectedMaximum(@Param("userId") String userId,
+                               @Param("conversationId") String conversationId,
+                               @Param("observedMaxSeq") long observedMaxSeq,
+                               @Param("updatedAt") long updatedAt);
 }

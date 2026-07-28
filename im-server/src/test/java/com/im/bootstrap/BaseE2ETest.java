@@ -5,9 +5,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.im.api.ApplySource;
 import com.im.config.Config;
 import com.im.config.ConfigLoader;
+import com.im.core.db.DatabaseConfiguration;
 import com.im.core.db.MyBatisPlusFactory;
+import com.im.core.db.SchemaInitializer;
 import com.im.core.db.mapper.FriendMapper;
 import com.im.core.serialization.jackson.ObjectMapperProvider;
+import com.mysql.cj.jdbc.MysqlDataSource;
 import io.lettuce.core.RedisClient;
 import io.lettuce.core.api.StatefulRedisConnection;
 import org.apache.ibatis.session.SqlSession;
@@ -19,6 +22,9 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.WebSocket;
+import java.sql.Connection;
+import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -32,6 +38,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * E2E 测试基类。
@@ -151,6 +158,106 @@ public abstract class BaseE2ETest {
         }
         SET_PROPS.clear();
         log.info("E2E server stopped, system properties cleaned");
+    }
+
+    protected static IsolatedMySqlDatabase openIsolatedMySqlDatabase(
+            String namePrefix, boolean initializeMyBatis) throws Exception {
+        Map<String, String> config = E2ETestConfig.infrastructureDefaults();
+        String databaseName = namePrefix + "_" + Long.toUnsignedString(System.nanoTime(), 36);
+        MysqlDataSource adminDataSource = mysqlDataSource(
+                withDatabase(config.get("im.db.jdbc-url"), ""), config);
+        MysqlDataSource databaseDataSource = mysqlDataSource(
+                withDatabase(config.get("im.db.jdbc-url"), databaseName), config);
+        try (Connection connection = adminDataSource.getConnection(); Statement statement = connection.createStatement()) {
+            statement.execute("DROP DATABASE IF EXISTS `" + databaseName + "`");
+            statement.execute("CREATE DATABASE `" + databaseName
+                    + "` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+        } catch (SQLException e) {
+            assumeTrue(false, "Real MySQL E2E prerequisite unavailable: " + e.getMessage());
+        }
+
+        IsolatedMySqlDatabase fixture = new IsolatedMySqlDatabase(
+                databaseName, adminDataSource, databaseDataSource, initializeMyBatis);
+        if (initializeMyBatis) {
+            try {
+                MyBatisPlusFactory.shutdown();
+                MyBatisPlusFactory.init(new DatabaseConfiguration.Builder()
+                        .jdbcUrl(databaseDataSource.getURL())
+                        .username(config.get("im.db.username"))
+                        .password(config.get("im.db.password"))
+                        .maximumPoolSize(4)
+                        .connectionTimeoutMs(2_000)
+                        .build());
+                SchemaInitializer.initialize(MyBatisPlusFactory.getDataSource(), "auto");
+            } catch (Exception e) {
+                fixture.close();
+                throw e;
+            }
+        }
+        return fixture;
+    }
+
+    protected static final class IsolatedMySqlDatabase implements AutoCloseable {
+        private final String databaseName;
+        private final MysqlDataSource adminDataSource;
+        private final MysqlDataSource dataSource;
+        private final boolean ownsMyBatis;
+
+        private IsolatedMySqlDatabase(String databaseName,
+                                      MysqlDataSource adminDataSource,
+                                      MysqlDataSource dataSource,
+                                      boolean ownsMyBatis) {
+            this.databaseName = databaseName;
+            this.adminDataSource = adminDataSource;
+            this.dataSource = dataSource;
+            this.ownsMyBatis = ownsMyBatis;
+        }
+
+        public MysqlDataSource dataSource() {
+            return dataSource;
+        }
+
+        public void reset() throws SQLException {
+            if (ownsMyBatis) {
+                throw new IllegalStateException("Cannot reset an isolated database while MyBatis owns its pool");
+            }
+            try (Connection connection = adminDataSource.getConnection(); Statement statement = connection.createStatement()) {
+                statement.execute("DROP DATABASE IF EXISTS `" + databaseName + "`");
+                statement.execute("CREATE DATABASE `" + databaseName
+                        + "` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+            }
+        }
+
+        @Override
+        public void close() {
+            if (ownsMyBatis) {
+                MyBatisPlusFactory.shutdown();
+            }
+            try (Connection connection = adminDataSource.getConnection(); Statement statement = connection.createStatement()) {
+                statement.execute("DROP DATABASE IF EXISTS `" + databaseName + "`");
+            } catch (SQLException ignored) {
+                // A test failure already reports the behavior under test; cleanup is best effort.
+            }
+        }
+    }
+
+    private static MysqlDataSource mysqlDataSource(String url, Map<String, String> config) {
+        MysqlDataSource dataSource = new MysqlDataSource();
+        dataSource.setURL(url);
+        dataSource.setUser(config.get("im.db.username"));
+        dataSource.setPassword(config.get("im.db.password"));
+        return dataSource;
+    }
+
+    private static String withDatabase(String jdbcUrl, String database) {
+        int protocol = jdbcUrl.indexOf("://");
+        int path = jdbcUrl.indexOf('/', protocol + 3);
+        if (protocol < 0 || path < 0) {
+            throw new IllegalArgumentException("Unsupported MySQL JDBC URL: " + jdbcUrl);
+        }
+        int query = jdbcUrl.indexOf('?', path);
+        String suffix = query >= 0 ? jdbcUrl.substring(query) : "";
+        return jdbcUrl.substring(0, path + 1) + database + suffix;
     }
 
     // ========== Redis 清理 ==========

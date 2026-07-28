@@ -2,7 +2,6 @@ package com.im.bootstrap;
 
 import com.im.common.exception.DatabasePersistenceException;
 import com.im.core.db.SchemaInitializer;
-import com.mysql.cj.jdbc.MysqlDataSource;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -19,51 +18,34 @@ import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /** Real-MySQL coverage for the explicit Version 2 schema lifecycle. */
 class SchemaMigrationE2ETest extends BaseE2ETest {
 
-    private static final String DATABASE_NAME = "im_schema_migration_e2e_" + Long.toUnsignedString(System.nanoTime());
-    private static MysqlDataSource adminDataSource;
-    private static MysqlDataSource migrationDataSource;
+    private static IsolatedMySqlDatabase mysql;
+    private static DataSource migrationDataSource;
 
     @BeforeAll
-    static void requireMySql() {
-        Map<String, String> config = E2ETestConfig.infrastructureDefaults();
-        String configuredUrl = config.get("im.db.jdbc-url");
-        adminDataSource = dataSource(withDatabase(configuredUrl, ""), config);
-        migrationDataSource = dataSource(withDatabase(configuredUrl, DATABASE_NAME), config);
-        try (Connection connection = adminDataSource.getConnection()) {
-            recreateDatabase(connection);
-        } catch (SQLException e) {
-            assumeTrue(false, "Real MySQL migration prerequisite unavailable: " + e.getMessage());
-        }
+    static void requireMySql() throws Exception {
+        mysql = openIsolatedMySqlDatabase("im_schema_migration_e2e", false);
+        migrationDataSource = mysql.dataSource();
     }
 
     @BeforeEach
     void resetDatabase() throws Exception {
-        try (Connection connection = adminDataSource.getConnection()) {
-            recreateDatabase(connection);
-        }
+        mysql.reset();
     }
 
     @AfterAll
     static void removeDatabase() {
-        if (adminDataSource == null) {
-            return;
-        }
-        try (Connection connection = adminDataSource.getConnection(); Statement statement = connection.createStatement()) {
-            statement.execute("DROP DATABASE IF EXISTS `" + DATABASE_NAME + "`");
-        } catch (SQLException ignored) {
-            // The prerequisite failure is already reported by the test result.
+        if (mysql != null) {
+            mysql.close();
         }
     }
 
@@ -106,6 +88,53 @@ class SchemaMigrationE2ETest extends BaseE2ETest {
                         + "ON r.user_id=e.owner_user_id AND r.conversation_id=e.conversation_id "
                         + "WHERE e.owner_user_id='receiver' AND e.conversation_id='single_receiver_sender' "
                         + "AND e.message_seq > COALESCE(r.read_seq, 0)"));
+    }
+
+    @Test
+    void migrateDoesNotBackfillMessagesBeyondOwnersLegacyProjectionMaximum() throws Exception {
+        createLegacyV11Fixture(migrationDataSource);
+        try (Connection connection = migrationDataSource.getConnection(); Statement statement = connection.createStatement()) {
+            statement.executeUpdate("INSERT INTO im_conversations (owner_user_id, conversation_id, max_seq, unread_count) "
+                    + "VALUES ('receiver', 'single_receiver_sender', 2, 1)");
+            statement.executeUpdate("INSERT INTO im_messages "
+                    + "(client_msg_id, server_msg_id, conversation_id, seq, send_id, recv_id, created_at) VALUES "
+                    + "('inbound-2', 'inbound-2', 'single_receiver_sender', 2, 'sender', 'receiver', 2), "
+                    + "('unprojected-3', 'unprojected-3', 'single_receiver_sender', 3, 'sender', 'receiver', 3)");
+        }
+
+        SchemaInitializer.initialize(migrationDataSource, "migrate");
+
+        assertEquals(1, queryLong(migrationDataSource,
+                "SELECT COUNT(*) FROM im_conversation_projection_events "
+                        + "WHERE owner_user_id='receiver' AND conversation_id='single_receiver_sender'"));
+        assertEquals(0, queryLong(migrationDataSource,
+                "SELECT COUNT(*) FROM im_conversation_projection_events WHERE message_id='unprojected-3'"));
+    }
+
+    @Test
+    void migrateStartsLateGroupMembersProjectionAtOwnersLegacyMinimum() throws Exception {
+        createLegacyV11Fixture(migrationDataSource);
+        try (Connection connection = migrationDataSource.getConnection(); Statement statement = connection.createStatement()) {
+            statement.executeUpdate("INSERT INTO im_conversations "
+                    + "(owner_user_id, conversation_id, conversation_type, group_id, max_seq, unread_count) "
+                    + "VALUES ('late-member', 'group_projection', 2, 'projection', 3, 1)");
+            statement.executeUpdate("INSERT INTO im_seq_users "
+                    + "(user_id, conversation_id, min_seq, max_seq, read_seq, updated_at) "
+                    + "VALUES ('late-member', 'group_projection', 3, 3, 0, 3)");
+            statement.executeUpdate("INSERT INTO im_messages "
+                    + "(client_msg_id, server_msg_id, conversation_id, seq, send_id, group_id, created_at) VALUES "
+                    + "('history-1', 'history-1', 'group_projection', 1, 'member-a', 'projection', 1), "
+                    + "('history-2', 'history-2', 'group_projection', 2, 'member-b', 'projection', 2), "
+                    + "('visible-3', 'visible-3', 'group_projection', 3, 'member-a', 'projection', 3)");
+        }
+
+        SchemaInitializer.initialize(migrationDataSource, "migrate");
+
+        assertEquals(1, queryLong(migrationDataSource,
+                "SELECT COUNT(*) FROM im_conversation_projection_events "
+                        + "WHERE owner_user_id='late-member' AND conversation_id='group_projection'"));
+        assertEquals(1, queryLong(migrationDataSource,
+                "SELECT COUNT(*) FROM im_conversation_projection_events WHERE message_id='visible-3'"));
     }
 
     @Test
@@ -352,30 +381,4 @@ class SchemaMigrationE2ETest extends BaseE2ETest {
         }
     }
 
-    private static MysqlDataSource dataSource(String url, Map<String, String> config) {
-        MysqlDataSource dataSource = new MysqlDataSource();
-        dataSource.setURL(url);
-        dataSource.setUser(config.get("im.db.username"));
-        dataSource.setPassword(config.get("im.db.password"));
-        return dataSource;
-    }
-
-    private static String withDatabase(String jdbcUrl, String database) {
-        int protocol = jdbcUrl.indexOf("://");
-        int path = jdbcUrl.indexOf('/', protocol + 3);
-        if (protocol < 0 || path < 0) {
-            throw new IllegalArgumentException("Unsupported MySQL JDBC URL: " + jdbcUrl);
-        }
-        int query = jdbcUrl.indexOf('?', path);
-        String suffix = query >= 0 ? jdbcUrl.substring(query) : "";
-        return jdbcUrl.substring(0, path + 1) + database + suffix;
-    }
-
-    private static void recreateDatabase(Connection connection) throws SQLException {
-        try (Statement statement = connection.createStatement()) {
-            statement.execute("DROP DATABASE IF EXISTS `" + DATABASE_NAME + "`");
-            statement.execute("CREATE DATABASE `" + DATABASE_NAME
-                    + "` DEFAULT CHARACTER SET utf8mb4 DEFAULT COLLATE utf8mb4_unicode_ci");
-        }
-    }
 }

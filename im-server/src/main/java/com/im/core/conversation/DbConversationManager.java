@@ -122,7 +122,10 @@ public class DbConversationManager implements IConversationManager {
                 seqMapper.upsertMaxSeq(ownerUserId, conversationId, newSeq, now);
 
                 MessageReadStateMapper readMapper = session.getMapper(MessageReadStateMapper.class);
-                readMapper.advanceReadIntentToObservedMaximum(ownerUserId, conversationId, newSeq, now);
+                ConversationEntity projectedConversation =
+                        mapper.selectByUserAndConversation(ownerUserId, conversationId);
+                long observedMaxSeq = projectedConversation != null ? projectedConversation.getMaxSeq() : newSeq;
+                readMapper.recordProjectedMaximum(ownerUserId, conversationId, observedMaxSeq, now);
                 MessageReadStateEntity readState = readMapper.selectByUserConversation(ownerUserId, conversationId);
                 if (readState != null) {
                     seqMapper.updateReadSeq(ownerUserId, conversationId, readState.getReadSeq(), now);
@@ -181,16 +184,25 @@ public class DbConversationManager implements IConversationManager {
         PersistenceExceptions.runDatabase("mark conversation read", () -> retryExecutor.execute(CFG, () -> {
             try (SqlSession session = MyBatisPlusFactory.openSession()) {
                 ConversationMapper mapper = session.getMapper(ConversationMapper.class);
-                ConversationEntity conversation = mapper.selectByUserAndConversation(ownerUserId, conversationId);
-                long observedMaxSeq = conversation != null ? conversation.getMaxSeq() : 0;
+                ConversationEntity conversation =
+                        mapper.selectByUserAndConversationForUpdate(ownerUserId, conversationId);
+                if (conversation == null) {
+                    return null;
+                }
+                long observedMaxSeq = conversation.getMaxSeq();
                 long requestedReadSeq = Math.max(readSeq, 0);
                 long now = System.currentTimeMillis();
                 mapper.updateUpdatedAt(ownerUserId, conversationId, now);
 
                 if (requestedReadSeq > 0) {
                     MessageReadStateMapper readMapper = session.getMapper(MessageReadStateMapper.class);
+                    MessageReadStateEntity existingReadState =
+                            readMapper.selectByUserConversationForUpdate(ownerUserId, conversationId);
+                    long deliveredSeq = existingReadState != null ? existingReadState.getDeliveredSeq() : 0;
+                    long authorizedMaxSeq = Math.max(observedMaxSeq, deliveredSeq);
                     readMapper.recordReadIntent(
-                            ownerUserId, conversationId, requestedReadSeq, observedMaxSeq, now);
+                            ownerUserId, conversationId, requestedReadSeq,
+                            observedMaxSeq, authorizedMaxSeq, now);
                     MessageReadStateEntity readState = readMapper.selectByUserConversation(ownerUserId, conversationId);
                     SeqUserMapper seqMapper = session.getMapper(SeqUserMapper.class);
                     if (readState != null) {

@@ -18,6 +18,11 @@ public interface ConversationMapper extends BaseMapper<ConversationEntity> {
     @Select("SELECT * FROM im_conversations WHERE owner_user_id = #{userId} AND conversation_id = #{conversationId}")
     ConversationEntity selectByUserAndConversation(@Param("userId") String userId, @Param("conversationId") String conversationId);
 
+    @Select("SELECT * FROM im_conversations WHERE owner_user_id = #{userId} "
+            + "AND conversation_id = #{conversationId} FOR UPDATE")
+    ConversationEntity selectByUserAndConversationForUpdate(@Param("userId") String userId,
+                                                             @Param("conversationId") String conversationId);
+
     @Update("UPDATE im_conversations SET max_seq = #{seq}, updated_at = #{time} " +
             "WHERE owner_user_id = #{userId} AND conversation_id = #{conversationId}")
     int updateMaxSeq(@Param("userId") String userId,

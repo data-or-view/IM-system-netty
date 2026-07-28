@@ -2,13 +2,11 @@ package com.im.core.conversation;
 
 import com.im.api.Conversation;
 import com.im.api.Message;
+import com.im.bootstrap.BaseE2ETest;
 import com.im.common.retry.RetryConfig;
 import com.im.common.retry.RetryExecutor;
-import com.im.core.db.DatabaseConfiguration;
 import com.im.core.db.MyBatisPlusFactory;
-import com.im.core.db.SchemaInitializer;
 import com.im.core.sync.DbIncrementalSync;
-import com.mysql.cj.jdbc.MysqlDataSource;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -22,53 +20,32 @@ import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Real-MySQL coverage for monotonic, idempotent conversation projection. */
-class DbConversationManagerProjectionE2ETest {
+class DbConversationManagerProjectionE2ETest extends BaseE2ETest {
 
-    private static final String DATABASE_NAME =
-            "im_conversation_projection_e2e_" + Long.toUnsignedString(System.nanoTime(), 36);
     private static final String OWNER_USER_ID = "projection-receiver";
     private static final String OTHER_USER_ID = "projection-sender";
     private static final String CONVERSATION_ID = "single_projection-receiver_projection-sender";
     private static final RetryExecutor DIRECT_RETRY = new DirectRetryExecutor();
 
-    private static MysqlDataSource adminDataSource;
+    private static IsolatedMySqlDatabase mysql;
     private static CommitObservingSync sync;
     private static DbConversationManager manager;
 
     @BeforeAll
     static void initializeDatabase() throws Exception {
-        String configuredUrl = env(
-                "IM_E2E_MYSQL_JDBC_URL",
-                "IM_IT_MYSQL_JDBC_URL",
-                "jdbc:mysql://127.0.0.1:3306/im_system?useUnicode=true&characterEncoding=utf-8"
-                        + "&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true");
-        String username = env("IM_E2E_MYSQL_USER", "IM_IT_MYSQL_USER", "root");
-        String password = env("IM_E2E_MYSQL_PASSWORD", "IM_IT_MYSQL_PASSWORD", "123456");
-        String databaseUrl = withDatabase(configuredUrl, DATABASE_NAME);
-
-        adminDataSource = dataSource(withDatabase(configuredUrl, ""), username, password);
-        try (Connection connection = adminDataSource.getConnection(); Statement statement = connection.createStatement()) {
-            statement.execute("CREATE DATABASE `" + DATABASE_NAME
-                    + "` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
-        } catch (SQLException e) {
-            assumeTrue(false, "Real MySQL conversation projection prerequisite unavailable: " + e.getMessage());
-        }
-
-        MyBatisPlusFactory.shutdown();
-        MyBatisPlusFactory.init(new DatabaseConfiguration.Builder()
-                .jdbcUrl(databaseUrl)
-                .username(username)
-                .password(password)
-                .maximumPoolSize(4)
-                .connectionTimeoutMs(2_000)
-                .build());
-        SchemaInitializer.initialize(MyBatisPlusFactory.getDataSource(), "auto");
+        mysql = openIsolatedMySqlDatabase("im_conversation_projection_e2e", true);
         sync = new CommitObservingSync(DIRECT_RETRY);
         manager = new DbConversationManager(DIRECT_RETRY, sync);
     }
@@ -89,14 +66,8 @@ class DbConversationManagerProjectionE2ETest {
 
     @AfterAll
     static void removeDatabase() {
-        MyBatisPlusFactory.shutdown();
-        if (adminDataSource == null) {
-            return;
-        }
-        try (Connection connection = adminDataSource.getConnection(); Statement statement = connection.createStatement()) {
-            statement.execute("DROP DATABASE IF EXISTS `" + DATABASE_NAME + "`");
-        } catch (SQLException ignored) {
-            // A test failure already reports the behavior under test; cleanup is best effort.
+        if (mysql != null) {
+            mysql.close();
         }
     }
 
@@ -158,8 +129,38 @@ class DbConversationManagerProjectionE2ETest {
     }
 
     @Test
-    void readIntentAheadOfProjectionIsAppliedWhenTheMessageIsProjected() {
+    void arbitraryFutureReadDoesNotAcknowledgeMessagesAuthorizedLater() {
+        project(inbound("m1", 1, 51, "one"));
+        project(inbound("m2", 2, 52, "two"));
+
+        manager.markRead(OWNER_USER_ID, CONVERSATION_ID, 99);
+        project(inbound("m3", 3, 53, "three"));
+
+        assertEquals(2, manager.getReadSeq(OWNER_USER_ID, CONVERSATION_ID));
+        assertEquals(1, manager.getUnreadCount(OWNER_USER_ID, CONVERSATION_ID));
+    }
+
+    @Test
+    void staleUnboundedPendingReadCannotConsumeNewlyProjectedMessage() throws Exception {
+        project(inbound("m1", 1, 54, "one"));
+        project(inbound("m2", 2, 55, "two"));
+        manager.markRead(OWNER_USER_ID, CONVERSATION_ID, 2);
+        setPendingReadSequence(99);
+
+        project(inbound("m3", 3, 56, "three"));
+
+        assertEquals(2, manager.getReadSeq(OWNER_USER_ID, CONVERSATION_ID));
+        assertEquals(0, queryLong(
+                "SELECT pending_read_seq FROM im_message_read_states "
+                        + "WHERE user_id=? AND conversation_id=?",
+                OWNER_USER_ID, CONVERSATION_ID));
+        assertEquals(1, manager.getUnreadCount(OWNER_USER_ID, CONVERSATION_ID));
+    }
+
+    @Test
+    void readIntentAheadOfProjectionIsAppliedWhenTheAuthorizedMessageIsProjected() throws Exception {
         project(inbound("m1", 1, 41, "first"));
+        authorizeDeliveredSequence(2);
 
         manager.markRead(OWNER_USER_ID, CONVERSATION_ID, 2);
         assertEquals(1, manager.getReadSeq(OWNER_USER_ID, CONVERSATION_ID));
@@ -167,6 +168,45 @@ class DbConversationManagerProjectionE2ETest {
         project(inbound("m2", 2, 42, "arrived after read"));
 
         assertEquals(2, manager.getReadSeq(OWNER_USER_ID, CONVERSATION_ID));
+        assertEquals(0, manager.getUnreadCount(OWNER_USER_ID, CONVERSATION_ID));
+    }
+
+    @Test
+    void concurrentProjectionCannotLeaveAuthorizedReadIntentPending() throws Exception {
+        project(inbound("m1", 1, 61, "first"));
+        authorizeDeliveredSequence(2);
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try (Connection blocker = MyBatisPlusFactory.getDataSource().getConnection();
+             PreparedStatement lockConversation = blocker.prepareStatement(
+                     "SELECT max_seq FROM im_conversations "
+                             + "WHERE owner_user_id=? AND conversation_id=? FOR UPDATE")) {
+            blocker.setAutoCommit(false);
+            lockConversation.setString(1, OWNER_USER_ID);
+            lockConversation.setString(2, CONVERSATION_ID);
+            try (ResultSet result = lockConversation.executeQuery()) {
+                assertTrue(result.next());
+            }
+
+            Future<?> projection = executor.submit(() ->
+                    project(inbound("m2", 2, 62, "second")));
+            assertThrows(TimeoutException.class, () -> projection.get(200, TimeUnit.MILLISECONDS));
+            Future<?> markRead = executor.submit(() ->
+                    manager.markRead(OWNER_USER_ID, CONVERSATION_ID, 2));
+            assertThrows(TimeoutException.class, () -> markRead.get(200, TimeUnit.MILLISECONDS));
+
+            blocker.commit();
+            projection.get(5, TimeUnit.SECONDS);
+            markRead.get(5, TimeUnit.SECONDS);
+        } finally {
+            executor.shutdownNow();
+        }
+
+        assertEquals(2, manager.getReadSeq(OWNER_USER_ID, CONVERSATION_ID));
+        assertEquals(0, queryLong(
+                "SELECT pending_read_seq FROM im_message_read_states "
+                        + "WHERE user_id=? AND conversation_id=?",
+                OWNER_USER_ID, CONVERSATION_ID));
         assertEquals(0, manager.getUnreadCount(OWNER_USER_ID, CONVERSATION_ID));
     }
 
@@ -220,33 +260,28 @@ class DbConversationManagerProjectionE2ETest {
         }
     }
 
-    private static MysqlDataSource dataSource(String url, String username, String password) {
-        MysqlDataSource dataSource = new MysqlDataSource();
-        dataSource.setURL(url);
-        dataSource.setUser(username);
-        dataSource.setPassword(password);
-        return dataSource;
+    private static void authorizeDeliveredSequence(long deliveredSeq) throws SQLException {
+        try (Connection connection = MyBatisPlusFactory.getDataSource().getConnection();
+             PreparedStatement statement = connection.prepareStatement(
+                     "UPDATE im_message_read_states SET delivered_seq=? "
+                             + "WHERE user_id=? AND conversation_id=?")) {
+            statement.setLong(1, deliveredSeq);
+            statement.setString(2, OWNER_USER_ID);
+            statement.setString(3, CONVERSATION_ID);
+            assertEquals(1, statement.executeUpdate());
+        }
     }
 
-    private static String env(String primary, String secondary, String defaultValue) {
-        if (System.getenv().containsKey(primary)) {
-            return System.getenv(primary);
+    private static void setPendingReadSequence(long pendingReadSeq) throws SQLException {
+        try (Connection connection = MyBatisPlusFactory.getDataSource().getConnection();
+             PreparedStatement statement = connection.prepareStatement(
+                     "UPDATE im_message_read_states SET pending_read_seq=? "
+                             + "WHERE user_id=? AND conversation_id=?")) {
+            statement.setLong(1, pendingReadSeq);
+            statement.setString(2, OWNER_USER_ID);
+            statement.setString(3, CONVERSATION_ID);
+            assertEquals(1, statement.executeUpdate());
         }
-        if (System.getenv().containsKey(secondary)) {
-            return System.getenv(secondary);
-        }
-        return defaultValue;
-    }
-
-    private static String withDatabase(String jdbcUrl, String database) {
-        int protocol = jdbcUrl.indexOf("://");
-        int path = jdbcUrl.indexOf('/', protocol + 3);
-        if (protocol < 0 || path < 0) {
-            throw new IllegalArgumentException("Unsupported MySQL JDBC URL: " + jdbcUrl);
-        }
-        int query = jdbcUrl.indexOf('?', path);
-        String suffix = query >= 0 ? jdbcUrl.substring(query) : "";
-        return jdbcUrl.substring(0, path + 1) + database + suffix;
     }
 
     private record ProjectionObservation(long maxSequence, long inboundEventCount) {
