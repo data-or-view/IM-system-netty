@@ -6,6 +6,9 @@ import com.im.api.INodeDiscovery;
 import com.im.api.NodeInformation;
 import com.im.common.lifecycle.Lifecycle;
 import com.im.core.call.CallStateManager;
+import com.im.core.call.SingleCallSession;
+import com.im.core.call.SingleCallStateStore;
+import com.im.core.call.TerminalSignalIntent;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Proxy;
@@ -33,7 +36,7 @@ class ServerRuntimeTest {
                 fake(Lifecycle.class, events, "delivery"),
                 fake(Lifecycle.class, events, "compensator"),
                 fake(Lifecycle.class, events, "transport"),
-                (CallStateManager) null,
+                recordingCallStateManager(events),
                 () -> events.add("connection.shutdown"),
                 () -> events.add("pending.shutdown"),
                 () -> events.add("session.clear"),
@@ -57,6 +60,7 @@ class ServerRuntimeTest {
                 "admission.open",
                 "admission.closeAndDrain",
                 "transport.stop",
+                "call.shutdown",
                 "compensator.stop",
                 "delivery.stop",
                 "persistence.stop",
@@ -67,6 +71,28 @@ class ServerRuntimeTest {
                 "connection.shutdown",
                 "pending.shutdown",
                 "session.clear"), events);
+    }
+
+    private static CallStateManager recordingCallStateManager(List<String> events) {
+        return new CallStateManager(null, new EmptyCallStateStore(), 30, 60_000, 1) {
+            @Override
+            public void shutdown() {
+                super.shutdown();
+                events.add("call.shutdown");
+            }
+        };
+    }
+
+    private static final class EmptyCallStateStore implements SingleCallStateStore {
+        @Override public SingleCallSession getByRoom(String roomId) { return null; }
+        @Override public SingleCallSession getActiveByUser(String userId) { return null; }
+        @Override public SingleCallSession createIfUsersIdle(SingleCallSession session) { return null; }
+        @Override public TerminalSignalIntent getPendingTerminalSignal(String roomId) { return null; }
+        @Override public boolean transitionTerminalSignal(TerminalSignalIntent intent) { return false; }
+        @Override public boolean acknowledgeTerminalSignal(TerminalSignalIntent intent) { return false; }
+        @Override public SingleCallSession accept(String roomId) { return null; }
+        @Override public SingleCallSession timeoutIfRinging(String roomId) { return null; }
+        @Override public SingleCallSession end(String roomId) { return null; }
     }
 
     private static RequestAdmission fakeAdmission(List<String> events) {

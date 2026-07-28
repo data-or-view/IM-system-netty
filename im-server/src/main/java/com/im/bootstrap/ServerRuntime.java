@@ -54,6 +54,7 @@ record ServerRuntime(INodeDiscovery nodeDiscovery,
         // Close network entry points first; the remaining shutdown order keeps routing
         // and persistence dependencies alive while in-flight work is being drained.
         transportServer.stop();
+        if (callStateManager != null) callStateManager.shutdown();
         businessMessageDlqCompensator.stop();
         deliveryConsumer.stop();
         persistenceConsumer.stop();
@@ -62,7 +63,6 @@ record ServerRuntime(INodeDiscovery nodeDiscovery,
         nodeDiscovery.unregister();
         nodeDiscovery.stop();
         connectionShutdown.run();
-        if (callStateManager != null) callStateManager.shutdown();
         pendingAckShutdown.run();
         sessionClear.run();
         if (redisConfig != null) redisConfig.close();

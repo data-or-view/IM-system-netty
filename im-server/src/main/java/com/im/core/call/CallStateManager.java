@@ -178,6 +178,17 @@ public class CallStateManager {
     /** 关闭本节点的扫描器；共享 Redis deadline remains available to other nodes. */
     public void shutdown() {
         timeoutExecutor.shutdown();
+        boolean interrupted = false;
+        while (!timeoutExecutor.isTerminated()) {
+            try {
+                timeoutExecutor.awaitTermination(1, TimeUnit.DAYS);
+            } catch (InterruptedException ignored) {
+                interrupted = true;
+            }
+        }
+        if (interrupted) {
+            Thread.currentThread().interrupt();
+        }
         log.info("CallStateManager timeout scanner shut down");
     }
 

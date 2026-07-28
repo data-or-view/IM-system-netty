@@ -16,12 +16,47 @@ import java.util.ArrayList;
 import java.util.List;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.slf4j.LoggerFactory;
 
 class CallStateManagerTimeoutTest {
+
+    @Test
+    void shutdownWaitsForInFlightTimeoutScanToFinish() throws Exception {
+        CountDownLatch scanEntered = new CountDownLatch(1);
+        CountDownLatch allowScanExit = new CountDownLatch(1);
+        CountDownLatch shutdownStarted = new CountDownLatch(1);
+        BlockingDeadlineStore store = new BlockingDeadlineStore(scanEntered, allowScanExit);
+        CallStateManager manager = new CallStateManager(new RecordingQueue(), store, 30, 1, 1);
+        ExecutorService stopper = Executors.newSingleThreadExecutor();
+
+        try {
+            assertTrue(scanEntered.await(5, TimeUnit.SECONDS), "scheduled timeout scan did not start");
+            var shutdown = stopper.submit(() -> {
+                shutdownStarted.countDown();
+                manager.shutdown();
+            });
+            assertTrue(shutdownStarted.await(5, TimeUnit.SECONDS), "shutdown task did not start");
+
+            assertThrows(TimeoutException.class, () -> shutdown.get(100, TimeUnit.MILLISECONDS),
+                    "shutdown returned while timeout scan was still running");
+
+            allowScanExit.countDown();
+            shutdown.get(5, TimeUnit.SECONDS);
+        } finally {
+            allowScanExit.countDown();
+            manager.shutdown();
+            stopper.shutdownNow();
+        }
+    }
 
     @Test
     void liveNodeClaimsAndPublishesDeadlineCreatedByStoppedNodeExactlyOnce() {
@@ -84,7 +119,7 @@ class CallStateManagerTimeoutTest {
         }
     }
 
-    private static final class InMemoryDeadlineStore implements SingleCallStateStore {
+    private static class InMemoryDeadlineStore implements SingleCallStateStore {
         private SingleCallSession session;
         private SingleCallSession terminalSnapshot;
         private int claimCalls;
@@ -107,6 +142,32 @@ class CallStateManagerTimeoutTest {
             terminalSnapshot = claimed;
             session = null;
             return List.of(claimed);
+        }
+    }
+
+    private static final class BlockingDeadlineStore extends InMemoryDeadlineStore {
+        private final CountDownLatch scanEntered;
+        private final CountDownLatch allowScanExit;
+
+        private BlockingDeadlineStore(CountDownLatch scanEntered, CountDownLatch allowScanExit) {
+            this.scanEntered = scanEntered;
+            this.allowScanExit = allowScanExit;
+        }
+
+        @Override
+        public List<SingleCallSession> claimExpiredRinging(long nowEpochMillis, int limit) {
+            scanEntered.countDown();
+            boolean interrupted = false;
+            while (true) {
+                try {
+                    allowScanExit.await();
+                    break;
+                } catch (InterruptedException ignored) {
+                    interrupted = true;
+                }
+            }
+            if (interrupted) Thread.currentThread().interrupt();
+            return List.of();
         }
     }
 
