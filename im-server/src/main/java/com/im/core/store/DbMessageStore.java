@@ -82,7 +82,7 @@ public class DbMessageStore implements IMessageStore {
                     // 增量同步和向上翻页都走 seq 区间；seq 从 1 开始，防止 0 被当成有效业务序号。
                     long from = Math.max(startSeq, 1);
                     long to = (endSeq <= 0) ? Long.MAX_VALUE : endSeq;
-                    entities = mapper.selectBySeqRange(conversationId, from, to);
+                    entities = mapper.selectBySeqRange(conversationId, from, to, actualLimit);
                 }
 
                 List<Message> result = new ArrayList<>(Math.min(entities.size(), actualLimit));

@@ -19,6 +19,7 @@ import com.im.core.handler.unified.GroupCallHandler;
 import com.im.core.handler.unified.HeartbeatHandler;
 import com.im.core.handler.unified.LoginHandler;
 import com.im.core.handler.unified.MessageHandler;
+import com.im.core.handler.unified.MessageQueryLimits;
 import com.im.core.handler.unified.RegisterHandler;
 import com.im.core.handler.unified.RevokeHandler;
 import com.im.core.handler.unified.SystemMessageHandler;
@@ -84,7 +85,8 @@ final class DispatcherFactory {
         registerInterceptors(dispatcher, config, dependencies);
         registerBusinessHandlers(dispatcher, dependencies, loginUseCase, registerUseCase,
                 conversationAccessChecker, sendMessageUseCase, systemMessagePublishUseCase);
-        registerMessagingHandlers(dispatcher, dependencies, sendMessageUseCase, revokeUseCase, conversationAccessChecker, chatSendPolicy);
+        registerMessagingHandlers(dispatcher, config, dependencies, sendMessageUseCase, revokeUseCase,
+                conversationAccessChecker, chatSendPolicy);
         registerFileHandlers(dispatcher, dependencies);
         return dispatcher;
     }
@@ -156,6 +158,7 @@ final class DispatcherFactory {
     }
 
     private static void registerMessagingHandlers(ApiDispatcher dispatcher,
+                                                  Config config,
                                                   DispatcherDependencies dependencies,
                                                   SendMessageUseCase sendMessageUseCase,
                                                   RevokeUseCase revokeUseCase,
@@ -164,7 +167,8 @@ final class DispatcherFactory {
         dispatcher.registerHandlers(new MessageHandler(
                         dependencies.storage().messageStore(),
                         dependencies.storage().sequenceManager(),
-                        conversationAccessChecker),
+                        conversationAccessChecker,
+                        MessageQueryLimits.from(config)),
                 Operation.CHAT_PULL, Operation.CHAT_SEQ, Operation.CHAT_SYNC, Operation.CHAT_SEARCH);
 
         ChatHandler chatHandler = new ChatHandler(

@@ -11,6 +11,7 @@ import com.im.api.RequestHandler;
 import com.im.api.SearchMessagesParam;
 import com.im.api.SearchMessagesResult;
 import com.im.common.exception.NotFoundException;
+import com.im.common.exception.ValidationException;
 import com.im.common.validation.Preconditions;
 import com.im.core.serialization.jackson.ObjectMapperProvider;
 
@@ -36,16 +37,23 @@ public class MessageHandler implements RequestHandler {
     private final IMessageStore messageStore;
     private final ISequenceManager sequenceManager;
     private final IConversationAccessChecker accessChecker;
+    private final MessageQueryLimits queryLimits;
 
     public MessageHandler(IMessageStore messageStore, ISequenceManager sequenceManager) {
-        this(messageStore, sequenceManager, null);
+        this(messageStore, sequenceManager, null, MessageQueryLimits.defaults());
     }
 
     public MessageHandler(IMessageStore messageStore, ISequenceManager sequenceManager,
                           IConversationAccessChecker accessChecker) {
+        this(messageStore, sequenceManager, accessChecker, MessageQueryLimits.defaults());
+    }
+
+    public MessageHandler(IMessageStore messageStore, ISequenceManager sequenceManager,
+                          IConversationAccessChecker accessChecker, MessageQueryLimits queryLimits) {
         this.messageStore = messageStore;
         this.sequenceManager = sequenceManager;
         this.accessChecker = accessChecker;
+        this.queryLimits = queryLimits;
     }
 
     @Override
@@ -66,11 +74,12 @@ public class MessageHandler implements RequestHandler {
         String conversationId = req.getString("conversationId");
         conversationId = Preconditions.requireText(conversationId, "conversationId");
         requireReadable(userId, conversationId);
-        long startSeq = req.getInt("startSeq", 0);
-        long endSeq = req.getInt("endSeq", 0);
-        int limit = req.getInt("limit", 50);
+        long startSeq = req.getLong("startSeq", 0);
+        long endSeq = req.getLong("endSeq", 0);
+        long boundedEndSeq = endSeq <= 0 ? Long.MAX_VALUE : endSeq;
+        int limit = queryLimits.clampPullLimit(req.getInt("limit", 50));
 
-        var messages = messageStore.pullBySequence(conversationId, startSeq, endSeq, limit);
+        var messages = messageStore.pullBySequence(conversationId, startSeq, boundedEndSeq, limit);
         long maxSeq = sequenceManager.getMaximumSequence(conversationId);
         return Map.of("conversationId", conversationId, "messages", toMapList(messages),
                 "count", messages.size(), "maxSeq", maxSeq);
@@ -97,11 +106,14 @@ public class MessageHandler implements RequestHandler {
     private Object handleSync(ApiRequest req) {
         String userId = RequestPreconditions.requireUser(req);
         Map<String, Object> seqsRaw = (Map<String, Object>) req.params().get("seqs");
-        int limit = req.getInt("limit", 50);
+        int limit = queryLimits.clampPullLimit(req.getInt("limit", 50));
 
         // 客户端没有上报会话水位时不主动展开所有会话，避免一次上线同步退化成全量扫描。
         if (seqsRaw == null || seqsRaw.isEmpty()) {
             return Map.of("syncs", List.of());
+        }
+        if (seqsRaw.size() > queryLimits.maxSyncConversations()) {
+            throw new ValidationException("seqs exceeds maximum conversation count");
         }
 
         List<Map<String, Object>> syncs = new ArrayList<>(seqsRaw.size());
@@ -112,7 +124,7 @@ public class MessageHandler implements RequestHandler {
             long lastSeq = entry.getValue() instanceof Number
                     ? ((Number) entry.getValue()).longValue() : 0;
 
-            var messages = messageStore.pullBySequence(convId, lastSeq + 1, 0, limit);
+            var messages = messageStore.pullBySequence(convId, lastSeq + 1, Long.MAX_VALUE, limit);
             long maxSeq = sequenceManager.getMaximumSequence(convId);
             syncs.add(Map.of(
                     "conversationId", convId,

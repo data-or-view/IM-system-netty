@@ -85,6 +85,14 @@ im:
   idempotency:
     send-expire-seconds: 86400   # 发送消息 clientMsgId 幂等记录保留 24 小时
 
+  # ── 消息查询边界 ──
+  # 客户端驱动的拉取和增量同步必须在 handler 和 SQL 查询两层保持有界。
+  message:
+    pull:
+      max-limit: 100
+    sync:
+      max-conversations: 20
+
   # ── Redis 集群限流 ──
   # 所有限流 key 都写 Redis，集群多节点共享；不要在生产路径改成本地内存限流。
   # fail-open=false 表示 Redis 限流不可用时拒绝高风险请求，企业默认优先保护系统。
@@ -124,6 +132,16 @@ im:
         window-seconds: 60
       user-group:
         limit: 60
+        window-seconds: 60
+
+    # 消息查询：按认证用户在 Redis 中跨节点计数。
+    chat-pull:
+      user:
+        limit: 60
+        window-seconds: 60
+    chat-sync:
+      user:
+        limit: 20
         window-seconds: 60
 
     # 好友申请：限制单用户总申请量，也限制对同一目标用户反复申请。

@@ -61,6 +61,23 @@ class RateLimitPolicyTest {
     }
 
     @Test
+    void messageQueriesUseAuthenticatedUserRules() {
+        RateLimitPolicy policy = RateLimitPolicy.defaults("im:rl:test:");
+        ApiRequest pull = authenticated(Operation.CHAT_PULL, "u1", Map.of());
+        ApiRequest sync = authenticated(Operation.CHAT_SYNC, "u1", Map.of());
+
+        RateLimitRule pullRule = policy.rulesFor(pull).stream().findFirst().orElseThrow();
+        RateLimitRule syncRule = policy.rulesFor(sync).stream().findFirst().orElseThrow();
+
+        assertEquals("chat-pull.user", pullRule.name());
+        assertEquals(60, pullRule.limit());
+        assertEquals("im:rl:test:chat-pull.user:user:u1", pullRule.key(pull));
+        assertEquals("chat-sync.user", syncRule.name());
+        assertEquals(20, syncRule.limit());
+        assertEquals("im:rl:test:chat-sync.user:user:u1", syncRule.key(sync));
+    }
+
+    @Test
     void configCanOverrideDefaultLimitsWithoutChangingCode() {
         TestConfig config = new TestConfig(Map.of(
                 "im.rate-limit.key-prefix", "im:rl:override:",

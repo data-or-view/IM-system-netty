@@ -82,6 +82,11 @@ public final class RateLimitPolicy {
                 rule("chat-send-group.user-group", RateLimitScope.USER_GROUP, 60, Duration.ofMinutes(1), RateLimitPolicy::userGroup,
                         Operation.CHAT_SEND_GROUP),
 
+                rule("chat-pull.user", RateLimitScope.USER, 60, Duration.ofMinutes(1), RateLimitPolicy::userId,
+                        Operation.CHAT_PULL),
+                rule("chat-sync.user", RateLimitScope.USER, 20, Duration.ofMinutes(1), RateLimitPolicy::userId,
+                        Operation.CHAT_SYNC),
+
                 rule("friend-apply.user", RateLimitScope.USER, 30, Duration.ofHours(1), RateLimitPolicy::userId,
                         Operation.FRIEND_APPLY),
                 rule("friend-apply.user-target", RateLimitScope.USER_TARGET, 3, Duration.ofHours(24), RateLimitPolicy::userTarget,

@@ -26,10 +26,11 @@ public interface MessageMapper extends BaseMapper<MessageEntity> {
     @Select("SELECT * FROM im_messages WHERE conversation_id = #{conversationId} AND seq = #{seq}")
     MessageEntity selectBySeq(@Param("conversationId") String conversationId, @Param("seq") long seq);
 
-    @Select("SELECT * FROM im_messages WHERE conversation_id = #{conversationId} AND seq BETWEEN #{from} AND #{to} ORDER BY seq ASC")
+    @Select("SELECT * FROM im_messages WHERE conversation_id = #{conversationId} AND seq BETWEEN #{from} AND #{to} ORDER BY seq ASC LIMIT #{limit}")
     List<MessageEntity> selectBySeqRange(@Param("conversationId") String conversationId,
                                           @Param("from") long from,
-                                          @Param("to") long to);
+                                          @Param("to") long to,
+                                          @Param("limit") int limit);
 
     @Select("""
             SELECT m.* FROM im_messages m
