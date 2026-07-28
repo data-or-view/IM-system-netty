@@ -26,15 +26,15 @@ public interface ConversationMapper extends BaseMapper<ConversationEntity> {
                      @Param("time") long time);
 
     @Insert("INSERT INTO im_conversations (owner_user_id, conversation_id, conversation_type, " +
-            "user_id, group_id, attached_info, max_seq, unread_count, updated_at) " +
+            "user_id, group_id, attached_info, max_seq, unread_count, created_at, updated_at) " +
             "VALUES (#{ownerUserId}, #{conversationId}, #{convType}, COALESCE(#{userId}, ''), COALESCE(#{groupId}, ''), " +
-            "#{attachedInfo}, #{newSeq}, 0, #{now}) " +
+            "#{attachedInfo}, #{newSeq}, 0, #{now}, #{now}) " +
             "ON DUPLICATE KEY UPDATE " +
             "user_id = VALUES(user_id), " +
             "group_id = VALUES(group_id), " +
-            "max_seq = VALUES(max_seq), " +
-            "attached_info = VALUES(attached_info), " +
-            "updated_at = VALUES(updated_at)")
+            "attached_info = CASE WHEN VALUES(max_seq) > max_seq THEN VALUES(attached_info) ELSE attached_info END, " +
+            "updated_at = CASE WHEN VALUES(max_seq) > max_seq THEN VALUES(updated_at) ELSE updated_at END, " +
+            "max_seq = GREATEST(max_seq, VALUES(max_seq))")
     int upsertConversation(@Param("ownerUserId") String ownerUserId,
                            @Param("conversationId") String conversationId,
                            @Param("convType") int convType,

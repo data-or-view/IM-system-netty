@@ -12,8 +12,8 @@ import com.im.api.MessageReceiveOption;
 import com.im.core.db.MyBatisPlusFactory;
 import com.im.core.db.entity.ConversationEntity;
 import com.im.core.db.entity.MessageReadStateEntity;
-import com.im.core.db.entity.SeqUserEntity;
 import com.im.core.db.mapper.ConversationMapper;
+import com.im.core.db.mapper.ConversationProjectionEventMapper;
 import com.im.core.db.mapper.MessageReadStateMapper;
 import com.im.core.db.mapper.SeqUserMapper;
 import com.im.core.sync.DbIncrementalSync;
@@ -37,7 +37,7 @@ import java.util.stream.Collectors;
  * <p>基于 MyBatis-Plus 操作 {@code im_conversations} 表。
  * 每个用户独立拥有会话视图，通过 {@code owner_user_id} 隔离。</p>
  *
- * <p>未读数通过 {@code im_message_read_states.read_seq} 与 {@code max_seq} 差值计算。</p>
+ * <p>未读数来自已读位置之后的去重入站投影事件。</p>
  */
 public class DbConversationManager implements IConversationManager {
 
@@ -89,6 +89,8 @@ public class DbConversationManager implements IConversationManager {
         PersistenceExceptions.runDatabase("update conversation on message", () -> retryExecutor.execute(CFG, () -> {
             try (SqlSession session = MyBatisPlusFactory.openSession()) {
                 ConversationMapper mapper = session.getMapper(ConversationMapper.class);
+                ConversationProjectionEventMapper projectionMapper =
+                        session.getMapper(ConversationProjectionEventMapper.class);
 
                 String attachedInfo = buildAttachedInfo(msg);
 
@@ -103,7 +105,7 @@ public class DbConversationManager implements IConversationManager {
                 }
 
                 long now = System.currentTimeMillis();
-                long newSeq = msg.getSequenceId();
+                long newSeq = msg.getMessageSeq();
 
                 mapper.upsertConversation(
                         ownerUserId, conversationId, convType.getCode(),
@@ -112,10 +114,12 @@ public class DbConversationManager implements IConversationManager {
                 );
 
                 if (!isSelf) {
-                    mapper.incrementUnread(ownerUserId, conversationId);
+                    projectionMapper.insertInboundIfAbsent(
+                            ownerUserId, conversationId, msg.getMessageId(), newSeq, now);
                 }
 
-                ensureSeqUser(session, ownerUserId, conversationId, newSeq);
+                SeqUserMapper seqMapper = session.getMapper(SeqUserMapper.class);
+                seqMapper.upsertMaxSeq(ownerUserId, conversationId, newSeq, now);
 
                 session.commit();
             }
@@ -170,12 +174,18 @@ public class DbConversationManager implements IConversationManager {
         PersistenceExceptions.runDatabase("mark conversation read", () -> retryExecutor.execute(CFG, () -> {
             try (SqlSession session = MyBatisPlusFactory.openSession()) {
                 ConversationMapper mapper = session.getMapper(ConversationMapper.class);
-                mapper.resetUnread(ownerUserId, conversationId);
-                mapper.updateUpdatedAt(ownerUserId, conversationId, System.currentTimeMillis());
+                ConversationEntity conversation = mapper.selectByUserAndConversation(ownerUserId, conversationId);
+                long observedMaxSeq = conversation != null ? conversation.getMaxSeq() : 0;
+                long clampedReadSeq = Math.min(Math.max(readSeq, 0), observedMaxSeq);
+                long now = System.currentTimeMillis();
+                mapper.updateUpdatedAt(ownerUserId, conversationId, now);
 
-                if (readSeq > 0) {
+                if (clampedReadSeq > 0) {
                     MessageReadStateMapper readMapper = session.getMapper(MessageReadStateMapper.class);
-                    readMapper.upsertState(ownerUserId, conversationId, readSeq, readSeq, 0, System.currentTimeMillis());
+                    readMapper.upsertState(
+                            ownerUserId, conversationId, clampedReadSeq, clampedReadSeq, 0, now);
+                    SeqUserMapper seqMapper = session.getMapper(SeqUserMapper.class);
+                    seqMapper.updateReadSeq(ownerUserId, conversationId, clampedReadSeq, now);
                 }
 
                 session.commit();
@@ -365,34 +375,9 @@ public class DbConversationManager implements IConversationManager {
         return conv;
     }
 
-    private void ensureSeqUser(SqlSession session, String userId, String conversationId, long newSeq) {
-        SeqUserMapper seqMapper = session.getMapper(SeqUserMapper.class);
-        SeqUserEntity existing = seqMapper.selectByUserAndConversation(userId, conversationId);
-        if (existing == null) {
-            SeqUserEntity su = new SeqUserEntity();
-            su.setUserId(userId);
-            su.setConversationId(conversationId);
-            su.setMinSeq(newSeq);
-            su.setMaxSeq(newSeq);
-            su.setReadSeq(0);
-            su.setUpdatedAt(System.currentTimeMillis());
-            seqMapper.insert(su);
-        } else if (newSeq > existing.getMaxSeq()) {
-            existing.setMaxSeq(newSeq);
-            existing.setUpdatedAt(System.currentTimeMillis());
-            seqMapper.updateById(existing);
-        }
-    }
-
     private long computeUnreadCount(SqlSession session, ConversationEntity e) {
-        MessageReadStateMapper readMapper = session.getMapper(MessageReadStateMapper.class);
-        MessageReadStateEntity state = readMapper.selectByUserConversation(
-                e.getOwnerUserId(), e.getConversationId());
-        if (state == null) {
-            return e.getMaxSeq() > 0 ? 1 : 0;
-        }
-        long unread = e.getMaxSeq() - state.getReadSeq();
-        return Math.max(unread, 0);
+        ConversationProjectionEventMapper mapper = session.getMapper(ConversationProjectionEventMapper.class);
+        return mapper.countUnreadAfter(e.getOwnerUserId(), e.getConversationId());
     }
 
     private void parseAttachedInfo(Conversation conv, String attachedInfo) {

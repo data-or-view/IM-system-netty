@@ -17,6 +17,7 @@ import org.slf4j.LoggerFactory;
 
 import com.im.core.db.mapper.BlacklistMapper;
 import com.im.core.db.mapper.ConversationMapper;
+import com.im.core.db.mapper.ConversationProjectionEventMapper;
 import com.im.core.db.mapper.FriendMapper;
 import com.im.core.db.mapper.FriendRequestMapper;
 import com.im.core.db.mapper.GroupMapper;
@@ -177,6 +178,7 @@ public final class MyBatisPlusFactory {
         configuration.addMapper(GroupMemberMapper.class);
         configuration.addMapper(GroupRequestMapper.class);
         configuration.addMapper(ConversationMapper.class);
+        configuration.addMapper(ConversationProjectionEventMapper.class);
         configuration.addMapper(MessageMapper.class);
         configuration.addMapper(MessageReadStateMapper.class);
         configuration.addMapper(MessageSendFailureMapper.class);
