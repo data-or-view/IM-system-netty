@@ -102,8 +102,41 @@ public class SendMessageUseCase {
         return handleSingleChat(params, fromUserId, toUserId, content);
     }
 
+    /**
+     * Runs every veto-capable single-message check before a caller commits an
+     * external state transition. The normal execute path performs the same
+     * checks immediately before publishing.
+     */
+    public void preflightSingle(Map<String, Object> params, String fromUserId,
+                                String toUserId, IMessageContent content) {
+        if (fromUserId == null || toUserId == null) {
+            throw new ForbiddenException("message sending blocked");
+        }
+        requireClientMsgId(params);
+        if (sendPolicy != null) {
+            sendPolicy.requireCanSendSingle(fromUserId, toUserId);
+        }
+        if (!webhookService.beforeSendSingle(params, fromUserId, toUserId, content)) {
+            throw new ForbiddenException("message sending blocked");
+        }
+    }
+
+    /** Publishes a single message after {@link #preflightSingle} has succeeded. */
+    public SendMessageResult executePreparedSingle(Map<String, Object> params, String fromUserId,
+                                                   String toUserId, IMessageContent content) {
+        if (fromUserId == null || toUserId == null) {
+            return null;
+        }
+        return handleSingleChat(params, fromUserId, toUserId, content, true);
+    }
+
     private SendMessageResult handleSingleChat(Map<String, Object> params, String fromUserId,
                                                 String toUserId, IMessageContent content) {
+        return handleSingleChat(params, fromUserId, toUserId, content, false);
+    }
+
+    private SendMessageResult handleSingleChat(Map<String, Object> params, String fromUserId,
+                                                String toUserId, IMessageContent content, boolean preflighted) {
         if (toUserId == null) return null;
 
         String conversationId = ConversationIds.single(fromUserId, toUserId);
@@ -111,11 +144,8 @@ public class SendMessageUseCase {
         String idempotencyKey = idempotencyKey(fromUserId, conversationId, clientMsgId);
 
         return sendMessageIdempotency.execute(idempotencyKey, () -> {
-            if (sendPolicy != null) {
-                sendPolicy.requireCanSendSingle(fromUserId, toUserId);
-            }
-            if (!webhookService.beforeSendSingle(params, fromUserId, toUserId, content)) {
-                throw new ForbiddenException("message sending blocked");
+            if (!preflighted) {
+                preflightSingle(params, fromUserId, toUserId, content);
             }
 
             SendMessageResult result = publishMessage(params, fromUserId, toUserId, null,

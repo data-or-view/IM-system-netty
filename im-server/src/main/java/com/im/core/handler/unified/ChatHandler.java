@@ -78,10 +78,15 @@ public class ChatHandler implements RequestHandler {
                 return handleInvite(req.params(), uid, toUserId, signal);
             }
             if (callStateManager != null) {
-                if (sendPolicy != null) {
-                    sendPolicy.requireCanSendSingle(uid, toUserId);
-                }
+                sendMessageUseCase.preflightSingle(req.params(), uid, toUserId, content);
                 callStateManager.transitionSignal(uid, toUserId, signal);
+                SendMessageResult result = sendMessageUseCase.executePreparedSingle(
+                        req.params(), uid, toUserId, content);
+                if (result == null) {
+                    throw new ForbiddenException("message sending blocked");
+                }
+                return Map.of("status", result.status(), "messageId", result.messageId(),
+                        "conversationId", result.conversationId(), "seq", result.seq());
             }
         }
 
