@@ -15,6 +15,8 @@ import com.im.common.exception.ValidationException;
 import com.im.common.validation.Preconditions;
 import com.im.core.serialization.jackson.ObjectMapperProvider;
 
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -33,6 +35,7 @@ import java.util.stream.Collectors;
 public class MessageHandler implements RequestHandler {
 
     private static final ObjectMapper MAPPER = ObjectMapperProvider.get();
+    private static final BigInteger MAX_SYNC_WATERMARK = BigInteger.valueOf(Long.MAX_VALUE);
 
     private final IMessageStore messageStore;
     private final ISequenceManager sequenceManager;
@@ -121,11 +124,7 @@ public class MessageHandler implements RequestHandler {
             String convId = entry.getKey();
             // seqs 完全来自客户端，逐个会话做可读校验，防止用户伪造 conversationId 批量探测消息。
             requireReadable(userId, convId);
-            long lastSeq = entry.getValue() instanceof Number
-                    ? ((Number) entry.getValue()).longValue() : 0;
-            if (lastSeq == Long.MAX_VALUE) {
-                throw new ValidationException("lastSeq must be less than Long.MAX_VALUE");
-            }
+            long lastSeq = parseSyncWatermark(entry.getValue());
 
             var messages = messageStore.pullBySequence(convId, lastSeq + 1, Long.MAX_VALUE, limit);
             long maxSeq = sequenceManager.getMaximumSequence(convId);
@@ -137,6 +136,38 @@ public class MessageHandler implements RequestHandler {
         }
 
         return Map.of("syncs", syncs);
+    }
+
+    private long parseSyncWatermark(Object rawValue) {
+        if (!(rawValue instanceof Number number)) {
+            return 0;
+        }
+        try {
+            BigInteger watermark = toExactInteger(number);
+            if (watermark.signum() < 0 || watermark.compareTo(MAX_SYNC_WATERMARK) >= 0) {
+                throw new ValidationException("lastSeq must be between 0 and Long.MAX_VALUE exclusive");
+            }
+            return watermark.longValueExact();
+        } catch (ArithmeticException | NumberFormatException e) {
+            throw new ValidationException("lastSeq must be a non-negative integral long", e);
+        }
+    }
+
+    private BigInteger toExactInteger(Number number) {
+        if (number instanceof BigInteger value) {
+            return value;
+        }
+        if (number instanceof BigDecimal value) {
+            return value.toBigIntegerExact();
+        }
+        if (number instanceof Double || number instanceof Float) {
+            double value = number.doubleValue();
+            if (!Double.isFinite(value)) {
+                throw new NumberFormatException("lastSeq must be finite");
+            }
+            return BigDecimal.valueOf(value).toBigIntegerExact();
+        }
+        return new BigDecimal(number.toString()).toBigIntegerExact();
     }
 
     @SuppressWarnings("unchecked")

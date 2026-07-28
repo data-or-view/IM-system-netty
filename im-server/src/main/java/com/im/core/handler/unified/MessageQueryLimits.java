@@ -12,10 +12,14 @@ public record MessageQueryLimits(int maxPullLimit, int maxSyncConversations) {
 
     public static final int DEFAULT_MAX_PULL_LIMIT = 100;
     public static final int DEFAULT_MAX_SYNC_CONVERSATIONS = 20;
+    public static final int MAX_SUPPORTED_PULL_LIMIT = 200;
 
     public MessageQueryLimits {
         if (maxPullLimit <= 0) {
             throw new IllegalArgumentException("maxPullLimit must be positive");
+        }
+        if (maxPullLimit > MAX_SUPPORTED_PULL_LIMIT) {
+            throw new IllegalArgumentException("maxPullLimit must not exceed " + MAX_SUPPORTED_PULL_LIMIT);
         }
         if (maxSyncConversations <= 0) {
             throw new IllegalArgumentException("maxSyncConversations must be positive");

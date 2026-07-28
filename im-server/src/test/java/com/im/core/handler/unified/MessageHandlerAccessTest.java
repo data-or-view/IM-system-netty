@@ -15,6 +15,7 @@ import com.im.core.db.mapper.MessageMapper;
 import org.apache.ibatis.annotations.Select;
 import org.junit.jupiter.api.Test;
 
+import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -155,6 +156,19 @@ class MessageHandlerAccessTest {
     }
 
     @Test
+    void syncRejectsOutOfRangeBigIntegerWatermarkBeforeNarrowing() {
+        RecordingMessageStore store = new RecordingMessageStore();
+        MessageHandler handler = new MessageHandler(store, new FixedSequenceManager());
+
+        assertThrows(ValidationException.class,
+                () -> handler.handle(request(Operation.CHAT_SYNC,
+                        Map.of("seqs", Map.of("single_alice_bob",
+                                new BigInteger("9223372036854775808"))), "alice")));
+
+        assertEquals(0, store.pullCalls);
+    }
+
+    @Test
     void sequenceRangeMapperHasDatabaseLimitParameter() throws NoSuchMethodException {
         Select select = MessageMapper.class
                 .getMethod("selectBySeqRange", String.class, long.class, long.class, int.class)
@@ -173,6 +187,13 @@ class MessageHandlerAccessTest {
         assertEquals(7, limits.maxPullLimit());
         assertEquals(3, limits.maxSyncConversations());
         assertEquals(7, limits.clampPullLimit(8));
+    }
+
+    @Test
+    void queryLimitsRejectConfiguredPullMaximumAbovePersistenceCap() {
+        assertThrows(IllegalArgumentException.class, () -> MessageQueryLimits.from(new TestConfig(Map.of(
+                "im.message.pull.max-limit", "201"
+        ))));
     }
 
     private static Map<String, Object> syncSeqs(int count) {
