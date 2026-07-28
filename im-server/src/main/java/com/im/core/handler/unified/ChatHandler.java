@@ -15,6 +15,7 @@ import com.im.common.exception.ValidationException;
 import com.im.common.exception.ForbiddenException;
 import com.im.core.call.SingleCallSession;
 import com.im.core.call.CallStateManager;
+import com.im.core.call.TerminalSignalIntent;
 import com.im.core.handler.ContentParser;
 import com.im.core.usecase.SendMessageResult;
 import com.im.core.usecase.SendMessageUseCase;
@@ -78,13 +79,19 @@ public class ChatHandler implements RequestHandler {
                 return handleInvite(req.params(), uid, toUserId, signal);
             }
             if (callStateManager != null) {
-                sendMessageUseCase.preflightSingle(req.params(), uid, toUserId, content);
-                callStateManager.transitionSignal(uid, toUserId, signal);
+                String clientMsgId = sendMessageUseCase.preflightSingle(req.params(), uid, toUserId, content);
+                TerminalSignalIntent pending = callStateManager.requirePendingSignalCompatible(
+                        uid, toUserId, signal, clientMsgId);
+                TerminalSignalIntent intent = newTerminalIntent(uid, toUserId, signal, clientMsgId);
                 SendMessageResult result = sendMessageUseCase.executePreparedSingle(
-                        req.params(), uid, toUserId, content);
+                        req.params(), uid, toUserId, content,
+                        pending != null ? pending.message() : null,
+                        message -> callStateManager.transitionSignal(
+                                uid, toUserId, signal, clientMsgId, message, pending));
                 if (result == null) {
                     throw new ForbiddenException("message sending blocked");
                 }
+                callStateManager.acknowledgeSignal(intent);
                 return Map.of("status", result.status(), "messageId", result.messageId(),
                         "conversationId", result.conversationId(), "seq", result.seq());
             }
@@ -154,5 +161,14 @@ public class ChatHandler implements RequestHandler {
 
     private String normalizeCallType(String callType) {
         return "video".equalsIgnoreCase(callType) ? "video" : "voice";
+    }
+
+    private TerminalSignalIntent newTerminalIntent(String actorId, String peerUserId,
+                                                   SignalingContent signal, String clientMsgId) {
+        return switch (signal.getAction()) {
+            case ACCEPT, REJECT, CANCEL, HANGUP -> new TerminalSignalIntent(
+                    signal.getRoomId(), actorId, peerUserId, signal.getAction(), clientMsgId);
+            default -> null;
+        };
     }
 }

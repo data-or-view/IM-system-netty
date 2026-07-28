@@ -122,22 +122,52 @@ public class CallStateManager {
         }
     }
 
-    /**
-     * Atomically wins the call-state transition before its terminal signal is persisted.
-     */
-    public SingleCallSession transitionSignal(String actorId, String peerUserId, SignalingContent signal) {
-        requireCanSendSignal(actorId, peerUserId, signal);
+    public TerminalSignalIntent requirePendingSignalCompatible(String actorId, String peerUserId,
+                                                               SignalingContent signal, String clientMsgId) {
+        if (!isTerminal(signal)) return null;
         String roomId = requireRoomId(signal);
-        SingleCallSession transitioned = switch (signal.getAction()) {
-            case ACCEPT -> stateStore.acceptBy(roomId, actorId);
-            case REJECT, CANCEL, HANGUP -> stateStore.endBy(roomId, actorId);
-            case ICE -> stateStore.getByRoom(roomId);
-            default -> null;
-        };
-        if (transitioned == null) {
+        TerminalSignalIntent pending = stateStore.getPendingTerminalSignal(roomId);
+        byte[] serializedContent = ContentSerializer.toBytes(signal);
+        if (pending != null && !pending.matchesRequest(
+                actorId, peerUserId, signal.getAction(), clientMsgId, serializedContent)) {
+            throw new ConflictException("another terminal call signal is pending delivery");
+        }
+        return pending;
+    }
+
+    /** Atomically wins or resumes the exact terminal transition intent. */
+    public TerminalSignalIntent transitionSignal(String actorId, String peerUserId,
+                                                 SignalingContent signal, String clientMsgId,
+                                                 Message preparedMessage, TerminalSignalIntent replayIntent) {
+        String roomId = requireRoomId(signal);
+        if (!isTerminal(signal)) {
+            requireCanSendSignal(actorId, peerUserId, signal);
+            if (stateStore.getByRoom(roomId) == null) {
+                throw new ConflictException("call state changed before signal could be applied");
+            }
+            return null;
+        }
+        TerminalSignalIntent intent = replayIntent != null
+                ? replayIntent
+                : TerminalSignalIntent.withMessage(
+                roomId, actorId, peerUserId, signal.getAction(), clientMsgId, preparedMessage);
+
+        TerminalSignalIntent pending = stateStore.getPendingTerminalSignal(roomId);
+        if (pending == null) {
+            requireCanSendSignal(actorId, peerUserId, signal);
+        } else if (!pending.equals(intent)) {
+            throw new ConflictException("another terminal call signal is pending delivery");
+        }
+        if (!stateStore.transitionTerminalSignal(intent)) {
             throw new ConflictException("call state changed before signal could be applied");
         }
-        return transitioned;
+        return intent;
+    }
+
+    public void acknowledgeSignal(TerminalSignalIntent intent) {
+        if (intent != null) {
+            stateStore.acknowledgeTerminalSignal(intent);
+        }
     }
 
     /** 主叫取消。 */
@@ -170,6 +200,12 @@ public class CallStateManager {
             throw new ValidationException("roomId is required for call signal");
         }
         return roomId;
+    }
+
+    private boolean isTerminal(SignalingContent signal) {
+        SignalingAction action = signal != null ? signal.getAction() : null;
+        return action == SignalingAction.ACCEPT || action == SignalingAction.REJECT
+                || action == SignalingAction.CANCEL || action == SignalingAction.HANGUP;
     }
 
     private void requireParticipant(SingleCallSession session, String userId) {

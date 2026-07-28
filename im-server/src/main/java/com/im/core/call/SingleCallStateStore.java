@@ -10,6 +10,17 @@ public interface SingleCallStateStore {
 
     SingleCallSession createIfUsersIdle(SingleCallSession session);
 
+    TerminalSignalIntent getPendingTerminalSignal(String roomId);
+
+    /**
+     * Atomically applies a terminal call transition and records its exact
+     * message intent, or resumes an already-recorded equivalent intent.
+     */
+    boolean transitionTerminalSignal(TerminalSignalIntent intent);
+
+    /** Removes the pending intent only when every identity field still matches. */
+    boolean acknowledgeTerminalSignal(TerminalSignalIntent intent);
+
     SingleCallSession accept(String roomId);
 
     default SingleCallSession acceptBy(String roomId, String actorId) {

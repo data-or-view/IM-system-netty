@@ -223,7 +223,11 @@ final class ServerComponentsFactory {
         }
 
         CallStateManager callStateManager = callManager != null
-                ? new CallStateManager(messageQueue, new RedisSingleCallStateStore(redisConfig),
+                ? new CallStateManager(messageQueue, new RedisSingleCallStateStore(
+                redisConfig,
+                Duration.ofSeconds(config.getLong(
+                        "im.idempotency.send-expire-seconds",
+                        BootstrapDefaults.SEND_IDEMPOTENCY_TTL_SECONDS))),
                 config.getLong("im.call.timeout-seconds", 30),
                 config.getLong("im.call.timeout-scan-interval-ms", 1_000),
                 config.getInt("im.call.timeout-scan-batch-size", 100),

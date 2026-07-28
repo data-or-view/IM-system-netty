@@ -92,6 +92,9 @@ class CallStateManagerTimeoutTest {
         @Override public SingleCallSession getByRoom(String roomId) { return session; }
         @Override public SingleCallSession getActiveByUser(String userId) { return session; }
         @Override public SingleCallSession createIfUsersIdle(SingleCallSession candidate) { session = candidate; return session; }
+        @Override public TerminalSignalIntent getPendingTerminalSignal(String roomId) { return null; }
+        @Override public boolean transitionTerminalSignal(TerminalSignalIntent intent) { return false; }
+        @Override public boolean acknowledgeTerminalSignal(TerminalSignalIntent intent) { return false; }
         @Override public SingleCallSession accept(String roomId) { return session != null ? session.accept(System.currentTimeMillis()) : null; }
         @Override public SingleCallSession timeoutIfRinging(String roomId) { return null; }
         @Override public SingleCallSession end(String roomId) { return session != null ? session.end() : null; }

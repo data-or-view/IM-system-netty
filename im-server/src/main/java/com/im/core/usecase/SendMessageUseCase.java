@@ -30,6 +30,7 @@ import org.slf4j.LoggerFactory;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.function.Consumer;
 import java.util.regex.Pattern;
 
 public class SendMessageUseCase {
@@ -107,36 +108,62 @@ public class SendMessageUseCase {
      * external state transition. The normal execute path performs the same
      * checks immediately before publishing.
      */
-    public void preflightSingle(Map<String, Object> params, String fromUserId,
-                                String toUserId, IMessageContent content) {
+    public String preflightSingle(Map<String, Object> params, String fromUserId,
+                                  String toUserId, IMessageContent content) {
         if (fromUserId == null || toUserId == null) {
             throw new ForbiddenException("message sending blocked");
         }
-        requireClientMsgId(params);
+        String clientMsgId = requireClientMsgId(params);
         if (sendPolicy != null) {
             sendPolicy.requireCanSendSingle(fromUserId, toUserId);
         }
         if (!webhookService.beforeSendSingle(params, fromUserId, toUserId, content)) {
             throw new ForbiddenException("message sending blocked");
         }
+        return clientMsgId;
     }
 
     /** Publishes a single message after {@link #preflightSingle} has succeeded. */
     public SendMessageResult executePreparedSingle(Map<String, Object> params, String fromUserId,
                                                    String toUserId, IMessageContent content) {
+        return executePreparedSingle(params, fromUserId, toUserId, content, null);
+    }
+
+    /** Runs a state transition inside the normal message-idempotency action. */
+    public SendMessageResult executePreparedSingle(Map<String, Object> params, String fromUserId,
+                                                   String toUserId, IMessageContent content,
+                                                   Runnable beforePublish) {
+        return executePreparedSingle(params, fromUserId, toUserId, content, null,
+                beforePublish != null ? message -> beforePublish.run() : null);
+    }
+
+    /** Replays an immutable prepared message and transitions before its first publish. */
+    public SendMessageResult executePreparedSingle(Map<String, Object> params, String fromUserId,
+                                                   String toUserId, IMessageContent content,
+                                                   Message preparedMessage,
+                                                   Consumer<Message> beforePublish) {
         if (fromUserId == null || toUserId == null) {
             return null;
         }
-        return handleSingleChat(params, fromUserId, toUserId, content, true);
+        return handleSingleChat(params, fromUserId, toUserId, content, true,
+                preparedMessage, beforePublish);
     }
 
     private SendMessageResult handleSingleChat(Map<String, Object> params, String fromUserId,
                                                 String toUserId, IMessageContent content) {
-        return handleSingleChat(params, fromUserId, toUserId, content, false);
+        return handleSingleChat(params, fromUserId, toUserId, content, false, null);
     }
 
     private SendMessageResult handleSingleChat(Map<String, Object> params, String fromUserId,
-                                                String toUserId, IMessageContent content, boolean preflighted) {
+                                                String toUserId, IMessageContent content, boolean preflighted,
+                                                Runnable beforePublish) {
+        return handleSingleChat(params, fromUserId, toUserId, content, preflighted, null,
+                beforePublish != null ? message -> beforePublish.run() : null);
+    }
+
+    private SendMessageResult handleSingleChat(Map<String, Object> params, String fromUserId,
+                                                String toUserId, IMessageContent content, boolean preflighted,
+                                                Message preparedMessage, Consumer<Message> beforePublish) {
         if (toUserId == null) return null;
 
         String conversationId = ConversationIds.single(fromUserId, toUserId);
@@ -147,9 +174,15 @@ public class SendMessageUseCase {
             if (!preflighted) {
                 preflightSingle(params, fromUserId, toUserId, content);
             }
+            Message message = preparedMessage != null
+                    ? preparedMessage
+                    : prepareMessage(params, fromUserId, toUserId, null, content,
+                    conversationId, clientMsgId);
+            if (beforePublish != null) {
+                beforePublish.accept(message);
+            }
 
-            SendMessageResult result = publishMessage(params, fromUserId, toUserId, null,
-                    content, conversationId, clientMsgId);
+            SendMessageResult result = publishPreparedMessage(message);
             webhookService.afterSendSingle(params, fromUserId, toUserId, content);
             return result;
         }, SendMessageResult.class);
@@ -186,6 +219,13 @@ public class SendMessageUseCase {
     private SendMessageResult publishMessage(Map<String, Object> params, String fromUserId,
                                              String toUserId, String groupId, IMessageContent content,
                                              String conversationId, String clientMsgId) {
+        return publishPreparedMessage(prepareMessage(params, fromUserId, toUserId, groupId,
+                content, conversationId, clientMsgId));
+    }
+
+    private Message prepareMessage(Map<String, Object> params, String fromUserId,
+                                   String toUserId, String groupId, IMessageContent content,
+                                   String conversationId, String clientMsgId) {
         long seq = 0;
         if (sequenceManager != null) {
             seq = sequenceManager.nextSequence(conversationId);
@@ -194,6 +234,10 @@ public class SendMessageUseCase {
         Message msg = buildMessage(params, fromUserId, toUserId, groupId, content,
                 conversationId, seq, clientMsgId);
         MessageObservability.captureRequestContext(msg, params);
+        return msg;
+    }
+
+    private SendMessageResult publishPreparedMessage(Message msg) {
         publishRequired(MessageQueueTopics.PERSIST, msg);
 
         String status = publishRecoverable(MessageQueueTopics.DELIVER, msg)
@@ -203,7 +247,7 @@ public class SendMessageUseCase {
         fields.put(LogFields.STATUS, status);
         log.info(StructuredLog.event(LogEvents.MESSAGE_SEND_ACCEPTED, fields));
 
-        return new SendMessageResult(msg.getMessageId(), conversationId, seq, status);
+        return new SendMessageResult(msg.getMessageId(), msg.getConversationId(), msg.getMessageSeq(), status);
     }
 
     /**
