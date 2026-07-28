@@ -35,6 +35,10 @@ public interface ICallManager {
     /**
      * 创建 SFU 房间并签发 room token。
      *
+     * <p>When {@code roomId} is supplied, implementations must make repeated
+     * calls idempotent for that room ID. Distributed recovery can retry room
+     * creation after the original creator loses ownership.</p>
+     *
      * @param callerId  主叫用户 ID
      * @param calleeId  被叫用户 ID
      * @param roomId    可选房间 ID（null 时自动生成）

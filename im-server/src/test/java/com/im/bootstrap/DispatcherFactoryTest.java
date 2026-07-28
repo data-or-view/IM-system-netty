@@ -158,11 +158,18 @@ class DispatcherFactoryTest {
                                             String initiatorUserId, long now) {
             GroupCallSession session = new GroupCallSession(groupId, roomId, callType,
                     initiatorUserId, "", now, now, 0, List.of(), false);
-            return new GroupCallReservation(session, true, false);
+            return new GroupCallReservation(session, true, false, 1L);
         }
 
         @Override
-        public GroupCallSession activate(String groupId, String roomId, String sfuEndpoint, long now) {
+        public boolean validateCreationOwner(String groupId, String roomId,
+                                             long creationEpoch, long now) {
+            return creationEpoch == 1L;
+        }
+
+        @Override
+        public GroupCallSession activate(String groupId, String roomId, long creationEpoch,
+                                         String sfuEndpoint, long now) {
             return null;
         }
 

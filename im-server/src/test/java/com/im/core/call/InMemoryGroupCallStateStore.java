@@ -23,22 +23,34 @@ class InMemoryGroupCallStateStore implements GroupCallStateStore {
         synchronized (sessions) {
             MutableSession existing = sessions.get(groupId);
             if (existing != null) {
-                return new GroupCallReservation(existing.snapshot(), false, existing.active);
+                return new GroupCallReservation(existing.snapshot(), false, existing.active,
+                        existing.creationEpoch);
             }
             GroupCallSession session = new GroupCallSession(groupId, roomId, callType,
                     initiatorUserId, "", now, now, 1,
                     List.of(new GroupCallParticipant(initiatorUserId, now)), false);
             MutableSession created = new MutableSession(session);
             sessions.put(groupId, created);
-            return new GroupCallReservation(created.snapshot(), true, false);
+            return new GroupCallReservation(created.snapshot(), true, false, created.creationEpoch);
         }
     }
 
     @Override
-    public GroupCallSession activate(String groupId, String roomId, String sfuEndpoint, long now) {
+    public boolean validateCreationOwner(String groupId, String roomId, long creationEpoch, long now) {
         synchronized (sessions) {
             MutableSession session = sessions.get(groupId);
-            if (session == null || !session.base.roomId().equals(roomId)) return null;
+            return session != null && !session.active && session.base.roomId().equals(roomId)
+                    && session.creationEpoch == creationEpoch;
+        }
+    }
+
+    @Override
+    public GroupCallSession activate(String groupId, String roomId, long creationEpoch,
+                                     String sfuEndpoint, long now) {
+        synchronized (sessions) {
+            MutableSession session = sessions.get(groupId);
+            if (session == null || !session.base.roomId().equals(roomId)
+                    || session.creationEpoch != creationEpoch) return null;
             session.base = new GroupCallSession(groupId, roomId, session.base.callType(),
                     session.base.initiatorUserId(), sfuEndpoint, session.base.startedAt(), now,
                     session.participants.size(), List.of(), false);
@@ -91,6 +103,7 @@ class InMemoryGroupCallStateStore implements GroupCallStateStore {
     private static final class MutableSession {
         private GroupCallSession base;
         private boolean active;
+        private long creationEpoch = 1L;
         private final Map<String, Long> participants = new LinkedHashMap<>();
 
         private MutableSession(GroupCallSession base) {

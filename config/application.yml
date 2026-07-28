@@ -100,6 +100,11 @@ im:
     # ⚠️  多机部署时必须改为 LiveKit 服务端的公网 IP 或域名，否则其他机器的用户将无法加入通话。
     # 例如: "ws://192.168.1.100:7880" (局域网) 或 "wss://livekit.example.com" (公网+TLS)
     sfu-endpoint: "ws://localhost:7880"
+    group:
+      max-participants: 16
+      # 滚动升级先保持 legacy；旧节点下线且旧通话清空后，显式切换到 tagged-v3。
+      # Redis Cluster 无法原子操作 legacy 跨槽键，因此在 legacy 模式下会拒绝启动群通话存储。
+      redis-key-layout: "legacy"
 
   # ── MinIO 文件存储 ──
   minio:

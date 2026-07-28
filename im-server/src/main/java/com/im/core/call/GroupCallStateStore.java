@@ -7,7 +7,10 @@ public interface GroupCallStateStore {
     GroupCallReservation reserve(String groupId, String roomId, String callType,
                                  String initiatorUserId, long now);
 
-    GroupCallSession activate(String groupId, String roomId, String sfuEndpoint, long now);
+    boolean validateCreationOwner(String groupId, String roomId, long creationEpoch, long now);
+
+    GroupCallSession activate(String groupId, String roomId, long creationEpoch,
+                              String sfuEndpoint, long now);
 
     GroupCallAdmission admit(String groupId, String userId, int maxParticipants, long now);
 

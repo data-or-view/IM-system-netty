@@ -43,9 +43,13 @@ public class GroupCallManager {
             }
             return reservation.session();
         }
+        if (!stateStore.validateCreationOwner(groupId, reservation.session().roomId(),
+                reservation.creationEpoch(), System.currentTimeMillis())) {
+            throw new ValidationException("group call creation was superseded");
+        }
         RoomInformation room = callManager.createRoom(operatorId, null, reservation.session().roomId());
         GroupCallSession activated = stateStore.activate(groupId, reservation.session().roomId(),
-                room.getSfuEndpoint(), System.currentTimeMillis());
+                reservation.creationEpoch(), room.getSfuEndpoint(), System.currentTimeMillis());
         if (activated == null) {
             throw new ValidationException("group call creation was superseded");
         }

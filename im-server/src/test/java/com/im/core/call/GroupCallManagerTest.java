@@ -27,9 +27,14 @@ class GroupCallManagerTest {
     void stateStoreUsesScalarReservationAndIdentityGuardedMutationContracts() throws Exception {
         assertNotNull(GroupCallStateStore.class.getMethod("reserve", String.class, String.class,
                 String.class, String.class, long.class));
+        assertNotNull(GroupCallStateStore.class.getMethod("validateCreationOwner", String.class,
+                String.class, long.class, long.class));
+        assertNotNull(GroupCallStateStore.class.getMethod("activate", String.class, String.class,
+                long.class, String.class, long.class));
         assertNotNull(GroupCallStateStore.class.getMethod("removeParticipant", String.class,
                 String.class, String.class, long.class));
         assertNotNull(GroupCallStateStore.class.getMethod("end", String.class, String.class, long.class));
+        assertNotNull(GroupCallReservation.class.getMethod("creationEpoch"));
     }
 
     @Test
@@ -170,9 +175,12 @@ class GroupCallManagerTest {
             @Override public GroupCallSession getActiveByGroup(String groupId) { return active; }
             @Override public GroupCallReservation reserve(String groupId, String roomId, String callType,
                                                           String initiatorUserId, long now) {
-                return new GroupCallReservation(active, false, true);
+                return new GroupCallReservation(active, false, true, 1L);
             }
-            @Override public GroupCallSession activate(String groupId, String roomId, String sfuEndpoint, long now) { return active; }
+            @Override public boolean validateCreationOwner(String groupId, String roomId,
+                                                            long creationEpoch, long now) { return false; }
+            @Override public GroupCallSession activate(String groupId, String roomId, long creationEpoch,
+                                                       String sfuEndpoint, long now) { return active; }
             @Override public GroupCallAdmission admit(String groupId, String userId, int maxParticipants, long now) {
                 return new GroupCallAdmission(active, false, false);
             }
@@ -242,9 +250,14 @@ class GroupCallManagerTest {
             @Override public GroupCallSession getActiveByGroup(String groupId) { return null; }
             @Override public GroupCallReservation reserve(String groupId, String roomId, String callType,
                                                           String initiatorUserId, long now) {
-                return new GroupCallReservation(reservation, created, false);
+                return new GroupCallReservation(reservation, created, false, created ? 1L : 0L);
             }
-            @Override public GroupCallSession activate(String groupId, String roomId, String sfuEndpoint, long now) {
+            @Override public boolean validateCreationOwner(String groupId, String roomId,
+                                                            long creationEpoch, long now) {
+                return created && creationEpoch == 1L;
+            }
+            @Override public GroupCallSession activate(String groupId, String roomId, long creationEpoch,
+                                                       String sfuEndpoint, long now) {
                 return activated;
             }
             @Override public GroupCallAdmission admit(String groupId, String userId, int maxParticipants, long now) {
@@ -263,9 +276,12 @@ class GroupCallManagerTest {
 
         @Override public GroupCallReservation reserve(String groupId, String roomId, String callType,
                                                       String initiatorUserId, long now) {
-            return new GroupCallReservation(current, false, true);
+            return new GroupCallReservation(current, false, true, 1L);
         }
-        @Override public GroupCallSession activate(String groupId, String roomId, String sfuEndpoint, long now) {
+        @Override public boolean validateCreationOwner(String groupId, String roomId,
+                                                        long creationEpoch, long now) { return false; }
+        @Override public GroupCallSession activate(String groupId, String roomId, long creationEpoch,
+                                                   String sfuEndpoint, long now) {
             return current;
         }
         @Override public GroupCallAdmission admit(String groupId, String userId, int maxParticipants, long now) {

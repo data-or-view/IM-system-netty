@@ -195,6 +195,11 @@ im:
     api-secret: "im-system-livekit-secret-2024"
     sfu-endpoint: "ws://localhost:7880"
     timeout-seconds: 30          # 通话超时秒数（超时未接听自动 TIMEOUT）
+    group:
+      max-participants: 16
+      # 滚动升级先保持 legacy；旧节点下线且旧通话清空后，显式切换到 tagged-v3。
+      # Redis Cluster 无法原子操作 legacy 跨槽键，因此在 legacy 模式下会拒绝启动群通话存储。
+      redis-key-layout: "legacy"
 
   # ── MinIO 文件存储 ──
   minio:

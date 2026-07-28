@@ -220,7 +220,8 @@ final class ServerComponentsFactory {
                 config.getLong("im.call.timeout-seconds", 30))
                 : null;
         GroupCallManager groupCallManager = callManager != null
-                ? new GroupCallManager(groupManager, callManager, new RedisGroupCallStateStore(redisConfig),
+                ? new GroupCallManager(groupManager, callManager, new RedisGroupCallStateStore(redisConfig,
+                config.getString("im.call.group.redis-key-layout", "legacy")),
                 config.getInt("im.call.group.max-participants", 16))
                 : null;
         return new CallDependencies(callManager, callStateManager, groupCallManager);

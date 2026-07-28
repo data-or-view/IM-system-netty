@@ -27,6 +27,12 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -118,9 +124,12 @@ class GroupCallHandlerTest {
             @Override public GroupCallSession getActiveByGroup(String groupId) { return null; }
             @Override public GroupCallReservation reserve(String groupId, String roomId, String callType,
                                                           String initiatorUserId, long now) {
-                return new GroupCallReservation(creating, false, false);
+                return new GroupCallReservation(creating, false, false, 1L);
             }
-            @Override public GroupCallSession activate(String groupId, String roomId, String sfuEndpoint, long now) {
+            @Override public boolean validateCreationOwner(String groupId, String roomId,
+                                                            long creationEpoch, long now) { return false; }
+            @Override public GroupCallSession activate(String groupId, String roomId, long creationEpoch,
+                                                       String sfuEndpoint, long now) {
                 return null;
             }
             @Override public GroupCallAdmission admit(String groupId, String userId, int maxParticipants, long now) {
@@ -144,6 +153,43 @@ class GroupCallHandlerTest {
         assertTrue(queue.messages.isEmpty());
     }
 
+    @Test
+    void recoveredCreatorFencesStalledOriginalBeforeRoomCreationAndPublication() throws Exception {
+        FakeGroupManager groups = new FakeGroupManager();
+        groups.members.put("g1", Set.of("u1", "u2"));
+        StalledOriginalStateStore store = new StalledOriginalStateStore();
+        FakeCallManager calls = new FakeCallManager();
+        RecordingQueue queue = new RecordingQueue();
+        SendMessageUseCase sendMessage = new SendMessageUseCase(
+                queue,
+                new FixedSequenceManager(),
+                new WebhookService(null),
+                new AllowAllSendPolicy());
+        GroupCallHandler handler = new GroupCallHandler(
+                new GroupCallManager(groups, calls, store, 16), sendMessage);
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+
+        try {
+            Future<?> stalled = executor.submit(() -> assertThrows(ValidationException.class,
+                    () -> handler.handle(request(Operation.GROUP_CALL_START,
+                            Map.of("groupId", "g1", "callType", "video"), "u1"))));
+            assertTrue(store.originalReservationHeld.await(5, TimeUnit.SECONDS));
+
+            handler.handle(request(Operation.GROUP_CALL_START,
+                    Map.of("groupId", "g1", "callType", "video"), "u2"));
+            store.releaseOriginal.countDown();
+            stalled.get(5, TimeUnit.SECONDS);
+
+            assertEquals(1, calls.createRoomCalls.get());
+            assertEquals(1, queue.topics.stream()
+                    .filter(MessageQueueTopics.PERSIST::equals)
+                    .count());
+        } finally {
+            store.releaseOriginal.countDown();
+            executor.shutdownNow();
+        }
+    }
+
     private static GroupCallManager manager() {
         FakeGroupManager groups = new FakeGroupManager();
         groups.members.put("g1", Set.of("u1", "u2"));
@@ -159,10 +205,83 @@ class GroupCallHandlerTest {
     }
 
     private static final class FakeCallManager implements ICallManager {
-        @Override public RoomInformation createRoom(String callerId, String calleeId, String roomId) { return new RoomInformation(roomId, getSfuEndpoint(), "token-" + callerId + "-" + roomId, null); }
+        private final AtomicInteger createRoomCalls = new AtomicInteger();
+
+        @Override public RoomInformation createRoom(String callerId, String calleeId, String roomId) {
+            createRoomCalls.incrementAndGet();
+            return new RoomInformation(roomId, getSfuEndpoint(), "token-" + callerId + "-" + roomId, null);
+        }
         @Override public String issueToken(String userId, String roomId) { return "token-" + userId + "-" + roomId; }
         @Override public String getProviderName() { return "fake"; }
         @Override public String getSfuEndpoint() { return "ws://livekit.test"; }
+    }
+
+    private static final class StalledOriginalStateStore implements GroupCallStateStore {
+        private final CountDownLatch originalReservationHeld = new CountDownLatch(1);
+        private final CountDownLatch releaseOriginal = new CountDownLatch(1);
+        private final AtomicInteger reservationAttempts = new AtomicInteger();
+        private GroupCallSession session;
+        private boolean active;
+        private long creationEpoch;
+
+        @Override public synchronized GroupCallSession getActiveByGroup(String groupId) {
+            return active ? session : null;
+        }
+
+        @Override
+        public GroupCallReservation reserve(String groupId, String roomId, String callType,
+                                            String initiatorUserId, long now) {
+            int attempt = reservationAttempts.incrementAndGet();
+            long reservedEpoch;
+            synchronized (this) {
+                if (session == null) {
+                    session = new GroupCallSession(groupId, roomId, callType, initiatorUserId, "",
+                            now, now, 1, List.of(new GroupCallParticipant(initiatorUserId, now)), false);
+                    creationEpoch = 1L;
+                } else if (!active) {
+                    creationEpoch++;
+                }
+                reservedEpoch = creationEpoch;
+            }
+            if (attempt == 1) {
+                originalReservationHeld.countDown();
+                try {
+                    assertTrue(releaseOriginal.await(5, TimeUnit.SECONDS));
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(e);
+                }
+            }
+            synchronized (this) {
+                return new GroupCallReservation(session, true, active, reservedEpoch);
+            }
+        }
+
+        @Override
+        public synchronized boolean validateCreationOwner(String groupId, String roomId,
+                                                          long creationEpoch, long now) {
+            return session != null && !active && session.roomId().equals(roomId)
+                    && this.creationEpoch == creationEpoch;
+        }
+
+        @Override
+        public synchronized GroupCallSession activate(String groupId, String roomId,
+                                                      long creationEpoch, String sfuEndpoint, long now) {
+            if (!validateCreationOwner(groupId, roomId, creationEpoch, now)) return null;
+            session = new GroupCallSession(session.groupId(), session.roomId(), session.callType(),
+                    session.initiatorUserId(), sfuEndpoint, session.startedAt(), now,
+                    session.participantCount(), session.participants(), false);
+            active = true;
+            return session;
+        }
+
+        @Override public GroupCallAdmission admit(String groupId, String userId,
+                                                  int maxParticipants, long now) {
+            return new GroupCallAdmission(session, false, false);
+        }
+        @Override public GroupCallSession removeParticipant(String groupId, String userId,
+                                                            String expectedRoomId, long now) { return null; }
+        @Override public GroupCallSession end(String groupId, String expectedRoomId, long now) { return null; }
     }
 
     private static final class TestGroupCallStateStore implements GroupCallStateStore {
@@ -175,17 +294,24 @@ class GroupCallHandlerTest {
         @Override
         public GroupCallReservation reserve(String groupId, String roomId, String callType,
                                             String initiatorUserId, long now) {
-            if (this.session != null) return new GroupCallReservation(this.session, false, active);
+            if (this.session != null) return new GroupCallReservation(this.session, false, active, 1L);
             GroupCallSession session = new GroupCallSession(groupId, roomId, callType,
                     initiatorUserId, "", now, now, 1,
                     List.of(new GroupCallParticipant(initiatorUserId, now)), false);
             this.session = session;
             participants.add(session.initiatorUserId());
-            return new GroupCallReservation(session, true, false);
+            return new GroupCallReservation(session, true, false, 1L);
         }
 
         @Override
-        public GroupCallSession activate(String groupId, String roomId, String sfuEndpoint, long now) {
+        public boolean validateCreationOwner(String groupId, String roomId,
+                                             long creationEpoch, long now) {
+            return session != null && !active && session.roomId().equals(roomId) && creationEpoch == 1L;
+        }
+
+        @Override
+        public GroupCallSession activate(String groupId, String roomId, long creationEpoch,
+                                         String sfuEndpoint, long now) {
             if (session == null || !session.roomId().equals(roomId)) return null;
             session = new GroupCallSession(session.groupId(), session.roomId(), session.callType(),
                     session.initiatorUserId(), sfuEndpoint, session.startedAt(), now, session.participantCount(),
