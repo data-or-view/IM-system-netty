@@ -19,6 +19,7 @@ import org.slf4j.LoggerFactory;
 public class ClusterSessionCommandHandler implements ClusterMessageHandler {
 
     private static final Logger log = LoggerFactory.getLogger(ClusterSessionCommandHandler.class);
+    private static final int MAX_ROUTE_CLAIM_ATTEMPTS = 3;
 
     private final ISessionManager sessionManager;
     private final IRouteTable routeTable;
@@ -70,8 +71,28 @@ public class ClusterSessionCommandHandler implements ClusterMessageHandler {
                 || !localNodeIncarnation.equals(command.nodeIncarnation())) {
             return false;
         }
-        RouteBinding expected = new RouteBinding(command.userId(), localNodeId, command.platformId(),
-                command.sessionId(), 0, command.nodeIncarnation(), command.generation());
-        return routeTable.offlineIfCurrent(expected);
+        // A heartbeat deliberately rotates the mutable route generation to fence
+        // stale delivery cleanup. Re-read the immutable session identity, then
+        // CAS the current generation so a delayed SAME_TERM_KICK still applies.
+        for (int attempt = 0; attempt < MAX_ROUTE_CLAIM_ATTEMPTS; attempt++) {
+            boolean matchingBindingFound = false;
+            for (RouteBinding current : routeTable.lookupAllBindings(command.userId())) {
+                if (!localNodeId.equals(current.nodeId())
+                        || !localNodeIncarnation.equals(current.nodeIncarnation())
+                        || current.platformId() != command.platformId()
+                        || !command.sessionId().equals(current.sessionId())) {
+                    continue;
+                }
+                matchingBindingFound = true;
+                if (routeTable.offlineIfCurrent(current)) {
+                    return true;
+                }
+                break;
+            }
+            if (!matchingBindingFound) {
+                return false;
+            }
+        }
+        return false;
     }
 }

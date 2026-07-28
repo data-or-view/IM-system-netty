@@ -50,46 +50,116 @@ class ClusterSessionCommandHandlerTest {
     }
 
     @Test
-    void ignoresKickSessionCommandForReplacedBindingGeneration() {
+    void appliesKickSessionCommandAfterHeartbeatRotatesGenerationForSameSession() {
         SessionManager sessionManager = new SessionManager();
         EmbeddedChannel phone = new EmbeddedChannel();
         NettyConnectionRef phoneRef = new NettyConnectionRef(phone);
         String phoneSessionId = sessionManager.createSession(phoneRef).getSessionId();
         sessionManager.bindUser(phoneRef.connectionId(), "u1", PlatformID.IOS);
-        RouteBinding stale = new RouteBinding(
-                "u1", "node-b", PlatformID.IOS, phoneSessionId, 0, "lease-b", "generation-old");
         RouteBinding current = new RouteBinding(
-                "u1", "node-b", PlatformID.IOS, phoneSessionId, 0, "lease-b", "generation-new");
+                "u1", "node-b", PlatformID.IOS, phoneSessionId, 0, "lease-b", "generation-old");
         BindingRouteTable routeTable = new BindingRouteTable(current);
+        ClusterSessionCommandHandler handler = new ClusterSessionCommandHandler(
+                sessionManager, routeTable, "node-b", "lease-b");
+        RouteBinding kickSnapshot = routeTable.lookupAllBindings("u1").getFirst();
+
+        routeTable.renewCurrentBinding("generation-new");
+
+        handler.handle(ClusterMessage.fromCommand(
+                "node-a", ClusterCommand.kickSession(kickSnapshot, "SAME_TERM_KICK")));
+
+        assertFalse(phone.isActive(), "heartbeat generation renewal must not suppress a kick for the same session");
+        assertTrue(routeTable.conditionalRemovalAttempted,
+                "the current route generation must still be removed atomically");
+        sessionManager.clear();
+    }
+
+    @Test
+    void retriesKickSessionClaimWhenHeartbeatRotatesGenerationDuringFirstCas() {
+        SessionManager sessionManager = new SessionManager();
+        EmbeddedChannel phone = new EmbeddedChannel();
+        NettyConnectionRef phoneRef = new NettyConnectionRef(phone);
+        String phoneSessionId = sessionManager.createSession(phoneRef).getSessionId();
+        sessionManager.bindUser(phoneRef.connectionId(), "u1", PlatformID.IOS);
+        BindingRouteTable routeTable = new BindingRouteTable(new RouteBinding(
+                "u1", "node-b", PlatformID.IOS, phoneSessionId, 0, "lease-b", "generation-old"));
+        ClusterSessionCommandHandler handler = new ClusterSessionCommandHandler(
+                sessionManager, routeTable, "node-b", "lease-b");
+        RouteBinding kickSnapshot = routeTable.lookupAllBindings("u1").getFirst();
+        routeTable.renewBeforeNextRemoval("generation-raced");
+
+        handler.handle(ClusterMessage.fromCommand(
+                "node-a", ClusterCommand.kickSession(kickSnapshot, "SAME_TERM_KICK")));
+
+        assertFalse(phone.isActive(), "a concurrent heartbeat must not suppress the exact session kick");
+        assertTrue(routeTable.conditionalRemovalAttempts > 1,
+                "the handler must re-read the generation after a failed conditional removal");
+        sessionManager.clear();
+    }
+
+    @Test
+    void ignoresKickSessionCommandAfterBindingIsReplacedWithAnotherSession() {
+        SessionManager sessionManager = new SessionManager();
+        EmbeddedChannel phone = new EmbeddedChannel();
+        NettyConnectionRef phoneRef = new NettyConnectionRef(phone);
+        String oldSessionId = sessionManager.createSession(phoneRef).getSessionId();
+        sessionManager.bindUser(phoneRef.connectionId(), "u1", PlatformID.IOS);
+        RouteBinding stale = new RouteBinding(
+                "u1", "node-b", PlatformID.IOS, oldSessionId, 0, "lease-b", "generation-old");
+        RouteBinding replacement = new RouteBinding(
+                "u1", "node-b", PlatformID.IOS, "replacement-session", 0, "lease-b", "generation-new");
+        BindingRouteTable routeTable = new BindingRouteTable(replacement);
         ClusterSessionCommandHandler handler = new ClusterSessionCommandHandler(
                 sessionManager, routeTable, "node-b", "lease-b");
 
         handler.handle(ClusterMessage.fromCommand(
                 "node-a", ClusterCommand.kickSession(stale, "SAME_TERM_KICK")));
 
-        assertTrue(phone.isActive(), "stale generation must not kick a rebound session");
-        assertTrue(routeTable.conditionalRemovalAttempted,
-                "stale commands must fail through the same atomic route comparison");
+        assertTrue(phone.isActive(), "a command for an old session must not kick a replacement binding");
+        assertFalse(routeTable.conditionalRemovalAttempted,
+                "a replacement session must not reach the conditional route removal");
         sessionManager.clear();
     }
 
     private static final class BindingRouteTable implements IRouteTable {
-        private final RouteBinding binding;
+        private RouteBinding binding;
         private boolean conditionalRemovalAttempted;
+        private int conditionalRemovalAttempts;
+        private String generationBeforeNextRemoval;
 
         private BindingRouteTable(RouteBinding binding) {
             this.binding = binding;
+        }
+
+        private void renewCurrentBinding(String generation) {
+            binding = new RouteBinding(binding.userId(), binding.nodeId(), binding.platformId(),
+                    binding.sessionId(), binding.expireAt(), binding.nodeIncarnation(), generation);
+        }
+
+        private void renewBeforeNextRemoval(String generation) {
+            generationBeforeNextRemoval = generation;
         }
 
         @Override public void online(String userId, String nodeId, int platformId, String sessionId) {}
         @Override public void offline(String userId, String nodeId, int platformId, String sessionId) {}
         @Override public boolean offlineIfCurrent(RouteBinding candidate) {
             conditionalRemovalAttempted = true;
-            return candidate.sameIdentity(binding);
+            conditionalRemovalAttempts++;
+            if (generationBeforeNextRemoval != null) {
+                renewCurrentBinding(generationBeforeNextRemoval);
+                generationBeforeNextRemoval = null;
+            }
+            if (!candidate.sameIdentity(binding)) {
+                return false;
+            }
+            binding = null;
+            return true;
         }
         @Override public RouteNode lookup(String userId) { return null; }
         @Override public List<RouteNode> lookupAll(String userId) { return List.of(); }
-        @Override public List<RouteBinding> lookupAllBindings(String userId) { return List.of(binding); }
+        @Override public List<RouteBinding> lookupAllBindings(String userId) {
+            return binding != null ? List.of(binding) : List.of();
+        }
         @Override public void setOnline(String userId, int platformId) {}
         @Override public void setOffline(String userId, int platformId) {}
         @Override public List<Integer> getOnlinePlatforms(String userId) { return List.of(); }
