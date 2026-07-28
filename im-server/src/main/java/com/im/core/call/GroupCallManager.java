@@ -7,7 +7,12 @@ import com.im.common.exception.ForbiddenException;
 import com.im.common.exception.ValidationException;
 import com.im.common.id.IdGenerator;
 
+import java.util.concurrent.locks.LockSupport;
+
 public class GroupCallManager {
+
+    private static final int CREATION_POLL_ATTEMPTS = 25;
+    private static final long CREATION_POLL_NANOS = 10_000_000L;
 
     private final IGroupManager groupManager;
     private final ICallManager callManager;
@@ -27,15 +32,36 @@ public class GroupCallManager {
         String normalizedCallType = normalizeCallType(callType);
         String roomId = IdGenerator.roomId();
         long now = System.currentTimeMillis();
-        GroupCallSession requested = new GroupCallSession(groupId, roomId, normalizedCallType,
-                operatorId, "", now, now, 1,
-                java.util.List.of(new GroupCallParticipant(operatorId, now)), false);
-        GroupCallReservation reservation = stateStore.reserve(requested);
+        GroupCallReservation reservation = stateStore.reserve(
+                groupId, roomId, normalizedCallType, operatorId, now);
+        if (!reservation.created() && !reservation.active()) {
+            reservation = awaitReservation(groupId, roomId, normalizedCallType, operatorId);
+        }
         if (!reservation.created()) {
+            if (!reservation.active()) {
+                throw new ValidationException("group call is being created");
+            }
             return reservation.session();
         }
         RoomInformation room = callManager.createRoom(operatorId, null, reservation.session().roomId());
-        return stateStore.activate(groupId, reservation.session().roomId(), room.getSfuEndpoint(), now);
+        GroupCallSession activated = stateStore.activate(groupId, reservation.session().roomId(),
+                room.getSfuEndpoint(), System.currentTimeMillis());
+        if (activated == null) {
+            throw new ValidationException("group call creation was superseded");
+        }
+        return activated;
+    }
+
+    private GroupCallReservation awaitReservation(String groupId, String roomId,
+                                                   String callType, String operatorId) {
+        GroupCallReservation reservation = null;
+        for (int attempt = 0; attempt < CREATION_POLL_ATTEMPTS; attempt++) {
+            LockSupport.parkNanos(CREATION_POLL_NANOS);
+            reservation = stateStore.reserve(groupId, roomId, callType,
+                    operatorId, System.currentTimeMillis());
+            if (reservation.created() || reservation.active()) return reservation;
+        }
+        return reservation;
     }
 
     public GroupCallJoinResult join(String userId, String groupId) {
@@ -56,7 +82,9 @@ public class GroupCallManager {
 
     public GroupCallSession leave(String userId, String groupId) {
         requireMember(groupId, userId);
-        return stateStore.removeParticipant(groupId, userId);
+        GroupCallSession active = stateStore.getActiveByGroup(groupId);
+        if (active == null) return null;
+        return stateStore.removeParticipant(groupId, userId, active.roomId(), System.currentTimeMillis());
     }
 
     public GroupCallSession end(String operatorId, String groupId) {
@@ -66,7 +94,7 @@ public class GroupCallManager {
         if (!canEnd(operatorId, groupId, active)) {
             throw new ForbiddenException("only group owner, admin or initiator can end group call");
         }
-        return stateStore.end(groupId);
+        return stateStore.end(groupId, active.roomId(), System.currentTimeMillis());
     }
 
     public GroupCallSession active(String operatorId, String groupId) {

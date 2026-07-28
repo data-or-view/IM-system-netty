@@ -24,6 +24,15 @@ import static org.junit.jupiter.api.Assertions.*;
 class GroupCallManagerTest {
 
     @Test
+    void stateStoreUsesScalarReservationAndIdentityGuardedMutationContracts() throws Exception {
+        assertNotNull(GroupCallStateStore.class.getMethod("reserve", String.class, String.class,
+                String.class, String.class, long.class));
+        assertNotNull(GroupCallStateStore.class.getMethod("removeParticipant", String.class,
+                String.class, String.class, long.class));
+        assertNotNull(GroupCallStateStore.class.getMethod("end", String.class, String.class, long.class));
+    }
+
+    @Test
     void memberCanStartAndJoinGroupCall() {
         FakeGroupManager groups = new FakeGroupManager();
         groups.members.put("g1", Set.of("u1", "u2"));
@@ -159,17 +168,139 @@ class GroupCallManagerTest {
                 1L, 1L, 1, List.of(new GroupCallParticipant("u1", 1L)), false);
         GroupCallStateStore store = new GroupCallStateStore() {
             @Override public GroupCallSession getActiveByGroup(String groupId) { return active; }
-            @Override public GroupCallReservation reserve(GroupCallSession session) { return new GroupCallReservation(active, false); }
+            @Override public GroupCallReservation reserve(String groupId, String roomId, String callType,
+                                                          String initiatorUserId, long now) {
+                return new GroupCallReservation(active, false, true);
+            }
             @Override public GroupCallSession activate(String groupId, String roomId, String sfuEndpoint, long now) { return active; }
             @Override public GroupCallAdmission admit(String groupId, String userId, int maxParticipants, long now) {
                 return new GroupCallAdmission(active, false, false);
             }
-            @Override public GroupCallSession removeParticipant(String groupId, String userId) { return active; }
-            @Override public GroupCallSession end(String groupId) { return active.markEnded(); }
+            @Override public GroupCallSession removeParticipant(String groupId, String userId,
+                                                                String expectedRoomId, long now) { return active; }
+            @Override public GroupCallSession end(String groupId, String expectedRoomId, long now) {
+                return active.markEnded();
+            }
         };
         GroupCallManager manager = new GroupCallManager(groups, new FakeCallManager(), store, 16);
 
         assertThrows(ValidationException.class, () -> manager.join("u1", "g1"));
+    }
+
+    @Test
+    void startDoesNotExposeAnExistingCreatingReservation() {
+        FakeGroupManager groups = new FakeGroupManager();
+        groups.members.put("g1", Set.of("u1"));
+        GroupCallSession creating = new GroupCallSession("g1", "room-creating", "video", "u1", "",
+                1L, 1L, 1, List.of(new GroupCallParticipant("u1", 1L)), false);
+        GroupCallStateStore store = fixedReservationStore(creating, false, null);
+        GroupCallManager manager = new GroupCallManager(groups, new FakeCallManager(), store, 16);
+
+        assertThrows(ValidationException.class, () -> manager.start("u1", "g1", "video"));
+    }
+
+    @Test
+    void startDoesNotExposeAReservationWhenActivationLosesAnEndRace() {
+        FakeGroupManager groups = new FakeGroupManager();
+        groups.members.put("g1", Set.of("u1"));
+        GroupCallSession creating = new GroupCallSession("g1", "room-creating", "video", "u1", "",
+                1L, 1L, 1, List.of(new GroupCallParticipant("u1", 1L)), false);
+        GroupCallStateStore store = fixedReservationStore(creating, true, null);
+        GroupCallManager manager = new GroupCallManager(groups, new FakeCallManager(), store, 16);
+
+        assertThrows(ValidationException.class, () -> manager.start("u1", "g1", "video"));
+    }
+
+    @Test
+    void endDoesNotDeleteAReplacementCallCreatedAfterAuthorization() {
+        FakeGroupManager groups = new FakeGroupManager();
+        groups.members.put("g1", Set.of("owner"));
+        groups.roles.put("g1:owner", "owner");
+        EndRaceStateStore store = new EndRaceStateStore();
+        GroupCallManager manager = new GroupCallManager(groups, new FakeCallManager(), store, 16);
+
+        assertNull(manager.end("owner", "g1"));
+        assertEquals("room-new", store.current.roomId());
+    }
+
+    @Test
+    void leaveDoesNotRemoveAUserFromAReplacementCall() {
+        FakeGroupManager groups = new FakeGroupManager();
+        groups.members.put("g1", Set.of("u1"));
+        LeaveRaceStateStore store = new LeaveRaceStateStore();
+        GroupCallManager manager = new GroupCallManager(groups, new FakeCallManager(), store, 16);
+
+        assertNull(manager.leave("u1", "g1"));
+        assertEquals(1, store.current.participantCount());
+        assertEquals("u1", store.current.participants().getFirst().userId());
+    }
+
+    private static GroupCallStateStore fixedReservationStore(GroupCallSession reservation,
+                                                              boolean created,
+                                                              GroupCallSession activated) {
+        return new GroupCallStateStore() {
+            @Override public GroupCallSession getActiveByGroup(String groupId) { return null; }
+            @Override public GroupCallReservation reserve(String groupId, String roomId, String callType,
+                                                          String initiatorUserId, long now) {
+                return new GroupCallReservation(reservation, created, false);
+            }
+            @Override public GroupCallSession activate(String groupId, String roomId, String sfuEndpoint, long now) {
+                return activated;
+            }
+            @Override public GroupCallAdmission admit(String groupId, String userId, int maxParticipants, long now) {
+                return new GroupCallAdmission(null, false, false);
+            }
+            @Override public GroupCallSession removeParticipant(String groupId, String userId,
+                                                                String expectedRoomId, long now) { return null; }
+            @Override public GroupCallSession end(String groupId, String expectedRoomId, long now) { return null; }
+        };
+    }
+
+    private abstract static class RaceStateStore implements GroupCallStateStore {
+        protected final GroupCallSession old = activeSession("room-old");
+        protected final GroupCallSession replacement = activeSession("room-new");
+        protected GroupCallSession current = old;
+
+        @Override public GroupCallReservation reserve(String groupId, String roomId, String callType,
+                                                      String initiatorUserId, long now) {
+            return new GroupCallReservation(current, false, true);
+        }
+        @Override public GroupCallSession activate(String groupId, String roomId, String sfuEndpoint, long now) {
+            return current;
+        }
+        @Override public GroupCallAdmission admit(String groupId, String userId, int maxParticipants, long now) {
+            return new GroupCallAdmission(current, true, false);
+        }
+
+        private static GroupCallSession activeSession(String roomId) {
+            return new GroupCallSession("g1", roomId, "video", "owner", "ws://livekit.test",
+                    1L, 1L, 1, List.of(new GroupCallParticipant("u1", 1L)), false);
+        }
+    }
+
+    private static final class EndRaceStateStore extends RaceStateStore {
+        @Override public GroupCallSession getActiveByGroup(String groupId) { return old; }
+        @Override public GroupCallSession removeParticipant(String groupId, String userId,
+                                                            String expectedRoomId, long now) { return current; }
+        @Override public GroupCallSession end(String groupId, String expectedRoomId, long now) {
+            current = replacement;
+            if (!current.roomId().equals(expectedRoomId)) return null;
+            GroupCallSession deleted = current;
+            current = null;
+            return deleted.markEnded();
+        }
+    }
+
+    private static final class LeaveRaceStateStore extends RaceStateStore {
+        @Override public GroupCallSession getActiveByGroup(String groupId) { return old; }
+        @Override public GroupCallSession removeParticipant(String groupId, String userId,
+                                                            String expectedRoomId, long now) {
+            current = replacement;
+            if (!current.roomId().equals(expectedRoomId)) return null;
+            current = current.withParticipants(List.of());
+            return current.markEnded();
+        }
+        @Override public GroupCallSession end(String groupId, String expectedRoomId, long now) { return null; }
     }
 
     private static <T> List<T> callConcurrently(int count, Callable<T> operation) throws Exception {

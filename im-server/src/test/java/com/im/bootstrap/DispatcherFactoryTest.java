@@ -154,8 +154,11 @@ class DispatcherFactoryTest {
         }
 
         @Override
-        public GroupCallReservation reserve(GroupCallSession session) {
-            return new GroupCallReservation(session, true);
+        public GroupCallReservation reserve(String groupId, String roomId, String callType,
+                                            String initiatorUserId, long now) {
+            GroupCallSession session = new GroupCallSession(groupId, roomId, callType,
+                    initiatorUserId, "", now, now, 0, List.of(), false);
+            return new GroupCallReservation(session, true, false);
         }
 
         @Override
@@ -169,12 +172,13 @@ class DispatcherFactoryTest {
         }
 
         @Override
-        public GroupCallSession removeParticipant(String groupId, String userId) {
+        public GroupCallSession removeParticipant(String groupId, String userId,
+                                                  String expectedRoomId, long now) {
             return null;
         }
 
         @Override
-        public GroupCallSession end(String groupId) {
+        public GroupCallSession end(String groupId, String expectedRoomId, long now) {
             return null;
         }
     }

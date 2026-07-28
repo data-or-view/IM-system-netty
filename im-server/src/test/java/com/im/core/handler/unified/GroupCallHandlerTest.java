@@ -11,6 +11,7 @@ import com.im.api.MessageQueueTopics;
 import com.im.api.Operation;
 import com.im.api.QueueMessageHandler;
 import com.im.api.RoomInformation;
+import com.im.common.exception.ValidationException;
 import com.im.core.handler.WebhookService;
 import com.im.core.call.GroupCallParticipant;
 import com.im.core.call.GroupCallAdmission;
@@ -28,6 +29,7 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class GroupCallHandlerTest {
@@ -106,6 +108,42 @@ class GroupCallHandlerTest {
         assertTrue(new String(signal.getBody()).contains("ACCEPT"));
     }
 
+    @Test
+    void startDoesNotPublishCallingForAnExistingCreatingReservation() {
+        FakeGroupManager groups = new FakeGroupManager();
+        groups.members.put("g1", Set.of("u1"));
+        GroupCallSession creating = new GroupCallSession("g1", "room-creating", "video", "u1", "",
+                1L, 1L, 1, List.of(new GroupCallParticipant("u1", 1L)), false);
+        GroupCallStateStore store = new GroupCallStateStore() {
+            @Override public GroupCallSession getActiveByGroup(String groupId) { return null; }
+            @Override public GroupCallReservation reserve(String groupId, String roomId, String callType,
+                                                          String initiatorUserId, long now) {
+                return new GroupCallReservation(creating, false, false);
+            }
+            @Override public GroupCallSession activate(String groupId, String roomId, String sfuEndpoint, long now) {
+                return null;
+            }
+            @Override public GroupCallAdmission admit(String groupId, String userId, int maxParticipants, long now) {
+                return new GroupCallAdmission(null, false, false);
+            }
+            @Override public GroupCallSession removeParticipant(String groupId, String userId,
+                                                                String expectedRoomId, long now) { return null; }
+            @Override public GroupCallSession end(String groupId, String expectedRoomId, long now) { return null; }
+        };
+        RecordingQueue queue = new RecordingQueue();
+        SendMessageUseCase sendMessage = new SendMessageUseCase(
+                queue,
+                new FixedSequenceManager(),
+                new WebhookService(null),
+                new AllowAllSendPolicy());
+        GroupCallHandler handler = new GroupCallHandler(
+                new GroupCallManager(groups, new FakeCallManager(), store, 16), sendMessage);
+
+        assertThrows(ValidationException.class, () -> handler.handle(request(Operation.GROUP_CALL_START,
+                Map.of("groupId", "g1", "callType", "video"), "u1")));
+        assertTrue(queue.messages.isEmpty());
+    }
+
     private static GroupCallManager manager() {
         FakeGroupManager groups = new FakeGroupManager();
         groups.members.put("g1", Set.of("u1", "u2"));
@@ -129,16 +167,21 @@ class GroupCallHandlerTest {
 
     private static final class TestGroupCallStateStore implements GroupCallStateStore {
         private GroupCallSession session;
+        private boolean active;
         private final Set<String> participants = new java.util.HashSet<>();
 
-        @Override public GroupCallSession getActiveByGroup(String groupId) { return session; }
+        @Override public GroupCallSession getActiveByGroup(String groupId) { return active ? session : null; }
 
         @Override
-        public GroupCallReservation reserve(GroupCallSession session) {
-            if (this.session != null) return new GroupCallReservation(this.session, false);
+        public GroupCallReservation reserve(String groupId, String roomId, String callType,
+                                            String initiatorUserId, long now) {
+            if (this.session != null) return new GroupCallReservation(this.session, false, active);
+            GroupCallSession session = new GroupCallSession(groupId, roomId, callType,
+                    initiatorUserId, "", now, now, 1,
+                    List.of(new GroupCallParticipant(initiatorUserId, now)), false);
             this.session = session;
             participants.add(session.initiatorUserId());
-            return new GroupCallReservation(session, true);
+            return new GroupCallReservation(session, true, false);
         }
 
         @Override
@@ -147,12 +190,13 @@ class GroupCallHandlerTest {
             session = new GroupCallSession(session.groupId(), session.roomId(), session.callType(),
                     session.initiatorUserId(), sfuEndpoint, session.startedAt(), now, session.participantCount(),
                     session.participants(), false);
+            active = true;
             return session;
         }
 
         @Override
         public GroupCallAdmission admit(String groupId, String userId, int maxParticipants, long now) {
-            if (session == null) return new GroupCallAdmission(null, false, false);
+            if (session == null || !active) return new GroupCallAdmission(null, false, false);
             if (!participants.contains(userId) && maxParticipants > 0 && participants.size() >= maxParticipants) {
                 return new GroupCallAdmission(session, false, true);
             }
@@ -164,7 +208,9 @@ class GroupCallHandlerTest {
         }
 
         @Override
-        public GroupCallSession removeParticipant(String groupId, String userId) {
+        public GroupCallSession removeParticipant(String groupId, String userId,
+                                                  String expectedRoomId, long now) {
+            if (session == null || !session.roomId().equals(expectedRoomId)) return null;
             participants.remove(userId);
             session = session.withParticipants(participants.stream()
                     .map(user -> new GroupCallParticipant(user, System.currentTimeMillis()))
@@ -173,10 +219,11 @@ class GroupCallHandlerTest {
         }
 
         @Override
-        public GroupCallSession end(String groupId) {
-            if (session == null) return null;
+        public GroupCallSession end(String groupId, String expectedRoomId, long now) {
+            if (session == null || !session.roomId().equals(expectedRoomId)) return null;
             GroupCallSession ended = session.markEnded();
             session = null;
+            active = false;
             participants.clear();
             return ended;
         }
